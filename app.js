@@ -19,8 +19,8 @@ const DEFAULT_ITEMS = [...DEFAULT_ITEMS_MORNING, ...DEFAULT_ITEMS_AFTERNOON];
 const DEFAULT_MACHINES = {
   morning: [
     { id: 'm1', name: '第一台・大宗', ranges: [{ start: 1001, end: 1999 }] },
-    { id: 'm2', name: '第二台・水菜', ranges: [{ start: 3001, end: 3999 }] },
-    { id: 'm3', name: '第三台', ranges: [{ start: null, end: null }] }
+    { id: 'm2', name: '第二台・水菜', ranges: [{ start: 3001, end: 3499 }] },
+    { id: 'm3', name: '第三台', ranges: [{ start: 3500, end: 3999 }] }
   ],
   afternoon: [
     {
@@ -66,7 +66,6 @@ let toastAction = null;
 let undoStack = null;
 let liveScrolls = {};
 let draftPriority = 'watch';
-let ruleOffer = null;
 let armTimer = null;
 let dragState = null;
 
@@ -130,7 +129,8 @@ function defaultState() {
     progressV2: true,
     itemsMigratedV2: true,
     lastPriority: 'watch',
-    dayRules: []
+    dayRules: [],
+    machinesMigratedV9: true
   };
 }
 
@@ -156,6 +156,10 @@ function loadState() {
     migrateItemLists(merged);
     if (!Array.isArray(merged.dayRules)) merged.dayRules = [];
     if (!['must', 'watch', 'skip'].includes(merged.lastPriority)) merged.lastPriority = 'watch';
+    if (!saved.machinesMigratedV9) {
+      migrateMorning3500(merged);
+      merged.machinesMigratedV9 = true;
+    }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
     }
@@ -217,8 +221,6 @@ function detectMachineId(num, half) {
     const found = machineById(draftMachineId, half);
     if (found) return found.id;
   }
-  const ruled = ruleMachineId(num, half);
-  if (ruled) return ruled;
   const hits = machinesMatching(num, half);
   if (hits.length === 1) return hits[0].id;
   if (hits.length > 1) {
@@ -332,12 +334,58 @@ function isFlow(lot) {
 function columnTitle(m, half) {
   const h = half || state.currentHalf;
   const names = (state.machines[h] || []).map((x) => String(x.name || ''));
-  const strip = (n) => n.replace(/^第[一二三]台・/, '');
+  const strip = (n) => n.replace(/^第[一二三四五]台・/, '');
   const short = strip(m.name || '');
   const unique = names.map(strip).filter((s) => s === short).length === 1;
-  if (unique && short && !/^第[一二三]台$/.test(short)) return short;
-  const idx = (state.machines[h] || []).findIndex((x) => x.id === m.id);
-  return ['第一台', '第二台', '第三台'][idx] || short || m.name;
+  if (unique && short && !/^第[一二三四五]台$/.test(short)) return short;
+  const head = String(m.name || '').match(/^第[一二三四五]台/);
+  return (head && head[0]) || short || m.name;
+}
+
+function migrateMorning3500(merged) {
+  const morning = merged.machines && merged.machines.morning;
+  if (!Array.isArray(morning)) return;
+  const m2 = morning.find((m) => m.id === 'm2');
+  const m3 = morning.find((m) => m.id === 'm3');
+  if (!m2 || !m3) return;
+  const listed = (ranges) => (ranges || []).filter((r) => r.start != null);
+  const m2ranges = listed(m2.ranges);
+  const m3ranges = listed(m3.ranges);
+  const oldWater = m2ranges.length === 1 && m2ranges[0].start === 3001 && m2ranges[0].end === 3999;
+  const emptyThird = m3ranges.length === 0;
+  if (!oldWater || !emptyThird) return;
+  m2.ranges = [{ start: 3001, end: 3499 }];
+  m3.ranges = [{ start: 3500, end: 3999 }];
+  for (const lot of merged.lots || []) {
+    if ((lot.half || 'morning') === 'morning' && lot.machineId === 'm2' && lot.number >= 3500 && lot.number <= 3999) {
+      lot.machineId = 'm3';
+    }
+  }
+}
+
+function reorderMachine(half, machineId, insertIndex) {
+  const arr = state.machines[half] || [];
+  const from = arr.findIndex((m) => m.id === machineId);
+  if (from < 0) return false;
+  let to = insertIndex;
+  if (to > from) to -= 1;
+  to = Math.max(0, Math.min(arr.length - 1, to));
+  if (to === from) return false;
+  const next = arr.slice();
+  const [m] = next.splice(from, 1);
+  next.splice(to, 0, m);
+  state.machines[half] = next;
+  return true;
+}
+
+function columnInsertIndex(x) {
+  const cols = [...document.querySelectorAll('.live-col')];
+  if (!cols.length) return 0;
+  for (let i = 0; i < cols.length; i++) {
+    const r = cols[i].getBoundingClientRect();
+    if (x < r.left + r.width / 2) return i;
+  }
+  return cols.length;
 }
 
 function columnLots(machineId, half) {
@@ -411,7 +459,6 @@ function undoLast() {
   if (snap.priority) lot.priority = snap.priority;
   if (snap.machineId) lot.machineId = snap.machineId;
   restoreCurrent(snap);
-  if (snap.kind === 'move') ruleOffer = null;
   saveState();
   toast('已復原');
   render();
@@ -541,55 +588,9 @@ function moveLotToMachine(id, machineId) {
   saveState();
   const dest = machineById(machineId, half);
   offerUndo(snap, `${lot.number} 已移到${columnTitle(dest, half) || dest?.name || '另一台'}`);
-  const block = hundredBlock(lot.number);
-  const already = dayRulesOf(half).some((r) => r.start === block.start && r.end === block.end && r.machineId === machineId);
-  if (!already) {
-    ruleOffer = {
-      lotId: lot.id,
-      fromId: snap.machineId,
-      machineId,
-      half,
-      start: block.start,
-      end: block.end,
-      label: block.label,
-      title: columnTitle(dest, half) || dest?.name || '這台'
-    };
-  }
   buzz([16, 40, 24]);
   render();
   return true;
-}
-
-function acceptDayRule() {
-  const offer = ruleOffer;
-  ruleOffer = null;
-  if (!offer) {
-    render();
-    return;
-  }
-  if (!Array.isArray(state.dayRules)) state.dayRules = [];
-  state.dayRules = state.dayRules.filter(
-    (r) => !(r.day === state.day && r.half === offer.half && r.start === offer.start && r.end === offer.end)
-  );
-  state.dayRules.push({
-    day: state.day,
-    half: offer.half,
-    start: offer.start,
-    end: offer.end,
-    machineId: offer.machineId
-  });
-  const dest = machineById(offer.machineId, offer.half);
-  const src = machineById(offer.fromId, offer.half);
-  addRangeToMachine(dest, offer.start, offer.end);
-  if (src && src.id !== dest?.id) subtractRangeFromMachine(src, offer.start, offer.end);
-  saveState();
-  toast(`以後 ${offer.label}（${offer.start}–${offer.end}）都放${offer.title}`);
-  render();
-}
-
-function dismissDayRule() {
-  ruleOffer = null;
-  render();
 }
 
 
@@ -1309,7 +1310,6 @@ function startNewDay(confirmed) {
   draftMachineId = '';
   itemTargetId = null;
   itemTargetAuto = false;
-  ruleOffer = null;
   saveState();
   toast('已開始新的一天');
   render();
@@ -1735,7 +1735,7 @@ function renderLive() {
             })
             .join('')
         : '<div class="col-empty">還沒抄號</div>';
-      return `<section class="live-col">
+      return `<section class="live-col" data-id="${m.id}">
         <div class="live-col-head">
           <div class="col-name">${escapeHtml(title)}</div>
           <button type="button" class="live-cur" data-act="toggle-progress" data-id="${m.id}">${curLabel}</button>
@@ -1763,10 +1763,6 @@ function renderLive() {
       </div>
       <div class="live-cols">${cols || '<div class="empty-hint">請先在設定裡確認三台號碼</div>'}</div>
       ${empty}
-      ${ruleOffer ? `<div class="rule-offer">
-        <button type="button" class="rule-ask" data-act="accept-rule">以後 ${escapeHtml(ruleOffer.label)}（${ruleOffer.start}–${ruleOffer.end}）都放${escapeHtml(ruleOffer.title)}？</button>
-        <button type="button" class="rule-no" data-act="dismiss-rule">不用</button>
-      </div>` : ''}
     </div>`;
 }
 
@@ -2216,12 +2212,6 @@ function onClick(e) {
       modal = null;
       setLotPriority(btn.dataset.id, v);
       break;
-    case 'accept-rule':
-      acceptDayRule();
-      break;
-    case 'dismiss-rule':
-      dismissDayRule();
-      break;
     case 'undo':
       if (toastAction?.fn) toastAction.fn();
       else undoLast();
@@ -2521,11 +2511,12 @@ function clearPressTimers() {
 
 function cleanupDrag() {
   if (dragState?.ghost) dragState.ghost.remove();
-  document.querySelectorAll('.lot-cell.dragging, .lot-cell.armed, .live-col.drop-target').forEach((el) => {
-    el.classList.remove('dragging', 'armed', 'drop-target');
+  document.querySelectorAll('.lot-cell.dragging, .lot-cell.armed, .live-col.drop-target, .live-col.dragging, .live-col.drop-before, .live-col.drop-after, .live-cols.drop-end').forEach((el) => {
+    el.classList.remove('dragging', 'armed', 'drop-target', 'drop-before', 'drop-after', 'drop-end');
   });
-  if (dragState?.cell && dragState.pointerId != null) {
-    try { dragState.cell.releasePointerCapture(dragState.pointerId); } catch { /* ignore */ }
+  const capEl = dragState?.cell || dragState?.colEl;
+  if (capEl && dragState?.pointerId != null) {
+    try { capEl.releasePointerCapture(dragState.pointerId); } catch { /* ignore */ }
   }
   dragState = null;
 }
@@ -2557,6 +2548,7 @@ function startLotDrag(e, cell, id) {
   cell.classList.add('dragging');
   cell.classList.remove('armed');
   dragState = {
+    kind: 'lot',
     id,
     cell,
     ghost,
@@ -2594,12 +2586,84 @@ function endLotDrag(e) {
   else render();
 }
 
+function startColDrag(e, col, id) {
+  if (dragState) return;
+  clearPressTimers();
+  const rect = col.getBoundingClientRect();
+  const head = col.querySelector('.live-col-head');
+  const ghost = (head || col).cloneNode(true);
+  ghost.querySelectorAll('.prog-pop').forEach((el) => el.remove());
+  ghost.className = 'col-ghost';
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.position = 'fixed';
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.height = (head ? head.getBoundingClientRect().height : 36) + 'px';
+  ghost.style.margin = '0';
+  ghost.style.zIndex = '2000';
+  ghost.style.pointerEvents = 'none';
+  document.body.appendChild(ghost);
+  col.classList.add('dragging');
+  dragState = {
+    kind: 'col',
+    id,
+    colEl: col,
+    ghost,
+    pointerId: e.pointerId,
+    grabX: e.clientX - rect.left,
+    grabY: e.clientY - rect.top
+  };
+  try { col.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  buzz(14);
+  moveColDrag(e);
+}
+
+function paintColDrop(insertAt) {
+  const cols = [...document.querySelectorAll('.live-col')];
+  const wrap = document.querySelector('.live-cols');
+  cols.forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+  if (wrap) wrap.classList.remove('drop-end');
+  if (insertAt >= cols.length) {
+    if (wrap) wrap.classList.add('drop-end');
+    if (cols.length) cols[cols.length - 1].classList.add('drop-after');
+  } else if (cols[insertAt]) {
+    cols[insertAt].classList.add('drop-before');
+  }
+}
+
+function moveColDrag(e) {
+  if (!dragState) return;
+  if (e.cancelable) e.preventDefault();
+  const g = dragState.ghost;
+  if (g) {
+    g.style.left = e.clientX - dragState.grabX + 'px';
+    g.style.top = e.clientY - dragState.grabY + 'px';
+  }
+  paintColDrop(columnInsertIndex(e.clientX));
+}
+
+function endColDrag(e) {
+  if (!dragState) return;
+  const id = dragState.id;
+  const insertAt = columnInsertIndex(e.clientX);
+  cleanupDrag();
+  const half = state.currentHalf;
+  if (reorderMachine(half, id, insertAt)) {
+    saveState();
+    buzz([16, 40, 24]);
+    toast('已調整台的順序');
+  }
+  render();
+}
+
 function onPointerDown(e) {
   clearPressTimers();
   if (dragState) cleanupDrag();
   pressOrigin = { x: e.clientX, y: e.clientY };
   const itemBtn = e.target.closest('[data-act="pick-item"]');
   const cell = e.target.closest('[data-act="cycle-lot"]');
+  const colHead = e.target.closest('.live-col-head');
   if (itemBtn) {
     const name = itemBtn.dataset.name;
     const half = state.currentHalf;
@@ -2608,6 +2672,15 @@ function onPointerDown(e) {
       ignoreItemClick = true;
       openItemEditor(name, half);
     }, 520);
+    return;
+  }
+  if (colHead && state.tab === 'live' && !showSettings && !modal && !e.target.closest('button, .prog-pop, input')) {
+    const col = colHead.closest('.live-col');
+    const id = col?.dataset.id;
+    if (col && id) {
+      pressOrigin.colEl = col;
+      pressOrigin.colId = id;
+    }
     return;
   }
   if (cell && state.tab === 'live' && !showSettings && !modal) {
@@ -2637,13 +2710,20 @@ function onPointerDown(e) {
 
 function onPointerMove(e) {
   if (dragState) {
-    moveLotDrag(e);
+    if (dragState.kind === 'col') moveColDrag(e);
+    else moveLotDrag(e);
     return;
   }
   if (!pressOrigin) return;
   const dx = e.clientX - pressOrigin.x;
   const dy = e.clientY - pressOrigin.y;
   const dist2 = dx * dx + dy * dy;
+  if (pressOrigin.colEl && pressOrigin.colId) {
+    if (dist2 > DRAG_SLOP * DRAG_SLOP && pressOrigin.colEl.isConnected) {
+      startColDrag(e, pressOrigin.colEl, pressOrigin.colId);
+    }
+    return;
+  }
   if (pressOrigin.cell && pressOrigin.id) {
     // After a short hold, any movement starts a drag. Before that, cancel and let the column scroll.
     if (dist2 > DRAG_SLOP * DRAG_SLOP) {
@@ -2664,7 +2744,8 @@ function onPointerMove(e) {
 
 function onPointerUp(e) {
   if (dragState) {
-    endLotDrag(e);
+    if (dragState.kind === 'col') endColDrag(e);
+    else endLotDrag(e);
     pressOrigin = null;
     return;
   }
@@ -2701,7 +2782,7 @@ function bind() {
     }
   });
   document.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell')) {
+    if (e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col-head')) {
       e.preventDefault();
     }
   });
