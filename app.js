@@ -65,6 +65,10 @@ let pressOrigin = null;
 let toastAction = null;
 let undoStack = null;
 let liveScrolls = {};
+let draftPriority = 'watch';
+let ruleOffer = null;
+let armTimer = null;
+let dragState = null;
 
 function todayStr() {
   const d = new Date();
@@ -124,7 +128,9 @@ function defaultState() {
     customItemsByHalf: { morning: [], afternoon: [] },
     itemCountsByHalf: { morning: {}, afternoon: {} },
     progressV2: true,
-    itemsMigratedV2: true
+    itemsMigratedV2: true,
+    lastPriority: 'watch',
+    dayRules: []
   };
 }
 
@@ -148,6 +154,11 @@ function loadState() {
     if (!Array.isArray(merged.customItems)) merged.customItems = [];
     if (!merged.itemCounts || typeof merged.itemCounts !== 'object') merged.itemCounts = {};
     migrateItemLists(merged);
+    if (!Array.isArray(merged.dayRules)) merged.dayRules = [];
+    if (!['must', 'watch', 'skip'].includes(merged.lastPriority)) merged.lastPriority = 'watch';
+    for (const lot of merged.lots) {
+      if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
+    }
     if (/^\d{4}$/.test(String(merged.sellerCode || ''))) merged.setupDone = true;
     if (merged.tab === 'track' || merged.tab === 'result' || merged.tab === 'settings') {
       merged.tab = 'live';
@@ -206,9 +217,91 @@ function detectMachineId(num, half) {
     const found = machineById(draftMachineId, half);
     if (found) return found.id;
   }
+  const ruled = ruleMachineId(num, half);
+  if (ruled) return ruled;
   const hits = machinesMatching(num, half);
   if (hits.length === 1) return hits[0].id;
+  if (hits.length > 1) {
+    const width = (m) => {
+      const rs = rangesOf(m, num);
+      let best = Infinity;
+      for (const r of rs) {
+        const w = (r.end == null ? 99999 : r.end) - r.start;
+        if (w < best) best = w;
+      }
+      return best;
+    };
+    const ranked = hits.slice().sort((a, b) => width(a) - width(b));
+    if (width(ranked[0]) < width(ranked[1])) return ranked[0].id;
+  }
   return null;
+}
+
+const PRIORITIES = ['must', 'watch', 'skip'];
+
+function lotPriority(lot) {
+  const p = lot && lot.priority;
+  return PRIORITIES.includes(p) ? p : 'watch';
+}
+
+function prioLabel(p) {
+  if (p === 'must') return '必標';
+  if (p === 'skip') return '可不標';
+  return '看價';
+}
+
+function prioShort(p) {
+  if (p === 'must') return '必';
+  if (p === 'skip') return '可';
+  return '價';
+}
+
+function hundredBlock(num) {
+  const n = Number(num);
+  const start = Math.floor(n / 100) * 100;
+  const end = start + 99;
+  const label = `${String(start).slice(0, -2)}xx`;
+  return { start, end, label };
+}
+
+function dayRulesOf(half) {
+  if (!Array.isArray(state.dayRules)) state.dayRules = [];
+  const h = half || state.currentHalf;
+  return state.dayRules.filter((r) => r.day === state.day && r.half === h);
+}
+
+function ruleMachineId(num, half) {
+  for (const r of dayRulesOf(half)) {
+    if (num >= r.start && num <= r.end) return r.machineId;
+  }
+  return null;
+}
+
+function addRangeToMachine(machine, start, end) {
+  if (!machine) return;
+  machine.ranges = (machine.ranges || []).filter((r) => r.start != null);
+  const covers = (machine.ranges || []).some(
+    (r) => r.start <= start && (r.end == null || r.end >= end)
+  );
+  if (!covers) machine.ranges.push({ start, end });
+  if (!machine.ranges.length) machine.ranges = [{ start, end }];
+}
+
+function subtractRangeFromMachine(machine, start, end) {
+  if (!machine) return;
+  const next = [];
+  for (const r of machine.ranges || []) {
+    if (r.start == null) continue;
+    const a = r.start;
+    const b = r.end == null ? Infinity : r.end;
+    if (b < start || a > end) {
+      next.push({ start: r.start, end: r.end });
+      continue;
+    }
+    if (a < start) next.push({ start: a, end: start - 1 });
+    if (b > end) next.push({ start: end + 1, end: r.end == null ? null : b });
+  }
+  machine.ranges = next.length ? next : [{ start: null, end: null }];
 }
 
 function todayLots(half) {
@@ -273,6 +366,7 @@ function snapshotLot(lot) {
     status: lot.status,
     secondMarket: !!lot.secondMarket,
     item: lot.item || '',
+    priority: lotPriority(lot),
     current: currentOf(lot.machineId, lot.half),
     half: lot.half,
     machineId: lot.machineId,
@@ -314,7 +408,10 @@ function undoLast() {
   lot.status = snap.status;
   lot.secondMarket = snap.secondMarket;
   lot.item = snap.item;
+  if (snap.priority) lot.priority = snap.priority;
+  if (snap.machineId) lot.machineId = snap.machineId;
   restoreCurrent(snap);
+  if (snap.kind === 'move') ruleOffer = null;
   saveState();
   toast('已復原');
   render();
@@ -392,6 +489,106 @@ function openPickItemForLot(id) {
 
 function openSecondSheet() {
   modal = { type: 'second-sheet' };
+  render();
+}
+
+function setLotPriority(id, prio, { fromToggle } = {}) {
+  if (!PRIORITIES.includes(prio)) return;
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  const snap = snapshotLot(lot);
+  lot.priority = prio;
+  if (fromToggle) {
+    draftPriority = prio;
+    state.lastPriority = prio;
+  }
+  saveState();
+  toast(`${lot.number}　${prioLabel(prio)}`, 1600);
+  buzz(10);
+  render();
+}
+
+function cycleLotPriority(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  const cur = lotPriority(lot);
+  const next = PRIORITIES[(PRIORITIES.indexOf(cur) + 1) % PRIORITIES.length];
+  setLotPriority(id, next);
+}
+
+function setDraftPriority(prio) {
+  if (!PRIORITIES.includes(prio)) return;
+  draftPriority = prio;
+  state.lastPriority = prio;
+  saveState();
+  render();
+}
+
+function isUnauctionedMust(lot) {
+  if (!lot || lotPriority(lot) !== 'must') return false;
+  if (lot.status !== 'pending' || lot.secondMarket) return false;
+  const cur = currentOf(lot.machineId, lot.half);
+  return !isPassed(lot, cur);
+}
+
+function moveLotToMachine(id, machineId) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || !machineId || lot.machineId === machineId) return false;
+  const snap = snapshotLot(lot);
+  snap.kind = 'move';
+  const half = lot.half || state.currentHalf;
+  lot.machineId = machineId;
+  saveState();
+  const dest = machineById(machineId, half);
+  offerUndo(snap, `${lot.number} 已移到${columnTitle(dest, half) || dest?.name || '另一台'}`);
+  const block = hundredBlock(lot.number);
+  const already = dayRulesOf(half).some((r) => r.start === block.start && r.end === block.end && r.machineId === machineId);
+  if (!already) {
+    ruleOffer = {
+      lotId: lot.id,
+      fromId: snap.machineId,
+      machineId,
+      half,
+      start: block.start,
+      end: block.end,
+      label: block.label,
+      title: columnTitle(dest, half) || dest?.name || '這台'
+    };
+  }
+  buzz([16, 40, 24]);
+  render();
+  return true;
+}
+
+function acceptDayRule() {
+  const offer = ruleOffer;
+  ruleOffer = null;
+  if (!offer) {
+    render();
+    return;
+  }
+  if (!Array.isArray(state.dayRules)) state.dayRules = [];
+  state.dayRules = state.dayRules.filter(
+    (r) => !(r.day === state.day && r.half === offer.half && r.start === offer.start && r.end === offer.end)
+  );
+  state.dayRules.push({
+    day: state.day,
+    half: offer.half,
+    start: offer.start,
+    end: offer.end,
+    machineId: offer.machineId
+  });
+  const dest = machineById(offer.machineId, offer.half);
+  const src = machineById(offer.fromId, offer.half);
+  addRangeToMachine(dest, offer.start, offer.end);
+  if (src && src.id !== dest?.id) subtractRangeFromMachine(src, offer.start, offer.end);
+  saveState();
+  toast(`以後 ${offer.label}（${offer.start}–${offer.end}）都放${offer.title}`);
+  render();
+}
+
+function dismissDayRule() {
+  ruleOffer = null;
   render();
 }
 
@@ -780,6 +977,7 @@ function commitLot(num, machineId, half) {
     note: draftNote.trim(),
     item: draftItem || '',
     status: 'pending',
+    priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
     createdAt: Date.now()
   };
   if (lot.item) bumpItemUse(lot.item);
@@ -1111,6 +1309,7 @@ function startNewDay(confirmed) {
   draftMachineId = '';
   itemTargetId = null;
   itemTargetAuto = false;
+  ruleOffer = null;
   saveState();
   toast('已開始新的一天');
   render();
@@ -1175,6 +1374,8 @@ function resultText() {
       if (flowG.length) lines.push(`  流標・二市：${flowG.map(lotLabel).join('、')}（${flowG.length}）`);
       if (over.length) lines.push(`  過號：${over.map(lotLabel).join('、')}（${over.length}）`);
       if (p.length) lines.push(`  未拍：${p.map(lotLabel).join('、')}（${p.length}）`);
+      const musts = group.filter((l) => isUnauctionedMust(l));
+      if (musts.length) lines.push(`  必標未拍：${musts.map(lotLabel).join('、')}（${musts.length}）`);
     }
   }
   const second = secondLots();
@@ -1444,7 +1645,15 @@ function renderNote() {
         <div class="keypad">${keypad}</div>
         ${itemPick}
       </div>
-      <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
+      <div class="save-row">
+        <div class="prio-toggle" role="group" aria-label="標貨優先">
+          ${['must', 'watch', 'skip'].map((p) => {
+            const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
+            return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${p === 'must' ? '必標' : p === 'skip' ? '可不' : '看價'}</button>`;
+          }).join('')}
+        </div>
+        <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
+      </div>
       <div class="note-tools">
         <button type="button" class="linkish" data-act="toggle-note">${draftShowNote ? '收起備註' : '＋備註'}</button>
       </div>
@@ -1467,9 +1676,11 @@ function renderLive() {
   const second = secondLots();
   let won = 0;
   let lost = 0;
+  let mustLeft = 0;
   for (const l of allToday) {
     if (l.status === 'won') won += 1;
     else if (l.status === 'lost') lost += 1;
+    if (isUnauctionedMust(l)) mustLeft += 1;
   }
 
   const cols = state.machines[half]
@@ -1497,7 +1708,8 @@ function renderLive() {
               const isNext = next && l.id === next.id;
               const d = cur != null && l.status === 'pending' && !l.secondMarket ? l.number - cur : null;
               const near = d != null && d >= 0 && d <= gapN;
-              let cls = 'lot-cell';
+              const prio = lotPriority(l);
+              let cls = `lot-cell prio-${prio}`;
               if (l.status === 'won') cls += ' won';
               else if (l.status === 'lost') cls += ' lost';
               else if (l.status === 'flow') cls += ' flow';
@@ -1510,13 +1722,15 @@ function renderLive() {
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
               const item = l.item
                 ? `<span class="cell-item">${escapeHtml(l.item)}</span>`
-                : '<span class="cell-item dim">　</span>';
+                : '<span class="cell-item dim"></span>';
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
-                <span class="cell-top">
-                  <span class="cell-num">${l.number}</span>
-                  ${badge}${er}
+                <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
+                  <span class="prio-bar"></span>
+                  <span class="prio-tag">${prioShort(prio)}</span>
                 </span>
+                <span class="cell-num">${l.number}</span>
                 ${item}
+                <span class="cell-flags">${badge}${er}</span>
               </button>`;
             })
             .join('')
@@ -1540,6 +1754,7 @@ function renderLive() {
     <div class="live-screen">
       <div class="live-bar">
         <div class="live-counts">
+          <span class="must-count${mustLeft ? ' on' : ''}"><b>${mustLeft}</b>必標</span>
           <span><b>${won}</b>標到</span>
           <span><b>${lost}</b>沒標到</span>
           <span><b>${second.length}</b>二市</span>
@@ -1548,6 +1763,10 @@ function renderLive() {
       </div>
       <div class="live-cols">${cols || '<div class="empty-hint">請先在設定裡確認三台號碼</div>'}</div>
       ${empty}
+      ${ruleOffer ? `<div class="rule-offer">
+        <button type="button" class="rule-ask" data-act="accept-rule">以後 ${escapeHtml(ruleOffer.label)}（${ruleOffer.start}–${ruleOffer.end}）都放${escapeHtml(ruleOffer.title)}？</button>
+        <button type="button" class="rule-no" data-act="dismiss-rule">不用</button>
+      </div>` : ''}
     </div>`;
 }
 
@@ -1757,6 +1976,12 @@ function renderModal() {
       <div class="sheet action-sheet" data-stop="1">
         <h3>${escapeHtml(lotLabel(lot))}</h3>
         <p>${escapeHtml(machineNameOf(lot))}</p>
+        <div class="prio-toggle sheet-prio" role="group" aria-label="標貨優先">
+          ${['must', 'watch', 'skip'].map((p) => {
+            const on = lotPriority(lot) === p ? ' on' : '';
+            return `<button type="button" class="prio-${p}${on}" data-act="set-prio" data-id="${escapeHtml(lot.id)}" data-v="${p}">${prioLabel(p)}</button>`;
+          }).join('')}
+        </div>
         ${flowBtn}
         <button type="button" class="action-btn" data-act="go-here" data-id="${escapeHtml(lot.id)}">打到這裡</button>
         ${secondBtn}
@@ -1969,11 +2194,33 @@ function onClick(e) {
       returnFromSecond(btn.dataset.id);
       break;
     case 'cycle-lot':
-      if (ignoreLotClick) {
+      if (ignoreLotClick || dragState) {
         ignoreLotClick = false;
         break;
       }
       cycleLotStatus(btn.dataset.id);
+      break;
+    case 'cycle-prio':
+      e.stopPropagation();
+      if (ignoreLotClick || dragState) {
+        ignoreLotClick = false;
+        break;
+      }
+      cycleLotPriority(btn.dataset.id);
+      break;
+    case 'set-draft-prio':
+      setDraftPriority(v);
+      buzz(8);
+      break;
+    case 'set-prio':
+      modal = null;
+      setLotPriority(btn.dataset.id, v);
+      break;
+    case 'accept-rule':
+      acceptDayRule();
+      break;
+    case 'dismiss-rule':
+      dismissDayRule();
       break;
     case 'undo':
       if (toastAction?.fn) toastAction.fn();
@@ -2260,6 +2507,172 @@ function syncViewportHeight() {
   if (h > 0) document.documentElement.style.setProperty('--app-h', h + 'px');
 }
 
+
+const ARM_MS = 180;
+const MENU_MS = 520;
+const DRAG_SLOP = 10;
+
+function clearPressTimers() {
+  clearTimeout(longPressTimer);
+  longPressTimer = null;
+  clearTimeout(armTimer);
+  armTimer = null;
+}
+
+function cleanupDrag() {
+  if (dragState?.ghost) dragState.ghost.remove();
+  document.querySelectorAll('.lot-cell.dragging, .lot-cell.armed, .live-col.drop-target').forEach((el) => {
+    el.classList.remove('dragging', 'armed', 'drop-target');
+  });
+  if (dragState?.cell && dragState.pointerId != null) {
+    try { dragState.cell.releasePointerCapture(dragState.pointerId); } catch { /* ignore */ }
+  }
+  dragState = null;
+}
+
+function columnAtPoint(x, y) {
+  const stack = document.elementsFromPoint(x, y) || [];
+  const col = stack.find((el) => el.classList && el.classList.contains('live-col'));
+  return col || null;
+}
+
+function startLotDrag(e, cell, id) {
+  if (dragState) return;
+  clearPressTimers();
+  ignoreLotClick = true;
+  const rect = cell.getBoundingClientRect();
+  const ghost = cell.cloneNode(true);
+  ghost.classList.add('lot-ghost');
+  ghost.classList.remove('armed');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.position = 'fixed';
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.height = rect.height + 'px';
+  ghost.style.margin = '0';
+  ghost.style.zIndex = '2000';
+  ghost.style.pointerEvents = 'none';
+  document.body.appendChild(ghost);
+  cell.classList.add('dragging');
+  cell.classList.remove('armed');
+  dragState = {
+    id,
+    cell,
+    ghost,
+    pointerId: e.pointerId,
+    grabX: e.clientX - rect.left,
+    grabY: e.clientY - rect.top
+  };
+  try { cell.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  buzz(14);
+  moveLotDrag(e);
+}
+
+function moveLotDrag(e) {
+  if (!dragState) return;
+  if (e.cancelable) e.preventDefault();
+  const g = dragState.ghost;
+  if (g) {
+    g.style.left = e.clientX - dragState.grabX + 'px';
+    g.style.top = e.clientY - dragState.grabY + 'px';
+  }
+  const col = columnAtPoint(e.clientX, e.clientY);
+  document.querySelectorAll('.live-col.drop-target').forEach((el) => {
+    if (el !== col) el.classList.remove('drop-target');
+  });
+  if (col) col.classList.add('drop-target');
+}
+
+function endLotDrag(e) {
+  if (!dragState) return;
+  const id = dragState.id;
+  const col = columnAtPoint(e.clientX, e.clientY);
+  const machineId = col?.querySelector('.live-col-list')?.dataset.id;
+  cleanupDrag();
+  if (machineId) moveLotToMachine(id, machineId);
+  else render();
+}
+
+function onPointerDown(e) {
+  clearPressTimers();
+  if (dragState) cleanupDrag();
+  pressOrigin = { x: e.clientX, y: e.clientY };
+  const itemBtn = e.target.closest('[data-act="pick-item"]');
+  const cell = e.target.closest('[data-act="cycle-lot"]');
+  if (itemBtn) {
+    const name = itemBtn.dataset.name;
+    const half = state.currentHalf;
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      ignoreItemClick = true;
+      openItemEditor(name, half);
+    }, 520);
+    return;
+  }
+  if (cell && state.tab === 'live' && !showSettings && !modal) {
+    const id = cell.dataset.id;
+    pressOrigin.cell = cell;
+    pressOrigin.id = id;
+    pressOrigin.armed = false;
+    armTimer = setTimeout(() => {
+      armTimer = null;
+      if (!pressOrigin || pressOrigin.id !== id || !cell.isConnected || dragState) return;
+      pressOrigin.armed = true;
+      cell.classList.add('armed');
+      buzz(8);
+    }, ARM_MS);
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      clearTimeout(armTimer);
+      armTimer = null;
+      if (dragState) return;
+      cell.classList.remove('armed');
+      ignoreLotClick = true;
+      pressOrigin = null;
+      openLotActions(id);
+    }, MENU_MS);
+  }
+}
+
+function onPointerMove(e) {
+  if (dragState) {
+    moveLotDrag(e);
+    return;
+  }
+  if (!pressOrigin) return;
+  const dx = e.clientX - pressOrigin.x;
+  const dy = e.clientY - pressOrigin.y;
+  const dist2 = dx * dx + dy * dy;
+  if (pressOrigin.cell && pressOrigin.id) {
+    // After a short hold, any movement starts a drag. Before that, cancel and let the column scroll.
+    if (dist2 > DRAG_SLOP * DRAG_SLOP) {
+      if (pressOrigin.armed && pressOrigin.cell.isConnected) {
+        startLotDrag(e, pressOrigin.cell, pressOrigin.id);
+        return;
+      }
+      pressOrigin.cell.classList.remove('armed');
+      clearPressTimers();
+      pressOrigin = { x: pressOrigin.x, y: pressOrigin.y };
+      return;
+    }
+    return;
+  }
+  if (!longPressTimer) return;
+  if (dist2 > 64) clearPressTimers();
+}
+
+function onPointerUp(e) {
+  if (dragState) {
+    endLotDrag(e);
+    pressOrigin = null;
+    return;
+  }
+  if (pressOrigin?.cell) pressOrigin.cell.classList.remove('armed');
+  clearPressTimers();
+  pressOrigin = null;
+}
+
 function bind() {
   syncViewportHeight();
   window.addEventListener('resize', syncViewportHeight);
@@ -2292,48 +2705,10 @@ function bind() {
       e.preventDefault();
     }
   });
-  document.addEventListener('pointerdown', (e) => {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-    pressOrigin = { x: e.clientX, y: e.clientY };
-    const itemBtn = e.target.closest('[data-act="pick-item"]');
-    const cell = e.target.closest('[data-act="cycle-lot"]');
-    if (itemBtn) {
-      const name = itemBtn.dataset.name;
-      const half = state.currentHalf;
-      longPressTimer = setTimeout(() => {
-        longPressTimer = null;
-        ignoreItemClick = true;
-        openItemEditor(name, half);
-      }, 520);
-      return;
-    }
-    if (cell) {
-      const id = cell.dataset.id;
-      longPressTimer = setTimeout(() => {
-        longPressTimer = null;
-        ignoreLotClick = true;
-        openLotActions(id);
-      }, 480);
-    }
-  });
-  document.addEventListener('pointerup', () => {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-  });
-  document.addEventListener('pointercancel', () => {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-  });
-  document.addEventListener('pointermove', (e) => {
-    if (!longPressTimer || !pressOrigin) return;
-    const dx = e.clientX - pressOrigin.x;
-    const dy = e.clientY - pressOrigin.y;
-    if (dx * dx + dy * dy > 64) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-  });
+  document.addEventListener('pointerdown', onPointerDown);
+  document.addEventListener('pointerup', onPointerUp);
+  document.addEventListener('pointercancel', onPointerUp);
+  document.addEventListener('pointermove', onPointerMove, { passive: false });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     const act = e.target?.dataset?.act;
@@ -2369,6 +2744,7 @@ function registerSW() {
 
 function init() {
   state = loadState();
+  draftPriority = state.lastPriority || 'watch';
   checkNewDay();
   bind();
   registerSW();
