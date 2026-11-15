@@ -1,7 +1,7 @@
 {
-  "name": "桃園果菜市場 標貨助手",
-  "short_name": "桃園標貨",
-  "description": "桃園果菜市場標貨、抄號與舉牌助手",
+  "name": "拍賣標貨助手",
+  "short_name": "拍賣標貨助手",
+  "description": "拍賣現場標貨、抄號與舉牌助手",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

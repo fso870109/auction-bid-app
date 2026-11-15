@@ -1342,7 +1342,7 @@ function checkNewDay() {
 /* ---------- 分享 ---------- */
 function resultText() {
   const code = state.sellerCode || '----';
-  const lines = [`【${formatDateLabel(state.day)} 桃園果菜市場標貨】承銷人 ${code}`];
+  const lines = [`【${formatDateLabel(state.day)} 拍賣標貨助手】承銷人 ${code}`];
   let won = 0;
   let lost = 0;
   let pending = 0;
@@ -1406,7 +1406,7 @@ async function shareResults() {
   const text = resultText();
   if (navigator.share) {
     try {
-      await navigator.share({ text, title: '桃園果菜市場標貨' });
+      await navigator.share({ text, title: '拍賣標貨助手' });
       return;
     } catch (err) {
       if (err && err.name === 'AbortError') return;
@@ -1512,7 +1512,7 @@ function renderHeader() {
     <header class="header">
       <div class="header-left">
         <div class="header-date">${escapeHtml(formatDateLabel(state.day))}</div>
-        <div class="header-sub">桃園果菜市場</div>
+        <div class="header-sub">拍賣標貨助手</div>
       </div>
       <div class="header-right">
         <div class="half-switch" role="tablist">
@@ -1893,8 +1893,7 @@ function renderSetup() {
     .join('');
   return `
     <div class="setup">
-      <div class="app-brand">桃園果菜市場</div>
-      <h1>標貨助手</h1>
+      <h1>拍賣標貨助手</h1>
       <p class="lead">請輸入我的承銷人代號（四位數）。只存在這支手機，舉牌時會用最大的字顯示給拍賣員看。</p>
       <div class="lot-display">
         <div class="num${code ? '' : ' empty'}">${code ? escapeHtml(code) : '----'}</div>
