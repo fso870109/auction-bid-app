@@ -1446,10 +1446,6 @@ function renderNote() {
       </div>
       <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
       <div class="note-tools">
-        <button type="button" class="auto" data-act="toggle-autosave">
-          <span class="toggle${state.autoSave4 ? ' on' : ''}"><i></i></span>
-          四碼自動存
-        </button>
         <button type="button" class="linkish" data-act="toggle-note">${draftShowNote ? '收起備註' : '＋備註'}</button>
       </div>
       ${noteBlock}
@@ -2258,7 +2254,20 @@ function onVisibility() {
   }
 }
 
+function syncViewportHeight() {
+  const vv = window.visualViewport;
+  const h = Math.round((vv && vv.height) || window.innerHeight || document.documentElement.clientHeight);
+  if (h > 0) document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+
 function bind() {
+  syncViewportHeight();
+  window.addEventListener('resize', syncViewportHeight);
+  window.addEventListener('orientationchange', () => setTimeout(syncViewportHeight, 200));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncViewportHeight);
+    window.visualViewport.addEventListener('scroll', syncViewportHeight);
+  }
   document.addEventListener('click', onClick);
   document.addEventListener('input', onInput);
   document.addEventListener('fullscreenchange', onFullscreenChange);
