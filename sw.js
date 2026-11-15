@@ -1,4 +1,4 @@
-const CACHE = 'auction-bid-v13';
+const CACHE = 'auction-bid-v14';
 const ASSETS = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const ASSETS = [
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
   './icons/apple-touch-icon.png',
+  './icons/favicon-32.png',
   './fonts/archivo-black.woff2'
 ];
 

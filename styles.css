@@ -122,12 +122,16 @@ input:focus, textarea:focus {
 }
 
 .half-switch button {
-  padding: 7px 14px;
+  padding: 6px 9px;
   border-radius: 999px;
-  font-weight: 700;
-  font-size: 14px;
+  font-weight: 800;
+  font-size: 12px;
   color: var(--muted);
-  min-height: 34px;
+  min-height: 32px;
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .half-switch button { padding: 6px 7px; font-size: 11px; }
 }
 
 .half-switch button.on {
@@ -905,15 +909,25 @@ input:focus, textarea:focus {
   padding: 24px 20px calc(24px + var(--safe-b));
 }
 
+.setup-logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  display: block;
+  margin: 0 auto 14px;
+  background: #038736;
+}
 .setup h1 {
   font-size: 28px;
   margin: 0 0 8px;
+  text-align: center;
 }
 
 .setup .lead {
   color: var(--muted);
   margin-bottom: 24px;
   line-height: 1.55;
+  text-align: center;
 }
 
 .hidden { display: none !important; }
@@ -925,7 +939,16 @@ input:focus, textarea:focus {
   margin-top: 8px;
 }
 
-.header-left { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.header-left { display: flex; flex-direction: row; align-items: center; gap: 8px; min-width: 0; }
+.app-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex: 0 0 auto;
+  display: block;
+  background: #038736;
+}
+.header-titles { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .header-sub { font-size: 11px; color: var(--muted); font-weight: 700; margin-top: 1px; letter-spacing: 0.02em; }
 .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
 .won-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
@@ -1596,10 +1619,12 @@ input:focus, textarea:focus {
 .live-cols {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   min-height: 0;
 }
+.live-cols[data-n="1"] { grid-template-columns: minmax(0, 1fr); }
+.live-cols[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .live-col {
   display: flex;
   flex-direction: column;

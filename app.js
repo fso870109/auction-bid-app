@@ -3,9 +3,13 @@
 const STORAGE_KEY = 'ty-auction-bid-v1';
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
+const HALVES = ['fruit', 'morning', 'afternoon'];
+const HALF_LABELS = { fruit: '水果場', morning: '上半場', afternoon: '下半場' };
+const SESSION_MACHINE_MAX = { fruit: 2, morning: 3, afternoon: 3 };
 const GROUP_RANK = {
+  fruit: { '水果': 0 },
   morning: { '大宗': 0, '水菜': 1 },
-  afternoon: { '瓜果': 0, '菇菌': 1, '水果': 2, '醃製': 3 }
+  afternoon: { '瓜果': 0, '菇菌': 1, '醃製': 2 }
 };
 let itemQuery = '';
 let variantPick = null; // crop official name when variant sheet is open
@@ -13,7 +17,13 @@ let itemPickScroll = 0;
 let resetItemPickScroll = false;
 
 function catalogHalfKey(half) {
-  return half === 'afternoon' ? 'a' : 'm';
+  if (half === 'afternoon') return 'a';
+  if (half === 'fruit') return 'f';
+  return 'm';
+}
+
+function isHalf(half) {
+  return HALVES.includes(half);
 }
 
 function catalogCrops(half) {
@@ -104,13 +114,29 @@ function visibleCrops(half, q) {
   return list;
 }
 
+function halfFromCatalogKey(k) {
+  if (k === 'a') return 'afternoon';
+  if (k === 'f') return 'fruit';
+  return 'morning';
+}
+
 function catalogCounts() {
-  const tally = { morning: {}, afternoon: {} };
+  const tally = { fruit: {}, morning: {}, afternoon: {} };
   for (const c of (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : [])) {
-    const half = c.h === 'a' ? 'afternoon' : 'morning';
+    const half = halfFromCatalogKey(c.h);
     tally[half][c.g] = (tally[half][c.g] || 0) + 1;
   }
   return tally;
+}
+
+function catalogSummary(half) {
+  const tally = catalogCounts()[half] || {};
+  const groups = half === 'fruit' ? ['水果']
+    : half === 'afternoon' ? ['瓜果', '菇菌', '醃製']
+    : ['大宗', '水菜'];
+  const parts = groups.map((g) => `${g} ${tally[g] || 0}`);
+  const total = groups.reduce((s, g) => s + (tally[g] || 0), 0);
+  return `內建 ${parts.join('、')}，共 ${total} 項，依桃農近一年交易量排序，完整名單請在抄號頁搜尋。`;
 }
 
 function variantCount(crop) {
@@ -218,6 +244,9 @@ function renderItemPicker(half, opts) {
 }
 
 const DEFAULT_MACHINES = {
+  fruit: [
+    { id: 'f1', name: '第一台', ranges: [] }
+  ],
   morning: [
     { id: 'm1', name: '第一台・大宗', ranges: [{ start: 1001, end: 1999 }] },
     { id: 'm2', name: '第二台・水菜', ranges: [{ start: 3001, end: 3499 }] },
@@ -299,9 +328,10 @@ function escapeHtml(s) {
 }
 
 function defaultCurrents(machines) {
-  const out = { morning: {}, afternoon: {} };
-  for (const half of ['morning', 'afternoon']) {
-    for (const m of machines[half]) {
+  const out = { fruit: {}, morning: {}, afternoon: {} };
+  for (const half of HALVES) {
+    out[half] = {};
+    for (const m of machines[half] || []) {
       out[half][m.id] = null;
     }
   }
@@ -316,7 +346,7 @@ function defaultState() {
     vibrate: true,
     alertGap: 3,
     autoSave4: true,
-    currentHalf: 'morning',
+    currentHalf: 'fruit',
     tab: 'note',
     machines,
     currentNumbers: defaultCurrents(machines),
@@ -325,8 +355,8 @@ function defaultState() {
     alerted: {},
     customItems: [],
     itemCounts: {},
-    customItemsByHalf: { morning: [], afternoon: [] },
-    itemCountsByHalf: { morning: {}, afternoon: {} },
+    customItemsByHalf: { fruit: [], morning: [], afternoon: [] },
+    itemCountsByHalf: { fruit: {}, morning: {}, afternoon: {} },
     progressV2: true,
     itemsMigratedV2: true,
     lastPriority: 'watch',
@@ -342,14 +372,25 @@ function loadState() {
     if (!raw) return base;
     const saved = JSON.parse(raw);
     const merged = { ...base, ...saved };
-    merged.machines = {
-      morning: saved.machines?.morning || base.machines.morning,
-      afternoon: saved.machines?.afternoon || base.machines.afternoon
-    };
-    merged.currentNumbers = {
-      morning: { ...base.currentNumbers.morning, ...(saved.currentNumbers?.morning || {}) },
-      afternoon: { ...base.currentNumbers.afternoon, ...(saved.currentNumbers?.afternoon || {}) }
-    };
+    merged.machines = {};
+    merged.currentNumbers = {};
+    for (const half of HALVES) {
+      const savedMachines = saved.machines && Array.isArray(saved.machines[half]) ? saved.machines[half] : null;
+      merged.machines[half] = savedMachines && savedMachines.length
+        ? savedMachines
+        : structuredClone(base.machines[half]);
+      if (half === 'fruit' && merged.machines.fruit.length > 2) {
+        merged.machines.fruit = merged.machines.fruit.slice(0, 2);
+      }
+      if (!merged.machines[half].length) {
+        merged.machines[half] = structuredClone(base.machines[half]);
+      }
+      merged.currentNumbers[half] = {
+        ...(base.currentNumbers[half] || {}),
+        ...((saved.currentNumbers && saved.currentNumbers[half]) || {})
+      };
+    }
+    if (!isHalf(merged.currentHalf)) merged.currentHalf = 'fruit';
     if (!Array.isArray(merged.lots)) merged.lots = [];
     if (!merged.alerted || typeof merged.alerted !== 'object') merged.alerted = {};
     if (!Array.isArray(merged.customItems)) merged.customItems = [];
@@ -387,16 +428,20 @@ function saveState() {
 }
 
 function halfLabel(half) {
-  return half === 'afternoon' ? '下半場' : '上半場';
+  return HALF_LABELS[half] || '上半場';
 }
 
 function machineById(id, half) {
   const h = half || state.currentHalf;
-  return (
-    state.machines[h].find((m) => m.id === id) ||
-    state.machines.morning.find((m) => m.id === id) ||
-    state.machines.afternoon.find((m) => m.id === id)
-  );
+  const pools = [state.machines[h] || []];
+  for (const k of HALVES) {
+    if (k !== h) pools.push(state.machines[k] || []);
+  }
+  for (const list of pools) {
+    const found = list.find((m) => m.id === id);
+    if (found) return found;
+  }
+  return null;
 }
 
 function machineNameOf(lotOrId, half) {
@@ -422,6 +467,8 @@ function detectMachineId(num, half) {
     const found = machineById(draftMachineId, half);
     if (found) return found.id;
   }
+  const list = (state.machines[half] || []);
+  if (list.length === 1) return list[0].id;
   const hits = machinesMatching(num, half);
   if (hits.length === 1) return hits[0].id;
   if (hits.length > 1) {
@@ -438,6 +485,52 @@ function detectMachineId(num, half) {
     if (width(ranked[0]) < width(ranked[1])) return ranked[0].id;
   }
   return null;
+}
+
+function addSessionMachine(half) {
+  const h = half || state.currentHalf;
+  if (!isHalf(h)) return;
+  const list = state.machines[h] || (state.machines[h] = []);
+  const max = SESSION_MACHINE_MAX[h] || 3;
+  if (list.length >= max) {
+    toast(`這場最多 ${max} 台`);
+    return;
+  }
+  const idBase = h === 'fruit' ? 'f' : h === 'morning' ? 'm' : 'a';
+  let n = list.length + 1;
+  let id = idBase + n;
+  while (list.some((m) => m.id === id)) {
+    n += 1;
+    id = idBase + n;
+  }
+  const ordinal = ['', '一', '二', '三', '四'][list.length + 1] || String(list.length + 1);
+  const name = '第' + ordinal + '台';
+  list.push({ id, name, ranges: [] });
+  if (!state.currentNumbers[h]) state.currentNumbers[h] = {};
+  state.currentNumbers[h][id] = null;
+  saveState();
+  toast(`已加上${name}`);
+  render();
+}
+
+function removeSessionMachine(half, machineId) {
+  const h = half || state.currentHalf;
+  const list = state.machines[h] || [];
+  if (list.length <= 1) {
+    toast('至少要留一台');
+    return;
+  }
+  const idx = machineId ? list.findIndex((m) => m.id === machineId) : list.length - 1;
+  if (idx < 0) return;
+  const [gone] = list.splice(idx, 1);
+  const keep = list[0];
+  for (const lot of state.lots || []) {
+    if (lot.half === h && lot.machineId === gone.id) lot.machineId = keep.id;
+  }
+  if (state.currentNumbers[h]) delete state.currentNumbers[h][gone.id];
+  saveState();
+  toast(`已移除${gone.name}`);
+  render();
 }
 
 const PRIORITIES = ['must', 'watch', 'skip'];
@@ -812,15 +905,15 @@ function lotLabel(lot) {
 
 function migrateItemLists(merged) {
   if (!merged.customItemsByHalf || typeof merged.customItemsByHalf !== 'object') {
-    merged.customItemsByHalf = { morning: [], afternoon: [] };
+    merged.customItemsByHalf = { fruit: [], morning: [], afternoon: [] };
   }
-  for (const half of ['morning', 'afternoon']) {
+  for (const half of HALVES) {
     if (!Array.isArray(merged.customItemsByHalf[half])) merged.customItemsByHalf[half] = [];
   }
   if (!merged.itemCountsByHalf || typeof merged.itemCountsByHalf !== 'object') {
-    merged.itemCountsByHalf = { morning: {}, afternoon: {} };
+    merged.itemCountsByHalf = { fruit: {}, morning: {}, afternoon: {} };
   }
-  for (const half of ['morning', 'afternoon']) {
+  for (const half of HALVES) {
     if (!merged.itemCountsByHalf[half] || typeof merged.itemCountsByHalf[half] !== 'object') {
       merged.itemCountsByHalf[half] = {};
     }
@@ -864,14 +957,14 @@ function itemVolume(name) {
 
 function customItemsOf(half) {
   const h = half || state.currentHalf;
-  if (!state.customItemsByHalf) state.customItemsByHalf = { morning: [], afternoon: [] };
+  if (!state.customItemsByHalf) state.customItemsByHalf = { fruit: [], morning: [], afternoon: [] };
   if (!Array.isArray(state.customItemsByHalf[h])) state.customItemsByHalf[h] = [];
   return state.customItemsByHalf[h];
 }
 
 function itemCountsOf(half) {
   const h = half || state.currentHalf;
-  if (!state.itemCountsByHalf) state.itemCountsByHalf = { morning: {}, afternoon: {} };
+  if (!state.itemCountsByHalf) state.itemCountsByHalf = { fruit: {}, morning: {}, afternoon: {} };
   if (!state.itemCountsByHalf[h] || typeof state.itemCountsByHalf[h] !== 'object') {
     state.itemCountsByHalf[h] = {};
   }
@@ -1510,6 +1603,7 @@ function startNewDay(confirmed) {
   state.day = todayStr();
   state.currentNumbers = defaultCurrents(state.machines);
   state.tab = 'note';
+  state.currentHalf = 'fruit';
   modal = null;
   draftNum = '';
   draftNote = '';
@@ -1518,7 +1612,7 @@ function startNewDay(confirmed) {
   itemTargetId = null;
   itemTargetAuto = false;
   saveState();
-  toast('已開始新的一天');
+  toast('已開始新的一天，先從水果場開始');
   render();
 }
 
@@ -1542,6 +1636,7 @@ function checkNewDay() {
     state.day = today;
     state.currentNumbers = defaultCurrents(state.machines);
     state.alerted = {};
+    state.currentHalf = 'fruit';
     saveState();
   }
 }
@@ -1555,7 +1650,7 @@ function resultText() {
   let pending = 0;
   let passed = 0;
   let flowN = 0;
-  for (const half of ['morning', 'afternoon']) {
+  for (const half of HALVES) {
     const dayLots = todayLots(half);
     const lots = dayLots.filter((l) => !l.secondMarket);
     const hasFlow = dayLots.some((l) => l.status === 'flow');
@@ -1738,13 +1833,15 @@ function renderHeader() {
   return `
     <header class="header">
       <div class="header-left">
-        <div class="header-date">${escapeHtml(formatDateLabel(state.day))}</div>
-        <div class="header-sub">拍賣標貨助手</div>
+        <img class="app-logo" src="icons/icon-192.png" alt="" width="28" height="28" />
+        <div class="header-titles">
+          <div class="header-date">${escapeHtml(formatDateLabel(state.day))}</div>
+          <div class="header-sub">拍賣標貨助手</div>
+        </div>
       </div>
       <div class="header-right">
         <div class="half-switch" role="tablist">
-          <button type="button" data-act="half" data-v="morning" class="${half === 'morning' ? 'on' : ''}">上半場</button>
-          <button type="button" data-act="half" data-v="afternoon" class="${half === 'afternoon' ? 'on' : ''}">下半場</button>
+          ${HALVES.map((h) => `<button type="button" data-act="half" data-v="${h}" class="${half === h ? 'on' : ''}">${halfLabel(h)}</button>`).join('')}
         </div>
         <button type="button" class="gear-btn${showSettings ? ' on' : ''}" data-act="settings" aria-label="設定">${showSettings ? '✕' : '⚙'}</button>
       </div>
@@ -1788,9 +1885,8 @@ function renderNote() {
       machineHint = '有多台符合，請選台';
       chipClass += ' warn';
     } else {
-      const other = state.currentHalf === 'morning' ? 'afternoon' : 'morning';
-      const otherHits = machinesMatching(parsed, other);
-      if (otherHits.length) {
+      const other = HALVES.find((h) => h !== state.currentHalf && machinesMatching(parsed, h).length);
+      if (other) {
         machineHint = `像是${halfLabel(other)}，請選台`;
         chipClass += ' warn';
       } else {
@@ -1799,8 +1895,17 @@ function renderNote() {
       }
     }
   } else {
-    machineHint = '輸入後自動判斷台別';
-    chipClass += ' warn';
+    const list = state.machines[state.currentHalf] || [];
+    const hasRanges = list.some((m) => (m.ranges || []).some((r) => r.start != null));
+    if (!hasRanges && list.length === 1) {
+      machineHint = `會存到${list[0].name}`;
+    } else if (!hasRanges) {
+      machineHint = '這場還沒設號碼區間，請選台';
+      chipClass += ' warn';
+    } else {
+      machineHint = '輸入後自動判斷台別';
+      chipClass += ' warn';
+    }
   }
 
   const recent = recentLots();
@@ -1965,7 +2070,7 @@ function renderLive() {
     .join('');
 
   const empty = allToday.length === 0
-    ? '<div class="live-empty">到「抄號」把紙上的號碼存進來，三台會並排顯示。</div>'
+    ? '<div class="live-empty">到「抄號」把紙上的號碼存進來，各台會並排顯示。</div>'
     : '';
 
   return `
@@ -1977,9 +2082,12 @@ function renderLive() {
           <span><b>${lost}</b>沒標到</span>
           <span><b>${second.length}</b>二市</span>
         </div>
+        ${half === 'fruit' && (state.machines.fruit || []).length < 2
+          ? '<button type="button" class="live-sheet-btn" data-act="add-machine" data-half="fruit">＋第二台</button>'
+          : ''}
         <button type="button" class="live-sheet-btn" data-act="open-second">清單</button>
       </div>
-      <div class="live-cols">${cols || '<div class="empty-hint">請先在設定裡確認三台號碼</div>'}</div>
+      <div class="live-cols" data-n="${(state.machines[half] || []).length}">${cols || '<div class="empty-hint">請先在設定裡確認台別</div>'}</div>
       ${empty}
     </div>`;
 }
@@ -1995,9 +2103,10 @@ function renderSettings() {
           : 'Android：用 Chrome 打開右上角選單，選「安裝應用程式」或「加入主畫面」。安裝後舉牌可以用真正的全螢幕，螢幕也不易休眠。'
       }${deferredInstall ? '</div><button type="button" class="btn primary" style="width:100%;margin-top:8px" data-act="install">安裝到桌面</button>' : '</div>'}`;
 
-  const halfBlocks = ['morning', 'afternoon']
+  const halfBlocks = HALVES
     .map((half) => {
-      const editors = state.machines[half]
+      const list = state.machines[half] || [];
+      const editors = list
         .map((m, mi) => {
           const ranges = (m.ranges && m.ranges.length ? m.ranges : [{ start: null, end: null }])
             .map((r, ri) => {
@@ -2009,16 +2118,27 @@ function renderSettings() {
               </div>`;
             })
             .join('');
+          const removeBtn = half === 'fruit' && list.length > 1
+            ? `<button type="button" class="linkish" data-act="remove-machine" data-half="${half}" data-id="${m.id}">移除此台</button>`
+            : '';
           return `<div class="range-editor">
             <div class="name-row">
               <input id="n-${half}-${m.id}" value="${escapeHtml(m.name)}" data-act="mname" data-half="${half}" data-id="${m.id}" />
             </div>
             ${ranges}
             <button type="button" class="linkish" data-act="add-range" data-half="${half}" data-id="${m.id}">＋ 加一段號碼</button>
+            ${removeBtn}
           </div>`;
         })
         .join('');
-      return `<div class="setting-block"><h2>${halfLabel(half)}　三台號碼</h2>${editors}</div>`;
+      const addBtn = half === 'fruit' && list.length < 2
+        ? '<button type="button" class="btn" style="width:100%;margin-top:8px" data-act="add-machine" data-half="fruit">＋加第二台</button>'
+        : '';
+      const sub = half === 'fruit'
+        ? '<p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">這場通常 1–2 台，號碼區間先留空，抄號時再選台，之後可在這裡補上。</p>'
+        : '';
+      const heading = half === 'fruit' ? `${halfLabel(half)}　台別（1–2 台）` : `${halfLabel(half)}　三台號碼`;
+      return `<div class="setting-block"><h2>${heading}</h2>${sub}${editors}${addBtn}</div>`;
     })
     .join('');
 
@@ -2049,13 +2169,11 @@ function renderSettings() {
       </div>
     </div>
     ${halfBlocks}
-    ${['morning', 'afternoon'].map((half) => {
-      const title = half === 'afternoon' ? '下半場品項（瓜果、菇菌、水果）' : '上半場品項（大宗、水菜）';
-      const tally = catalogCounts()[half];
-      const built = (half === 'afternoon'
-        ? `內建 ${['瓜果','菇菌','水果','醃製'].map((g) => `${g} ${tally[g] || 0}`).join('、')}，共 ${(tally['瓜果']||0)+(tally['菇菌']||0)+(tally['水果']||0)+(tally['醃製']||0)} 項`
-        : `內建 大宗 ${tally['大宗'] || 0}、水菜 ${tally['水菜'] || 0}，共 ${(tally['大宗']||0)+(tally['水菜']||0)} 項`)
-        + '，依桃農近一年交易量排序，完整名單請在抄號頁搜尋。';
+    ${HALVES.map((half) => {
+      const title = half === 'fruit' ? '水果場品項（水果）'
+        : half === 'afternoon' ? '下半場品項（瓜果、菇菌、醃製）'
+        : '上半場品項（大宗、水菜）';
+      const built = catalogSummary(half);
       const customs = customItemsOf(half);
       const list = customs.length
         ? customs.map((n) => `<div class="custom-chip">
@@ -2115,6 +2233,7 @@ function renderSetup() {
     .join('');
   return `
     <div class="setup">
+      <img class="setup-logo" src="icons/icon-192.png" alt="" width="96" height="96" />
       <h1>拍賣標貨助手</h1>
       <p class="lead">請輸入我的承銷人代號（四位數）。只存在這支手機，舉牌時會用最大的字顯示給拍賣員看。</p>
       <div class="lot-display">
@@ -2547,7 +2666,14 @@ function onClick(e) {
       secondOpen = !secondOpen;
       render();
       break;
+    case 'add-machine':
+      addSessionMachine(btn.dataset.half || state.currentHalf);
+      break;
+    case 'remove-machine':
+      removeSessionMachine(btn.dataset.half || state.currentHalf, btn.dataset.id);
+      break;
     case 'half':
+      if (!isHalf(v)) break;
       state.currentHalf = v;
       draftMachineId = '';
       showMachinePicker = false;
