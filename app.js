@@ -16,6 +16,49 @@ const DEFAULT_ITEMS_AFTERNOON = [
 ];
 const DEFAULT_ITEMS = [...DEFAULT_ITEMS_MORNING, ...DEFAULT_ITEMS_AFTERNOON];
 
+// 桃農（AMIS 338）2026-11-02–11-15 交易量合計，公斤；9 個交易日，已排除進口。見 item-volumes.csv
+const ITEM_VOLUME = {
+  '高麗菜': 253561,
+  '大白菜': 104535,
+  '花椰菜': 67301,
+  '青花菜': 11851,
+  '胡蘿蔔': 45523,
+  '白蘿蔔': 66805,
+  '洋蔥': 6169,
+  '馬鈴薯': 17117,
+  '芋頭': 24423,
+  '薑': 9804,
+  '蒜': 11623,
+  '小白菜': 19311,
+  '青江菜': 11871,
+  '菠菜': 21523,
+  '空心菜': 26670,
+  '地瓜葉': 26795,
+  '蔥': 44175,
+  '芹菜': 21985,
+  '莧菜': 5908,
+  '奶油生菜': 3743,
+  'A菜': 4452,
+  '大陸妹': 4554,
+  '小黃瓜': 47463,
+  '大黃瓜': 33765,
+  '絲瓜': 8838,
+  '苦瓜': 41214,
+  '南瓜': 50147,
+  '冬瓜': 21246,
+  '胡瓜': 0,
+  '茄子': 17679,
+  '番茄': 54363,
+  '青椒': 12727,
+  '彩椒': 7798,
+  '玉米': 11552,
+  '毛豆': 843,
+  '四季豆': 7182,
+  '秋葵': 5112,
+  '豌豆': 1174,
+  '美人腿': 8639
+};
+
 const DEFAULT_MACHINES = {
   morning: [
     { id: 'm1', name: '第一台・大宗', ranges: [{ start: 1001, end: 1999 }] },
@@ -646,7 +689,18 @@ function migrateItemLists(merged) {
 }
 
 function defaultItems(half) {
-  return half === 'afternoon' ? DEFAULT_ITEMS_AFTERNOON : DEFAULT_ITEMS_MORNING;
+  const h = half || (typeof state !== 'undefined' && state.currentHalf) || 'morning';
+  const list = (h === 'afternoon' ? DEFAULT_ITEMS_AFTERNOON : DEFAULT_ITEMS_MORNING).slice();
+  list.sort((a, b) => {
+    const dg = itemGroup(a, null) - itemGroup(b, null);
+    if (dg) return dg;
+    return itemVolume(b) - itemVolume(a);
+  });
+  return list;
+}
+
+function itemVolume(name) {
+  return Number(ITEM_VOLUME[name] || 0);
 }
 
 function customItemsOf(half) {
@@ -682,37 +736,39 @@ function itemPreferGroup(half) {
 }
 
 function itemGroup(name, prefer) {
-  if (!prefer) return 1;
   const bulk = DEFAULT_ITEMS_BULK.includes(name);
   const leafy = DEFAULT_ITEMS_LEAFY.includes(name);
-  if (prefer === 'bulk') return bulk ? 0 : 1;
-  if (prefer === 'leafy') return leafy ? 0 : 1;
-  return 1;
+  if (prefer === 'bulk') return bulk ? 0 : leafy ? 1 : 2;
+  if (prefer === 'leafy') return leafy ? 0 : bulk ? 1 : 2;
+  if (bulk) return 0;
+  if (leafy) return 1;
+  return 2;
 }
 
 function allItems(half) {
   const h = half || state.currentHalf;
-  const seen = new Set();
-  const list = [];
-  for (const name of [...customItemsOf(h), ...defaultItems(h)]) {
-    const n = String(name || '').trim();
-    if (!n || seen.has(n)) continue;
-    seen.add(n);
-    list.push(n);
-  }
   const counts = itemCountsOf(h);
-  const customs = customItemsOf(h);
   const prefer = itemPreferGroup(h);
-  list.sort((a, b) => {
+  const defaults = defaultItems(h).slice();
+  defaults.sort((a, b) => {
     const dg = itemGroup(a, prefer) - itemGroup(b, prefer);
     if (dg) return dg;
-    const dc = (counts[b] || 0) - (counts[a] || 0);
-    if (dc) return dc;
-    const ac = customs.includes(a);
-    const bc = customs.includes(b);
-    if (ac !== bc) return ac ? -1 : 1;
-    return 0;
+    const dv = itemVolume(b) - itemVolume(a);
+    if (dv) return dv;
+    return (counts[b] || 0) - (counts[a] || 0);
   });
+  const defaultSet = new Set(defaults);
+  const customs = customItemsOf(h)
+    .map((n) => String(n || '').trim())
+    .filter((n) => n && !defaultSet.has(n));
+  customs.sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b, 'zh-Hant'));
+  const seen = new Set();
+  const list = [];
+  for (const name of [...customs, ...defaults]) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    list.push(name);
+  }
   return list;
 }
 
