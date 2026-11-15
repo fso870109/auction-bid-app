@@ -1978,6 +1978,12 @@ function renderModal() {
             return `<button type="button" class="prio-${p}${on}" data-act="set-prio" data-id="${escapeHtml(lot.id)}" data-v="${p}">${prioLabel(p)}</button>`;
           }).join('')}
         </div>
+        <div class="move-lot-row">
+          <div class="move-lot-label">移到別台</div>
+          ${state.machines[lot.half || state.currentHalf].filter((m) => m.id !== lot.machineId).map((m) =>
+            `<button type="button" class="action-btn" data-act="move-lot" data-id="${escapeHtml(lot.id)}" data-v="${escapeHtml(m.id)}">移到${escapeHtml(columnTitle(m, lot.half || state.currentHalf))}</button>`
+          ).join('')}
+        </div>
         ${flowBtn}
         <button type="button" class="action-btn" data-act="go-here" data-id="${escapeHtml(lot.id)}">打到這裡</button>
         ${secondBtn}
@@ -2211,6 +2217,10 @@ function onClick(e) {
     case 'set-prio':
       modal = null;
       setLotPriority(btn.dataset.id, v);
+      break;
+    case 'move-lot':
+      modal = null;
+      moveLotToMachine(btn.dataset.id, v);
       break;
     case 'undo':
       if (toastAction?.fn) toastAction.fn();
@@ -2498,9 +2508,15 @@ function syncViewportHeight() {
 }
 
 
-const ARM_MS = 180;
-const MENU_MS = 520;
-const DRAG_SLOP = 10;
+const HOLD_MS = 350;
+const ITEM_HOLD_MS = 520;
+const DRAG_SLOP = 12;
+
+function eventPoint(e) {
+  const tch = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+  if (tch) return { x: tch.clientX, y: tch.clientY, id: tch.identifier };
+  return { x: e.clientX, y: e.clientY, id: e.pointerId };
+}
 
 function clearPressTimers() {
   clearTimeout(longPressTimer);
@@ -2509,13 +2525,30 @@ function clearPressTimers() {
   armTimer = null;
 }
 
+function cancelPress() {
+  if (pressOrigin?.cell) pressOrigin.cell.classList.remove('armed');
+  clearPressTimers();
+  pressOrigin = null;
+}
+
+function lockLists() {
+  document.documentElement.classList.add('is-dragging');
+  document.querySelectorAll('.live-col-list').forEach((el) => {
+    el.style.overflow = 'hidden';
+  });
+}
+
 function cleanupDrag() {
+  document.documentElement.classList.remove('is-dragging');
+  document.querySelectorAll('.live-col-list').forEach((el) => {
+    el.style.overflow = '';
+  });
   if (dragState?.ghost) dragState.ghost.remove();
   document.querySelectorAll('.lot-cell.dragging, .lot-cell.armed, .live-col.drop-target, .live-col.dragging, .live-col.drop-before, .live-col.drop-after, .live-cols.drop-end').forEach((el) => {
     el.classList.remove('dragging', 'armed', 'drop-target', 'drop-before', 'drop-after', 'drop-end');
   });
   const capEl = dragState?.cell || dragState?.colEl;
-  if (capEl && dragState?.pointerId != null) {
+  if (capEl && dragState?.pointerId != null && capEl.releasePointerCapture) {
     try { capEl.releasePointerCapture(dragState.pointerId); } catch { /* ignore */ }
   }
   dragState = null;
@@ -2527,14 +2560,11 @@ function columnAtPoint(x, y) {
   return col || null;
 }
 
-function startLotDrag(e, cell, id) {
-  if (dragState) return;
-  clearPressTimers();
-  ignoreLotClick = true;
-  const rect = cell.getBoundingClientRect();
-  const ghost = cell.cloneNode(true);
-  ghost.classList.add('lot-ghost');
-  ghost.classList.remove('armed');
+function makeGhost(src, rect, className) {
+  const ghost = src.cloneNode(true);
+  ghost.classList.add(className);
+  ghost.classList.remove('armed', 'dragging');
+  ghost.querySelectorAll('.prog-pop').forEach((el) => el.remove());
   ghost.setAttribute('aria-hidden', 'true');
   ghost.style.position = 'fixed';
   ghost.style.left = rect.left + 'px';
@@ -2545,78 +2575,114 @@ function startLotDrag(e, cell, id) {
   ghost.style.zIndex = '2000';
   ghost.style.pointerEvents = 'none';
   document.body.appendChild(ghost);
+  return ghost;
+}
+
+function maybeCapture(el) {
+  if (pressOrigin?.pointerCap != null && el && el.setPointerCapture) {
+    try { el.setPointerCapture(pressOrigin.pointerCap); return pressOrigin.pointerCap; } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function startLotDrag(pt, cell, id) {
+  if (dragState) return;
+  clearPressTimers();
+  ignoreLotClick = true;
+  const rect = cell.getBoundingClientRect();
+  const ghost = makeGhost(cell, rect, 'lot-ghost');
   cell.classList.add('dragging');
   cell.classList.remove('armed');
+  lockLists();
+  const cap = maybeCapture(cell);
   dragState = {
     kind: 'lot',
     id,
     cell,
     ghost,
-    pointerId: e.pointerId,
-    grabX: e.clientX - rect.left,
-    grabY: e.clientY - rect.top
+    fromId: cell.closest('.live-col')?.dataset.id,
+    pointerId: cap,
+    grabX: pt.x - rect.left,
+    grabY: pt.y - rect.top,
+    startX: pt.x,
+    startY: pt.y,
+    lastX: pt.x,
+    lastY: pt.y,
+    moved: false
   };
-  try { cell.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   buzz(14);
-  moveLotDrag(e);
+  moveLotDrag(pt);
 }
 
-function moveLotDrag(e) {
+function moveLotDrag(pt) {
   if (!dragState) return;
-  if (e.cancelable) e.preventDefault();
+  dragState.lastX = pt.x;
+  dragState.lastY = pt.y;
+  const dx = pt.x - dragState.startX;
+  const dy = pt.y - dragState.startY;
+  if (dx * dx + dy * dy > DRAG_SLOP * DRAG_SLOP) dragState.moved = true;
   const g = dragState.ghost;
   if (g) {
-    g.style.left = e.clientX - dragState.grabX + 'px';
-    g.style.top = e.clientY - dragState.grabY + 'px';
+    g.style.left = pt.x - dragState.grabX + 'px';
+    g.style.top = pt.y - dragState.grabY + 'px';
   }
-  const col = columnAtPoint(e.clientX, e.clientY);
+  const col = columnAtPoint(pt.x, pt.y);
   document.querySelectorAll('.live-col.drop-target').forEach((el) => {
     if (el !== col) el.classList.remove('drop-target');
   });
   if (col) col.classList.add('drop-target');
 }
 
-function endLotDrag(e) {
+function endLotDrag(pt) {
   if (!dragState) return;
   const id = dragState.id;
-  const col = columnAtPoint(e.clientX, e.clientY);
-  const machineId = col?.querySelector('.live-col-list')?.dataset.id;
+  const fromId = dragState.fromId;
+  const moved = dragState.moved;
+  const x = pt && pt.x != null ? pt.x : dragState.lastX;
+  const y = pt && pt.y != null ? pt.y : dragState.lastY;
+  const col = columnAtPoint(x, y);
+  const machineId = col?.dataset.id || col?.querySelector('.live-col-list')?.dataset.id;
   cleanupDrag();
-  if (machineId) moveLotToMachine(id, machineId);
-  else render();
+  if (moved && machineId && machineId !== fromId) {
+    moveLotToMachine(id, machineId);
+  } else if (!moved) {
+    openLotActions(id);
+  } else {
+    render();
+  }
 }
 
-function startColDrag(e, col, id) {
+function startColDrag(pt, col, id) {
   if (dragState) return;
   clearPressTimers();
   const rect = col.getBoundingClientRect();
   const head = col.querySelector('.live-col-head');
-  const ghost = (head || col).cloneNode(true);
-  ghost.querySelectorAll('.prog-pop').forEach((el) => el.remove());
-  ghost.className = 'col-ghost';
-  ghost.setAttribute('aria-hidden', 'true');
-  ghost.style.position = 'fixed';
-  ghost.style.left = rect.left + 'px';
-  ghost.style.top = rect.top + 'px';
-  ghost.style.width = rect.width + 'px';
-  ghost.style.height = (head ? head.getBoundingClientRect().height : 36) + 'px';
-  ghost.style.margin = '0';
-  ghost.style.zIndex = '2000';
-  ghost.style.pointerEvents = 'none';
-  document.body.appendChild(ghost);
+  const headRect = head ? head.getBoundingClientRect() : rect;
+  const ghost = makeGhost(head || col, {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: headRect.height
+  }, 'col-ghost');
   col.classList.add('dragging');
+  lockLists();
+  const cap = maybeCapture(col);
   dragState = {
     kind: 'col',
     id,
     colEl: col,
     ghost,
-    pointerId: e.pointerId,
-    grabX: e.clientX - rect.left,
-    grabY: e.clientY - rect.top
+    pointerId: cap,
+    grabX: pt.x - rect.left,
+    grabY: pt.y - rect.top,
+    startX: pt.x,
+    startY: pt.y,
+    lastX: pt.x,
+    lastY: pt.y,
+    moved: false
   };
-  try { col.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   buzz(14);
-  moveColDrag(e);
+  moveColDrag(pt);
 }
 
 function paintColDrop(insertAt) {
@@ -2632,24 +2698,29 @@ function paintColDrop(insertAt) {
   }
 }
 
-function moveColDrag(e) {
+function moveColDrag(pt) {
   if (!dragState) return;
-  if (e.cancelable) e.preventDefault();
+  dragState.lastX = pt.x;
+  dragState.lastY = pt.y;
+  const dx = pt.x - dragState.startX;
+  const dy = pt.y - dragState.startY;
+  if (dx * dx + dy * dy > DRAG_SLOP * DRAG_SLOP) dragState.moved = true;
   const g = dragState.ghost;
   if (g) {
-    g.style.left = e.clientX - dragState.grabX + 'px';
-    g.style.top = e.clientY - dragState.grabY + 'px';
+    g.style.left = pt.x - dragState.grabX + 'px';
+    g.style.top = pt.y - dragState.grabY + 'px';
   }
-  paintColDrop(columnInsertIndex(e.clientX));
+  paintColDrop(columnInsertIndex(pt.x));
 }
 
-function endColDrag(e) {
+function endColDrag(pt) {
   if (!dragState) return;
   const id = dragState.id;
-  const insertAt = columnInsertIndex(e.clientX);
+  const moved = dragState.moved;
+  const x = pt && pt.x != null ? pt.x : dragState.lastX;
+  const insertAt = columnInsertIndex(x);
   cleanupDrag();
-  const half = state.currentHalf;
-  if (reorderMachine(half, id, insertAt)) {
+  if (moved && reorderMachine(state.currentHalf, id, insertAt)) {
     saveState();
     buzz([16, 40, 24]);
     toast('已調整台的順序');
@@ -2657,13 +2728,14 @@ function endColDrag(e) {
   render();
 }
 
-function onPointerDown(e) {
+function onPressStart(e, pt) {
   clearPressTimers();
   if (dragState) cleanupDrag();
-  pressOrigin = { x: e.clientX, y: e.clientY };
-  const itemBtn = e.target.closest('[data-act="pick-item"]');
-  const cell = e.target.closest('[data-act="cycle-lot"]');
-  const colHead = e.target.closest('.live-col-head');
+  const target = e.target && e.target.nodeType === 1 ? e.target : document.elementFromPoint(pt.x, pt.y);
+  pressOrigin = { x: pt.x, y: pt.y, pointerCap: e.pointerId };
+  const itemBtn = target && target.closest && target.closest('[data-act="pick-item"]');
+  const cell = target && target.closest && target.closest('[data-act="cycle-lot"]');
+  const colHead = target && target.closest && target.closest('.live-col-head');
   if (itemBtn) {
     const name = itemBtn.dataset.name;
     const half = state.currentHalf;
@@ -2671,15 +2743,20 @@ function onPointerDown(e) {
       longPressTimer = null;
       ignoreItemClick = true;
       openItemEditor(name, half);
-    }, 520);
+    }, ITEM_HOLD_MS);
     return;
   }
-  if (colHead && state.tab === 'live' && !showSettings && !modal && !e.target.closest('button, .prog-pop, input')) {
+  if (colHead && state.tab === 'live' && !showSettings && !modal && !(target.closest && target.closest('button, .prog-pop, input'))) {
     const col = colHead.closest('.live-col');
-    const id = col?.dataset.id;
+    const id = col && col.dataset.id;
     if (col && id) {
       pressOrigin.colEl = col;
       pressOrigin.colId = id;
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        if (!pressOrigin || pressOrigin.colId !== id || !col.isConnected || dragState) return;
+        startColDrag({ x: pressOrigin.x, y: pressOrigin.y, id: pt.id }, col, id);
+      }, HOLD_MS);
     }
     return;
   }
@@ -2687,54 +2764,39 @@ function onPointerDown(e) {
     const id = cell.dataset.id;
     pressOrigin.cell = cell;
     pressOrigin.id = id;
-    pressOrigin.armed = false;
-    armTimer = setTimeout(() => {
-      armTimer = null;
-      if (!pressOrigin || pressOrigin.id !== id || !cell.isConnected || dragState) return;
-      pressOrigin.armed = true;
-      cell.classList.add('armed');
-      buzz(8);
-    }, ARM_MS);
     longPressTimer = setTimeout(() => {
       longPressTimer = null;
-      clearTimeout(armTimer);
-      armTimer = null;
-      if (dragState) return;
-      cell.classList.remove('armed');
-      ignoreLotClick = true;
-      pressOrigin = null;
-      openLotActions(id);
-    }, MENU_MS);
+      if (!pressOrigin || pressOrigin.id !== id || !cell.isConnected || dragState) return;
+      cell.classList.add('armed');
+      startLotDrag({ x: pressOrigin.x, y: pressOrigin.y, id: pt.id }, cell, id);
+    }, HOLD_MS);
   }
 }
 
-function onPointerMove(e) {
+function onPressMove(e, pt) {
   if (dragState) {
-    if (dragState.kind === 'col') moveColDrag(e);
-    else moveLotDrag(e);
+    if (e.cancelable) e.preventDefault();
+    if (dragState.kind === 'col') moveColDrag(pt);
+    else moveLotDrag(pt);
     return;
   }
   if (!pressOrigin) return;
-  const dx = e.clientX - pressOrigin.x;
-  const dy = e.clientY - pressOrigin.y;
+  const dx = pt.x - pressOrigin.x;
+  const dy = pt.y - pressOrigin.y;
   const dist2 = dx * dx + dy * dy;
   if (pressOrigin.colEl && pressOrigin.colId) {
     if (dist2 > DRAG_SLOP * DRAG_SLOP && pressOrigin.colEl.isConnected) {
-      startColDrag(e, pressOrigin.colEl, pressOrigin.colId);
+      if (e.cancelable) e.preventDefault();
+      startColDrag(pt, pressOrigin.colEl, pressOrigin.colId);
     }
     return;
   }
   if (pressOrigin.cell && pressOrigin.id) {
-    // After a short hold, any movement starts a drag. Before that, cancel and let the column scroll.
+    // Before the hold finishes, cancel and let the column scroll.
     if (dist2 > DRAG_SLOP * DRAG_SLOP) {
-      if (pressOrigin.armed && pressOrigin.cell.isConnected) {
-        startLotDrag(e, pressOrigin.cell, pressOrigin.id);
-        return;
-      }
       pressOrigin.cell.classList.remove('armed');
       clearPressTimers();
       pressOrigin = { x: pressOrigin.x, y: pressOrigin.y };
-      return;
     }
     return;
   }
@@ -2742,16 +2804,58 @@ function onPointerMove(e) {
   if (dist2 > 64) clearPressTimers();
 }
 
-function onPointerUp(e) {
+function onPressEnd(e, pt) {
   if (dragState) {
-    if (dragState.kind === 'col') endColDrag(e);
-    else endLotDrag(e);
+    if (e.cancelable) e.preventDefault();
+    if (dragState.kind === 'col') endColDrag(pt);
+    else endLotDrag(pt);
     pressOrigin = null;
     return;
   }
-  if (pressOrigin?.cell) pressOrigin.cell.classList.remove('armed');
-  clearPressTimers();
-  pressOrigin = null;
+  cancelPress();
+}
+
+function onTouchStart(e) {
+  if (e.touches && e.touches.length > 1) {
+    if (dragState) cleanupDrag();
+    cancelPress();
+    return;
+  }
+  onPressStart(e, eventPoint(e));
+}
+
+function onTouchMove(e) {
+  onPressMove(e, eventPoint(e));
+}
+
+function onTouchEnd(e) {
+  onPressEnd(e, eventPoint(e));
+}
+
+function onTouchCancel(e) {
+  if (dragState) {
+    const pt = { x: dragState.lastX, y: dragState.lastY };
+    if (dragState.kind === 'col') endColDrag(pt);
+    else endLotDrag(pt);
+    pressOrigin = null;
+    return;
+  }
+  cancelPress();
+}
+
+function onPointerDown(e) {
+  if (e.pointerType === 'touch') return;
+  onPressStart(e, eventPoint(e));
+}
+
+function onPointerMove(e) {
+  if (e.pointerType === 'touch') return;
+  onPressMove(e, eventPoint(e));
+}
+
+function onPointerUp(e) {
+  if (e.pointerType === 'touch') return;
+  onPressEnd(e, eventPoint(e));
 }
 
 function bind() {
@@ -2782,10 +2886,17 @@ function bind() {
     }
   });
   document.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col-head')) {
+    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit')) {
       e.preventDefault();
     }
   });
+  document.addEventListener('selectstart', (e) => {
+    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list')) e.preventDefault();
+  });
+  document.addEventListener('touchstart', onTouchStart, { passive: true });
+  document.addEventListener('touchmove', onTouchMove, { passive: false });
+  document.addEventListener('touchend', onTouchEnd, { passive: false });
+  document.addEventListener('touchcancel', onTouchCancel, { passive: true });
   document.addEventListener('pointerdown', onPointerDown);
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', onPointerUp);
