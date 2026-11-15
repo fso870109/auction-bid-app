@@ -1016,21 +1016,21 @@ function renderNote() {
     } else if (hits.length === 1) {
       machineHint = hits[0].name;
     } else if (hits.length > 1) {
-      machineHint = '有多台符合，請選擇';
+      machineHint = '有多台符合，請選台';
       chipClass += ' warn';
     } else {
       const other = state.currentHalf === 'morning' ? 'afternoon' : 'morning';
       const otherHits = machinesMatching(parsed, other);
       if (otherHits.length) {
-        machineHint = `像是${halfLabel(other)}「${otherHits[0].name}」，請選擇台別`;
+        machineHint = `像是${halfLabel(other)}，請選台`;
         chipClass += ' warn';
       } else {
-        machineHint = '無法判斷台別，請選擇';
+        machineHint = '無法判斷，請選台';
         chipClass += ' warn';
       }
     }
   } else {
-    machineHint = '輸入貨號後會自動判斷台別';
+    machineHint = '輸入後自動判斷台別';
     chipClass += ' warn';
   }
 
@@ -1050,7 +1050,7 @@ function renderNote() {
           }
         )
         .join('')}</div>`
-    : `<div class="recent-row"><span class="empty-hint" style="padding:8px 0">還沒有抄號，輸入號碼後按「存」</span></div>`;
+    : '';
 
   const selectedLot = itemTargetId ? state.lots.find((l) => l.id === itemTargetId) : null;
   const activeItem = draftNum ? draftItem : (selectedLot?.item || '');
@@ -1093,15 +1093,16 @@ function renderNote() {
 
   return `
     <div class="note-screen">
-      <div class="lot-display">
-        <div class="h-label">貨號</div>
+      <div class="note-head">
         <div class="num${num ? '' : ' empty'}${dupFlash ? ' dup-flash' : ''}">${num ? escapeHtml(num) : '----'}</div>
         <div class="${chipClass}">${escapeHtml(machineHint)}</div>
-        ${picker}
       </div>
+      ${picker}
       ${recentHtml}
-      ${itemPick}
-      <div class="keypad">${keypad}</div>
+      <div class="note-body">
+        <div class="keypad">${keypad}</div>
+        ${itemPick}
+      </div>
       <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
       <div class="note-tools">
         <button type="button" class="auto" data-act="toggle-autosave">

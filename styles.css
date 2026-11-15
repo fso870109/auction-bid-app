@@ -946,12 +946,12 @@ input:focus, textarea:focus {
 }
 .result-group h3 .cnt { color: var(--muted); font-size: 12px; font-weight: 700; }
 
-/* 抄號 rapid-entry layout */
+/* 抄號 rapid-entry layout — compact head + left keypad / right items */
 .main.note-mode {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 8px 12px calc(var(--nav-h) + var(--safe-b) + 8px);
+  padding: 4px 8px calc(var(--nav-h) + var(--safe-b) + 4px);
 }
 .note-screen {
   flex: 1;
@@ -961,16 +961,77 @@ input:focus, textarea:focus {
   max-width: 560px;
   width: 100%;
   margin: 0 auto;
+  gap: 4px;
+  overflow: hidden;
 }
-.note-screen .lot-display { flex: 0 0 auto; padding-top: 2px; }
-.note-screen .lot-display .num { font-size: clamp(64px, 22vw, 96px); }
+
+/* One-line number + machine chip */
+.note-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 2px;
+}
+.note-head .num {
+  flex: 0 0 auto;
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  min-width: 3.2ch;
+  padding-right: 2px;
+  position: relative;
+  z-index: 1;
+}
+.note-head .num.empty { color: #5a5a5a; font-weight: 800; letter-spacing: 0.08em; }
+.note-head .machine-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.25;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.note-screen .machine-pick {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 4px;
+  justify-content: flex-start;
+  margin: 0;
+  padding: 0;
+}
+.note-screen .machine-pick button {
+  flex: 1 1 0;
+  min-height: 32px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* Compact recent chips, hidden when empty */
 .recent-row {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   overflow-x: auto;
-  padding: 4px 0 8px;
+  padding: 0;
   flex: 0 0 auto;
-  min-height: 48px;
+  min-height: 0;
+  align-items: center;
   -webkit-overflow-scrolling: touch;
 }
 .recent-row::-webkit-scrollbar { display: none; }
@@ -978,67 +1039,110 @@ input:focus, textarea:focus {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  height: 30px;
   background: var(--bg-card);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 4px 4px 4px 12px;
+  padding: 0 2px 0 8px;
   font-weight: 800;
-  font-size: 15px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 .recent-chip .mch {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  margin-left: 2px;
+  margin-left: 1px;
 }
 .recent-chip .del {
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: #2a2a2a;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: #ccc;
+  line-height: 1;
 }
 .recent-chip .del:active { background: var(--red); color: #fff; }
-.note-screen .keypad {
+.recent-chip.on {
+  border-color: var(--yellow);
+  background: #221f00;
+}
+.recent-chip .itm {
+  color: var(--yellow);
+  font-size: 11px;
+  font-weight: 800;
+  margin-left: 1px;
+}
+
+/* Two columns: keypad (priority) + item pick (scrolls) */
+.note-body {
   flex: 1 1 auto;
-  grid-auto-rows: 1fr;
-  min-height: 0;
-  margin-top: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(108px, 0.9fr);
+  gap: 6px;
+  min-height: calc(52px * 4 + 5px * 3);
+  align-items: stretch;
+  overflow: hidden;
+}
+.note-screen .keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(4, minmax(52px, 1fr));
+  gap: 5px;
+  margin: 0;
+  min-height: calc(52px * 4 + 5px * 3);
+  height: 100%;
+  min-width: 0;
 }
 .note-screen .key {
-  min-height: 0;
-  height: 100%;
-  font-size: clamp(26px, 8vw, 36px);
+  min-height: 52px;
+  height: auto;
+  width: 100%;
+  font-size: clamp(22px, 7.2vw, 34px);
+  border-radius: 10px;
+  padding: 0;
 }
+.note-screen .key.muted { font-size: clamp(13px, 4vw, 18px); }
+
+/* 存 sits under both columns, never overlaps */
 .note-screen .btn-save {
+  position: static;
   flex: 0 0 auto;
-  margin-top: 8px;
-  min-height: 64px;
-  font-size: 28px;
+  width: 100%;
+  margin: 0;
+  min-height: 48px;
+  height: 48px;
+  font-size: 22px;
+  border-radius: 12px;
+  letter-spacing: 0.1em;
 }
+
 .note-tools {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 6px;
+  margin: 0;
+  min-height: 28px;
 }
 .note-tools .auto {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: 800;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
 }
-.note-tools .toggle { width: 46px; height: 28px; }
-.note-tools .toggle i { width: 22px; height: 22px; top: 3px; }
-.note-tools .toggle.on i { left: 21px; }
+.note-tools .toggle { width: 42px; height: 24px; }
+.note-tools .toggle i { width: 18px; height: 18px; top: 3px; }
+.note-tools .toggle.on i { left: 20px; }
+.note-screen .remark { flex: 0 0 auto; margin: 0; }
+.note-screen .remark input { min-height: 36px; font-size: 14px; }
+
 .dup-flash { animation: dupshake 0.35s ease; }
 @keyframes dupshake {
   0%, 100% { transform: translateX(0); }
@@ -1050,39 +1154,54 @@ input:focus, textarea:focus {
   user-select: none;
 }
 
-/* 品項快選 */
+/* 品項快選：右側直向捲動、兩欄 */
 .item-pick-wrap {
-  flex: 0 0 auto;
-  margin: 0 0 2px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
 }
 .item-pick-label {
-  font-size: 11px;
+  flex: 0 0 auto;
+  font-size: 10px;
   font-weight: 800;
   color: var(--muted);
-  margin-bottom: 4px;
-  letter-spacing: 0.04em;
+  margin: 0 0 4px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .item-pick {
+  flex: 1 1 auto;
   display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(2, minmax(44px, auto));
-  grid-auto-columns: minmax(76px, 1fr);
-  gap: 6px;
-  overflow-x: auto;
-  padding: 0 0 4px;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: row;
+  grid-auto-rows: minmax(36px, auto);
+  align-content: start;
+  gap: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0;
+  min-height: 0;
   -webkit-overflow-scrolling: touch;
 }
-.item-pick::-webkit-scrollbar { height: 0; }
+.item-pick::-webkit-scrollbar { width: 0; height: 0; }
 .item-btn {
-  min-height: 44px;
-  padding: 6px 8px;
-  border-radius: 10px;
+  min-height: 36px;
+  padding: 2px 3px;
+  border-radius: 8px;
   background: var(--bg-card);
   border: 1px solid var(--line);
   font-weight: 800;
-  font-size: 14px;
+  font-size: 12px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .item-btn:active { background: var(--bg-press); transform: scale(0.97); }
 .item-btn.on {
@@ -1091,16 +1210,7 @@ input:focus, textarea:focus {
   border-color: var(--yellow);
 }
 .item-btn.custom { border-style: dashed; }
-.recent-chip.on {
-  border-color: var(--yellow);
-  background: #221f00;
-}
-.recent-chip .itm {
-  color: var(--yellow);
-  font-size: 13px;
-  font-weight: 800;
-  margin-left: 2px;
-}
+
 .custom-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .custom-chip {
   display: flex;
