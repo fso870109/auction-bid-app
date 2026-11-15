@@ -1,15 +1,17 @@
-const CACHE = 'auction-bid-v12';
+const CACHE = 'auction-bid-v13';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './items-catalog.js',
   './manifest.json',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
-  './icons/apple-touch-icon.png'
+  './icons/apple-touch-icon.png',
+  './fonts/archivo-black.woff2'
 ];
 
 self.addEventListener('install', (event) => {

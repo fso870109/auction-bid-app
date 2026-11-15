@@ -3,61 +3,219 @@
 const STORAGE_KEY = 'ty-auction-bid-v1';
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
-const DEFAULT_ITEMS_BULK = [
-  '高麗菜', '大白菜', '花椰菜', '青花菜', '胡蘿蔔', '白蘿蔔', '洋蔥', '馬鈴薯', '芋頭', '薑', '蒜'
-];
-const DEFAULT_ITEMS_LEAFY = [
-  '小白菜', '青江菜', '菠菜', '空心菜', '地瓜葉', '蔥', '芹菜', '莧菜', '奶油生菜', 'A菜', '大陸妹'
-];
-const DEFAULT_ITEMS_MORNING = [...DEFAULT_ITEMS_BULK, ...DEFAULT_ITEMS_LEAFY];
-const DEFAULT_ITEMS_AFTERNOON = [
-  '小黃瓜', '大黃瓜', '絲瓜', '苦瓜', '南瓜', '冬瓜', '胡瓜', '茄子', '番茄',
-  '青椒', '彩椒', '玉米', '毛豆', '四季豆', '秋葵', '豌豆', '美人腿'
-];
-const DEFAULT_ITEMS = [...DEFAULT_ITEMS_MORNING, ...DEFAULT_ITEMS_AFTERNOON];
-
-// 桃農（AMIS 338）2026-11-02–11-15 交易量合計，公斤；9 個交易日，已排除進口。見 item-volumes.csv
-const ITEM_VOLUME = {
-  '高麗菜': 253561,
-  '大白菜': 104535,
-  '花椰菜': 67301,
-  '青花菜': 11851,
-  '胡蘿蔔': 45523,
-  '白蘿蔔': 66805,
-  '洋蔥': 6169,
-  '馬鈴薯': 17117,
-  '芋頭': 24423,
-  '薑': 9804,
-  '蒜': 11623,
-  '小白菜': 19311,
-  '青江菜': 11871,
-  '菠菜': 21523,
-  '空心菜': 26670,
-  '地瓜葉': 26795,
-  '蔥': 44175,
-  '芹菜': 21985,
-  '莧菜': 5908,
-  '奶油生菜': 3743,
-  'A菜': 4452,
-  '大陸妹': 4554,
-  '小黃瓜': 47463,
-  '大黃瓜': 33765,
-  '絲瓜': 8838,
-  '苦瓜': 41214,
-  '南瓜': 50147,
-  '冬瓜': 21246,
-  '胡瓜': 0,
-  '茄子': 17679,
-  '番茄': 54363,
-  '青椒': 12727,
-  '彩椒': 7798,
-  '玉米': 11552,
-  '毛豆': 843,
-  '四季豆': 7182,
-  '秋葵': 5112,
-  '豌豆': 1174,
-  '美人腿': 8639
+const GROUP_RANK = {
+  morning: { '大宗': 0, '水菜': 1 },
+  afternoon: { '瓜果': 0, '菇菌': 1, '水果': 2, '醃製': 3 }
 };
+let itemQuery = '';
+let variantPick = null; // crop official name when variant sheet is open
+let itemPickScroll = 0;
+let resetItemPickScroll = false;
+
+function catalogHalfKey(half) {
+  return half === 'afternoon' ? 'a' : 'm';
+}
+
+function catalogCrops(half) {
+  const key = catalogHalfKey(half);
+  return (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : []).filter((c) => c.h === key);
+}
+
+function catalogNameSet(half) {
+  const set = new Set();
+  for (const c of catalogCrops(half)) {
+    set.add(c.n);
+    set.add(c.l);
+    for (const a of c.a || []) set.add(a);
+    for (const v of c.s || []) {
+      set.add(v.n);
+      set.add(v.l);
+      for (const a of v.a || []) set.add(a);
+    }
+  }
+  return set;
+}
+
+function findCrop(name, half) {
+  if (!name) return null;
+  const pools = half ? catalogCrops(half) : (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : []);
+  const exact = pools.find((c) => c.n === name || c.l === name) || null;
+  if (exact) return exact;
+  for (const c of pools) {
+    if ((c.a || []).includes(name)) return c;
+    if (name.startsWith(c.n + '-')) return c;
+    for (const v of c.s || []) {
+      if (v.n === name || v.l === name || (v.a || []).includes(name)) return c;
+    }
+  }
+  return null;
+}
+
+function itemDisplayName(name) {
+  if (!name) return '';
+  const crop = findCrop(name);
+  if (!crop) return name;
+  const v = (crop.s || []).find((x) => x.n === name || x.l === name || (x.a || []).includes(name));
+  if (!v || v.n === crop.n || v.l === crop.l || v.l === '其他') return crop.l;
+  return crop.l + ' ' + v.l;
+}
+
+function itemIsActive(crop, stored) {
+  if (!stored) return false;
+  if (stored === crop.l || stored === crop.n || (crop.a || []).includes(stored)) return true;
+  if (typeof stored === 'string' && stored.startsWith(crop.n + '-')) return true;
+  return (crop.s || []).some((v) => v.n === stored || v.l === stored || (v.a || []).includes(stored));
+}
+
+function cropMatchesQuery(crop, q) {
+  q = String(q || '').trim();
+  if (!q) return true;
+  const fields = [crop.n, crop.l, ...(crop.a || [])];
+  for (const v of crop.s || []) {
+    fields.push(v.n, v.l, ...(v.a || []));
+  }
+  if (q.length >= 2) return fields.some((f) => f && String(f).includes(q));
+  return fields.some((f) => f === q || (f && String(f).startsWith(q)));
+}
+
+function visibleCrops(half, q) {
+  const h = half || (state && state.currentHalf) || 'morning';
+  const counts = itemCountsOf(h);
+  const prefer = itemPreferGroup(h);
+  const ranks = Object.assign({}, GROUP_RANK[h] || GROUP_RANK.morning);
+  if (prefer === 'leafy') {
+    ranks['水菜'] = 0;
+    ranks['大宗'] = 1;
+  }
+  const list = catalogCrops(h).filter((c) => cropMatchesQuery(c, q));
+  list.sort((a, b) => {
+    const ga = ranks[a.g] ?? 9;
+    const gb = ranks[b.g] ?? 9;
+    if (ga !== gb) return ga - gb;
+    const za = a.v > 0 ? 0 : 1;
+    const zb = b.v > 0 ? 0 : 1;
+    if (za !== zb) return za - zb;
+    if (b.v !== a.v) return b.v - a.v;
+    const ca = counts[a.l] || counts[a.n] || 0;
+    const cb = counts[b.l] || counts[b.n] || 0;
+    if (cb !== ca) return cb - ca;
+    return String(a.l).localeCompare(String(b.l), 'zh-Hant');
+  });
+  return list;
+}
+
+function catalogCounts() {
+  const tally = { morning: {}, afternoon: {} };
+  for (const c of (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : [])) {
+    const half = c.h === 'a' ? 'afternoon' : 'morning';
+    tally[half][c.g] = (tally[half][c.g] || 0) + 1;
+  }
+  return tally;
+}
+
+function variantCount(crop) {
+  return (crop.s || []).length;
+}
+
+function shouldOpenVariants(crop) {
+  const useful = (crop.s || []).filter((v) => !v.imp && v.l !== '其他' && v.n !== crop.n);
+  return useful.length > 1;
+}
+
+function renderItemPicker(half, opts) {
+  opts = opts || {};
+  const h = half || state.currentHalf;
+  const active = opts.active || '';
+  const lotId = opts.lotId || '';
+  const inSheet = !!opts.inSheet;
+  const searchId = inSheet ? 'sheet-item-search' : 'item-search';
+  const q = itemQuery;
+  const counts = itemCountsOf(h);
+
+  const builtSet = catalogNameSet(h);
+  const customs = customItemsOf(h)
+    .map((n) => String(n || '').trim())
+    .filter((n) => n && !builtSet.has(n))
+    .filter((n) => {
+      if (!q) return true;
+      if (q.length >= 2) return n.includes(q);
+      return n === q || n.startsWith(q);
+    });
+  customs.sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b, 'zh-Hant'));
+
+  const crops = visibleCrops(h, q);
+  const parts = [];
+  if (customs.length) {
+    parts.push('<div class="item-group-h">自己輸入</div>');
+    for (const name of customs) {
+      const on = active === name ? ' on' : '';
+      const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
+      parts.push(
+        `<button type="button" class="item-btn custom${on}" data-act="pick-item" data-name="${escapeHtml(name)}"${lotAttr}>${escapeHtml(name)}</button>`
+      );
+    }
+  }
+
+  let lastGroup = null;
+  for (const crop of crops) {
+    if (crop.g !== lastGroup) {
+      lastGroup = crop.g;
+      parts.push(`<div class="item-group-h">${escapeHtml(crop.g)}</div>`);
+    }
+    const on = itemIsActive(crop, active) ? ' on' : '';
+    const badge = shouldOpenVariants(crop) ? '<span class="var-n">▾</span>' : '';
+    const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
+    parts.push(
+      `<button type="button" class="item-btn${on}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}</button>`
+    );
+  }
+  if (!crops.length && !customs.length) {
+    parts.push('<div class="item-group-h">沒有符合的品項</div>');
+  }
+  const addLot = lotId ? ` data-id="${escapeHtml(lotId)}" data-half="${h}"` : '';
+  parts.push(`<button type="button" class="item-btn item-add" data-act="type-item"${addLot}>＋自己輸入</button>`);
+
+  let sheet = '';
+  if (variantPick) {
+    const crop = catalogCrops(h).find((c) => c.n === variantPick) || findCrop(variantPick, h);
+    if (crop) {
+      const vars = (crop.s || []).slice();
+      const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
+      const vBtns = [
+        `<button type="button" class="item-btn${active === crop.l || active === crop.n ? ' on' : ''}" data-act="pick-item" data-name="${escapeHtml(crop.l)}"${lotAttr}>不指定品種</button>`
+      ];
+      for (const v of vars) {
+        const on = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
+        const imp = v.imp ? ' imp' : '';
+        let label = v.l || '';
+        if (v.imp) {
+          const rest = String(label).replace(/^進口\s*/, '');
+          label = rest ? '進口 ' + rest : '進口';
+        }
+        vBtns.push(
+          `<button type="button" class="item-btn${on}${imp}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(label)}</button>`
+        );
+      }
+      sheet = `<div class="var-sheet">
+        <div class="var-sheet-head">
+          <button type="button" class="var-back" data-act="close-vars">返回</button>
+          <div class="var-title">${escapeHtml(crop.l)}</div>
+        </div>
+        <div class="var-sheet-list">${vBtns.join('')}</div>
+      </div>`;
+    }
+  }
+
+  const hintOpt = opts.hint != null
+    ? `<div class="item-pick-label">${escapeHtml(opts.hint)}</div>`
+    : '';
+  return `<div class="item-pick-wrap${inSheet ? ' in-sheet' : ''}">
+      ${hintOpt}
+      <input id="${searchId}" class="item-search" type="search" enterkeyhint="search" placeholder="搜尋品項" value="${escapeHtml(q)}" data-act="item-search" autocomplete="off" />
+      <div class="item-pick${inSheet ? ' sheet-items' : ''}">${parts.join('')}</div>
+      ${sheet}
+    </div>`;
+}
 
 const DEFAULT_MACHINES = {
   morning: [
@@ -574,6 +732,9 @@ function openPickItemForLot(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
   modal = { type: 'pick-item', id, half: lot.half || state.currentHalf };
+  itemQuery = '';
+  variantPick = null;
+  resetItemPickScroll = true;
   render();
 }
 
@@ -646,7 +807,7 @@ function recentLots() {
 
 function lotLabel(lot) {
   if (!lot) return '';
-  return lot.item ? `${lot.number} ${lot.item}` : String(lot.number);
+  return lot.item ? `${lot.number} ${itemDisplayName(lot.item)}` : String(lot.number);
 }
 
 function migrateItemLists(merged) {
@@ -690,17 +851,15 @@ function migrateItemLists(merged) {
 
 function defaultItems(half) {
   const h = half || (typeof state !== 'undefined' && state.currentHalf) || 'morning';
-  const list = (h === 'afternoon' ? DEFAULT_ITEMS_AFTERNOON : DEFAULT_ITEMS_MORNING).slice();
-  list.sort((a, b) => {
-    const dg = itemGroup(a, null) - itemGroup(b, null);
-    if (dg) return dg;
-    return itemVolume(b) - itemVolume(a);
-  });
-  return list;
+  return Array.from(catalogNameSet(h));
 }
 
 function itemVolume(name) {
-  return Number(ITEM_VOLUME[name] || 0);
+  const crop = findCrop(name);
+  if (!crop) return 0;
+  if (crop.l === name || crop.n === name || (crop.a || []).includes(name)) return Number(crop.v || 0);
+  const v = (crop.s || []).find((x) => x.n === name || x.l === name || (x.a || []).includes(name));
+  return Number((v && v.v) || crop.v || 0);
 }
 
 function customItemsOf(half) {
@@ -736,40 +895,25 @@ function itemPreferGroup(half) {
 }
 
 function itemGroup(name, prefer) {
-  const bulk = DEFAULT_ITEMS_BULK.includes(name);
-  const leafy = DEFAULT_ITEMS_LEAFY.includes(name);
+  const crop = findCrop(name);
+  const g = crop ? crop.g : '';
+  const leafy = g === '水菜';
+  const bulk = g === '大宗';
   if (prefer === 'bulk') return bulk ? 0 : leafy ? 1 : 2;
   if (prefer === 'leafy') return leafy ? 0 : bulk ? 1 : 2;
   if (bulk) return 0;
   if (leafy) return 1;
-  return 2;
+  const ranks = GROUP_RANK.afternoon;
+  return ranks[g] != null ? ranks[g] + 2 : 9;
 }
 
 function allItems(half) {
   const h = half || state.currentHalf;
-  const counts = itemCountsOf(h);
-  const prefer = itemPreferGroup(h);
-  const defaults = defaultItems(h).slice();
-  defaults.sort((a, b) => {
-    const dg = itemGroup(a, prefer) - itemGroup(b, prefer);
-    if (dg) return dg;
-    const dv = itemVolume(b) - itemVolume(a);
-    if (dv) return dv;
-    return (counts[b] || 0) - (counts[a] || 0);
-  });
-  const defaultSet = new Set(defaults);
+  const builtSet = catalogNameSet(h);
   const customs = customItemsOf(h)
     .map((n) => String(n || '').trim())
-    .filter((n) => n && !defaultSet.has(n));
-  customs.sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b, 'zh-Hant'));
-  const seen = new Set();
-  const list = [];
-  for (const name of [...customs, ...defaults]) {
-    if (seen.has(name)) continue;
-    seen.add(name);
-    list.push(name);
-  }
-  return list;
+    .filter((n) => n && !builtSet.has(n));
+  return [...customs, ...visibleCrops(h, '').map((c) => c.l)];
 }
 
 function isCustomItem(name, half) {
@@ -1313,17 +1457,24 @@ function fitPaddleDigits() {
   const el = document.getElementById('paddle-code');
   const box = document.getElementById('paddle-box');
   if (!el || !box) return;
+  if (document.fonts && !fitPaddleDigits._armed) {
+    fitPaddleDigits._armed = true;
+    Promise.resolve(document.fonts.load('400 200px "Paddle Black"'))
+      .then(() => document.fonts.ready)
+      .then(() => { if (paddleOpen) fitPaddleDigits(); })
+      .catch(() => {});
+  }
   applyCssLandscapeIfNeeded();
-  const w = box.clientWidth * 0.99;
-  const h = box.clientHeight * 0.98;
+  const w = box.clientWidth * 0.96;
+  const h = box.clientHeight * 0.94;
   if (w < 20 || h < 20) return;
   el.style.whiteSpace = 'nowrap';
-  el.style.lineHeight = '0.72';
-  el.style.letterSpacing = '-0.06em';
-  el.style.fontWeight = '900';
-  el.style.fontStretch = 'condensed';
+  el.style.lineHeight = '0.8';
+  el.style.letterSpacing = '0.05em';
+  el.style.fontWeight = '400';
+  el.style.fontFamily = '"Paddle Black", "Archivo Black", sans-serif';
   let lo = 24;
-  let hi = Math.max(w * 1.4, h * 1.6);
+  let hi = Math.max(w * 1.35, h * 1.5);
   for (let i = 0; i < 28; i++) {
     const mid = (lo + hi) / 2;
     el.style.fontSize = mid + 'px';
@@ -1508,6 +1659,24 @@ function formatRange(m) {
     .join('、') || '尚未設定號碼';
 }
 
+
+function captureItemPickScroll() {
+  const el = document.querySelector('.item-pick-wrap:not(.in-sheet) .item-pick, .item-pick-wrap.in-sheet .item-pick');
+  if (el && !resetItemPickScroll) itemPickScroll = el.scrollTop;
+}
+
+function restoreItemPickScroll() {
+  const el = document.querySelector('.item-pick-wrap:not(.in-sheet) .item-pick, .item-pick-wrap.in-sheet .item-pick');
+  if (!el) return;
+  if (resetItemPickScroll) {
+    el.scrollTop = 0;
+    itemPickScroll = 0;
+    resetItemPickScroll = false;
+    return;
+  }
+  el.scrollTop = itemPickScroll;
+}
+
 /* ---------- Render ---------- */
 function render() {
   const app = document.getElementById('app');
@@ -1524,6 +1693,7 @@ function render() {
   }
 
   captureLiveScroll();
+  captureItemPickScroll();
   const liveCls = state.tab === 'live' && !showSettings ? ' live-mode' : '';
   const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
   app.innerHTML =
@@ -1537,6 +1707,7 @@ function render() {
   paintToast(document.getElementById('toast'));
   restoreFocus(focusId, start, end);
   restoreLiveScroll();
+  restoreItemPickScroll();
   if (modal?.type === 'type-item') {
     const input = document.getElementById('type-item-input');
     if (input && document.activeElement !== input) {
@@ -1638,7 +1809,7 @@ function renderNote() {
         .map(
           (l) => {
             const on = itemTargetId === l.id ? ' on' : '';
-            const item = l.item ? `<span class="itm">${escapeHtml(l.item)}</span>` : '';
+            const item = l.item ? `<span class="itm">${escapeHtml(itemDisplayName(l.item))}</span>` : '';
             return `<button type="button" class="recent-chip${on}" data-act="select-lot" data-id="${escapeHtml(l.id)}">
               <span>${l.number}</span>
               ${item}
@@ -1655,16 +1826,7 @@ function renderNote() {
   const itemHint = draftNum
     ? (draftItem ? `下一筆 ${draftNum} → ${draftItem}` : '可先點品項，再存這號')
     : (selectedLot ? `為 ${selectedLot.number} 選品項` : '存號後點品項，或先點上面的貨號');
-  const itemPick = `<div class="item-pick-wrap">
-      <div class="item-pick-label">${escapeHtml(itemHint)}</div>
-      <div class="item-pick">${allItems(state.currentHalf)
-        .map((name) => {
-          const on = activeItem === name ? ' on' : '';
-          const custom = isCustomItem(name, state.currentHalf) ? ' custom' : '';
-          return `<button type="button" class="item-btn${on}${custom}" data-act="pick-item" data-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
-        })
-        .join('')}<button type="button" class="item-btn item-add" data-act="type-item">＋自己輸入</button></div>
-    </div>`;
+  const itemPick = renderItemPicker(state.currentHalf, { active: activeItem, hint: itemHint });
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
   const keypad = keys
@@ -1777,7 +1939,7 @@ function renderLive() {
               else if (near && d > 0) badge = `<span class="cell-badge">差${d}</span>`;
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
               const item = l.item
-                ? `<span class="cell-item">${escapeHtml(l.item)}</span>`
+                ? `<span class="cell-item">${escapeHtml(itemDisplayName(l.item))}</span>`
                 : '<span class="cell-item dim"></span>';
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
                 <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
@@ -1888,8 +2050,12 @@ function renderSettings() {
     </div>
     ${halfBlocks}
     ${['morning', 'afternoon'].map((half) => {
-      const title = half === 'afternoon' ? '下半場品項（瓜果）' : '上半場品項（大宗、水菜）';
-      const built = defaultItems(half).join('、');
+      const title = half === 'afternoon' ? '下半場品項（瓜果、菇菌、水果）' : '上半場品項（大宗、水菜）';
+      const tally = catalogCounts()[half];
+      const built = (half === 'afternoon'
+        ? `內建 ${['瓜果','菇菌','水果','醃製'].map((g) => `${g} ${tally[g] || 0}`).join('、')}，共 ${(tally['瓜果']||0)+(tally['菇菌']||0)+(tally['水果']||0)+(tally['醃製']||0)} 項`
+        : `內建 大宗 ${tally['大宗'] || 0}、水菜 ${tally['水菜'] || 0}，共 ${(tally['大宗']||0)+(tally['水菜']||0)} 項`)
+        + '，依桃農近一年交易量排序，完整名單請在抄號頁搜尋。';
       const customs = customItemsOf(half);
       const list = customs.length
         ? customs.map((n) => `<div class="custom-chip">
@@ -2051,14 +2217,11 @@ function renderModal() {
   if (modal.type === 'pick-item') {
     const lot = state.lots.find((l) => l.id === modal.id);
     const h = modal.half || lot?.half || state.currentHalf;
-    const items = allItems(h).map((name) => {
-      const on = lot?.item === name ? ' on' : '';
-      return `<button type="button" class="item-btn${on}" data-act="lot-item" data-id="${escapeHtml(modal.id)}" data-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
-    }).join('');
+    const picker = renderItemPicker(h, { active: lot?.item || '', lotId: modal.id || '', inSheet: true });
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet" data-stop="1">
         <h3>改品項${lot ? `　${lot.number}` : ''}</h3>
-        <div class="item-pick sheet-items">${items}<button type="button" class="item-btn item-add" data-act="type-item" data-id="${escapeHtml(modal.id || '')}" data-half="${h}">＋自己輸入</button></div>
+        ${picker}
         ${lot?.item ? `<button type="button" class="btn" style="width:100%;margin-top:8px" data-act="clear-lot-item" data-id="${escapeHtml(lot.id)}">清除品項</button>` : ''}
         <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="modal-cancel">取消</button>
       </div>
@@ -2187,7 +2350,48 @@ function onClick(e) {
         ignoreItemClick = false;
         break;
       }
+      variantPick = null;
+      if (btn.dataset.id) {
+        const lot = state.lots.find((l) => l.id === btn.dataset.id);
+        if (lot) {
+          if (modal?.type === 'pick-item') modal = null;
+          applyItemToLot(lot, btn.dataset.name);
+          render();
+          break;
+        }
+      }
       assignItem(btn.dataset.name);
+      break;
+    case 'pick-crop': {
+      if (ignoreItemClick) {
+        ignoreItemClick = false;
+        break;
+      }
+      const crop = findCrop(btn.dataset.crop, state.currentHalf) || findCrop(btn.dataset.crop);
+      if (!crop) break;
+      if (!shouldOpenVariants(crop)) {
+        variantPick = null;
+        const only = (crop.s || []).find((v) => !v.imp && v.l !== '其他' && v.n !== crop.n);
+        const name = crop.l;
+        if (btn.dataset.id) {
+          const lot = state.lots.find((l) => l.id === btn.dataset.id);
+          if (lot) {
+            if (modal?.type === 'pick-item') modal = null;
+            applyItemToLot(lot, name);
+            render();
+            break;
+          }
+        }
+        assignItem(name);
+        break;
+      }
+      variantPick = crop.n;
+      render();
+      break;
+    }
+    case 'close-vars':
+      variantPick = null;
+      render();
       break;
     case 'add-item': {
       const half = btn.dataset.half || state.currentHalf;
@@ -2349,6 +2553,9 @@ function onClick(e) {
       showMachinePicker = false;
       progressPopId = null;
       draftItem = '';
+      itemQuery = '';
+      variantPick = null;
+      resetItemPickScroll = true;
       saveState();
       render();
       break;
@@ -2493,6 +2700,12 @@ function onClick(e) {
 function onInput(e) {
   const el = e.target;
   const act = el.dataset.act;
+  if (act === 'item-search') {
+    itemQuery = el.value;
+    resetItemPickScroll = true;
+    render();
+    return;
+  }
   if (act === 'draft-note') {
     draftNote = el.value;
     return;

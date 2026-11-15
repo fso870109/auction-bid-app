@@ -1,4 +1,5 @@
 :root {
+  --paddle-font: "Paddle Black", "Archivo Black", sans-serif;
   --bg: #090909;
   --bg-elev: #121212;
   --bg-card: #1a1a1a;
@@ -20,6 +21,14 @@
   --radius: 14px;
   --font: "Noto Sans TC", "PingFang TC", "Heiti TC", "Microsoft JhengHei",
     system-ui, -apple-system, sans-serif;
+}
+
+@font-face {
+  font-family: "Paddle Black";
+  src: url("fonts/archivo-black.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
 }
 
 * {
@@ -798,12 +807,18 @@ input:focus, textarea:focus {
 }
 
 #paddle-code {
-  font-weight: 900;
+  font-family: var(--paddle-font);
+  font-weight: 400;
+  font-style: normal;
+  font-synthesis: none;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.08em;
-  line-height: 0.85;
-  font-family: "SF Pro Display", "Helvetica Neue", var(--font);
+  letter-spacing: 0.05em;
+  line-height: 0.8;
+  -webkit-text-stroke: 0.045em currentColor;
+  paint-order: stroke fill;
+  text-rendering: geometricPrecision;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 #paddle-hint {
@@ -938,9 +953,8 @@ input:focus, textarea:focus {
   border-color: #111;
 }
 #paddle-code {
-  font-family: "Roboto Mono", "Droid Sans Mono", "Noto Sans Mono", ui-monospace,
-    "SFMono-Regular", Menlo, Consolas, monospace;
-  font-weight: 900;
+  font-family: var(--paddle-font);
+  font-weight: 400;
   font-synthesis: none;
   text-rendering: geometricPrecision;
 }
@@ -1260,9 +1274,14 @@ input:focus, textarea:focus {
   border: 1px solid var(--line);
   font-weight: 800;
   font-size: 12px;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.15;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .item-btn:active { background: var(--bg-press); transform: scale(0.97); }
 .item-btn.on {
@@ -1271,6 +1290,96 @@ input:focus, textarea:focus {
   border-color: var(--yellow);
 }
 .item-btn.custom { border-style: dashed; }
+
+.item-search {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 32px;
+  margin: 0 0 4px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 0 10px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.item-search::placeholder { color: var(--muted); font-weight: 700; }
+.item-group-h {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted);
+  padding: 6px 2px 0;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+.item-btn .var-n {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 800;
+  opacity: 0.7;
+  margin-left: 1px;
+}
+.item-btn.on .var-n { opacity: 0.85; }
+.item-btn.imp { opacity: 0.72; font-weight: 700; }
+.item-pick-wrap { position: relative; }
+.item-pick-wrap.in-sheet {
+  height: auto;
+  max-height: 46vh;
+}
+.item-pick-wrap.in-sheet .item-pick.sheet-items {
+  max-height: none;
+  flex: 1 1 auto;
+}
+.var-sheet {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.var-sheet-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 6px;
+}
+.var-back {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  font-weight: 800;
+  font-size: 12px;
+}
+.var-title {
+  font-weight: 800;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.var-sheet-list {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: minmax(36px, auto);
+  align-content: start;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
 
 .custom-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .custom-chip {
@@ -1306,12 +1415,15 @@ input:focus, textarea:focus {
   padding: 0 1vw;
 }
 #paddle-code {
-  font-weight: 900;
-  letter-spacing: -0.06em;
-  line-height: 0.72;
-  -webkit-text-stroke: 0.012em currentColor;
-  text-shadow: 0 0 1px currentColor;
-  font-variation-settings: "wght" 900;
+  font-family: var(--paddle-font);
+  font-weight: 400;
+  font-style: normal;
+  font-synthesis: none;
+  letter-spacing: 0.05em;
+  line-height: 0.8;
+  -webkit-text-stroke: 0.045em currentColor;
+  paint-order: stroke fill;
+  text-rendering: geometricPrecision;
 }
 #paddle.css-landscape #paddle-stage {
   position: absolute;
