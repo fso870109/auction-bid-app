@@ -3,11 +3,18 @@
 const STORAGE_KEY = 'ty-auction-bid-v1';
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
-const DEFAULT_ITEMS = [
-  '高麗菜', '小白菜', '青江菜', '菠菜', '空心菜', '地瓜葉', '大白菜',
-  '花椰菜', '青花菜', '蔥', '蒜', '薑', '胡蘿蔔', '白蘿蔔',
-  '小黃瓜', '大黃瓜', '絲瓜', '苦瓜', '南瓜', '冬瓜', '茄子', '番茄', '青椒'
+const DEFAULT_ITEMS_BULK = [
+  '高麗菜', '大白菜', '花椰菜', '青花菜', '胡蘿蔔', '白蘿蔔', '洋蔥', '馬鈴薯', '芋頭', '薑', '蒜'
 ];
+const DEFAULT_ITEMS_LEAFY = [
+  '小白菜', '青江菜', '菠菜', '空心菜', '地瓜葉', '蔥', '芹菜', '莧菜', '奶油生菜', 'A菜', '大陸妹'
+];
+const DEFAULT_ITEMS_MORNING = [...DEFAULT_ITEMS_BULK, ...DEFAULT_ITEMS_LEAFY];
+const DEFAULT_ITEMS_AFTERNOON = [
+  '小黃瓜', '大黃瓜', '絲瓜', '苦瓜', '南瓜', '冬瓜', '胡瓜', '茄子', '番茄',
+  '青椒', '彩椒', '玉米', '毛豆', '四季豆', '秋葵', '豌豆', '美人腿'
+];
+const DEFAULT_ITEMS = [...DEFAULT_ITEMS_MORNING, ...DEFAULT_ITEMS_AFTERNOON];
 
 const DEFAULT_MACHINES = {
   morning: [
@@ -52,6 +59,12 @@ let ignoreItemClick = false;
 let longPressTimer = null;
 let showSettings = false;
 let secondOpen = true;
+let progressPopId = null;
+let ignoreLotClick = false;
+let pressOrigin = null;
+let toastAction = null;
+let undoStack = null;
+let liveScrolls = {};
 
 function todayStr() {
   const d = new Date();
@@ -107,7 +120,11 @@ function defaultState() {
     day: todayStr(),
     alerted: {},
     customItems: [],
-    itemCounts: {}
+    itemCounts: {},
+    customItemsByHalf: { morning: [], afternoon: [] },
+    itemCountsByHalf: { morning: {}, afternoon: {} },
+    progressV2: true,
+    itemsMigratedV2: true
   };
 }
 
@@ -130,6 +147,7 @@ function loadState() {
     if (!merged.alerted || typeof merged.alerted !== 'object') merged.alerted = {};
     if (!Array.isArray(merged.customItems)) merged.customItems = [];
     if (!merged.itemCounts || typeof merged.itemCounts !== 'object') merged.itemCounts = {};
+    migrateItemLists(merged);
     if (/^\d{4}$/.test(String(merged.sellerCode || ''))) merged.setupDone = true;
     if (merged.tab === 'track' || merged.tab === 'result' || merged.tab === 'settings') {
       merged.tab = 'live';
@@ -214,6 +232,170 @@ function isPassed(lot, cur) {
   return !!(lot && lot.status === 'pending' && !lot.secondMarket && cur != null && lot.number < cur);
 }
 
+function isFlow(lot) {
+  return !!(lot && lot.status === 'flow');
+}
+
+function columnTitle(m, half) {
+  const h = half || state.currentHalf;
+  const names = (state.machines[h] || []).map((x) => String(x.name || ''));
+  const strip = (n) => n.replace(/^第[一二三]台・/, '');
+  const short = strip(m.name || '');
+  const unique = names.map(strip).filter((s) => s === short).length === 1;
+  if (unique && short && !/^第[一二三]台$/.test(short)) return short;
+  const idx = (state.machines[h] || []).findIndex((x) => x.id === m.id);
+  return ['第一台', '第二台', '第三台'][idx] || short || m.name;
+}
+
+function columnLots(machineId, half) {
+  return todayLots(half)
+    .filter((l) => l.machineId === machineId)
+    .sort((a, b) => a.number - b.number || (a.createdAt || 0) - (b.createdAt || 0));
+}
+
+function captureLiveScroll() {
+  liveScrolls = {};
+  document.querySelectorAll('.live-col-list').forEach((el) => {
+    liveScrolls[el.dataset.id] = el.scrollTop;
+  });
+}
+
+function restoreLiveScroll() {
+  document.querySelectorAll('.live-col-list').forEach((el) => {
+    if (liveScrolls[el.dataset.id] != null) el.scrollTop = liveScrolls[el.dataset.id];
+  });
+}
+
+function snapshotLot(lot) {
+  if (!lot) return null;
+  return {
+    id: lot.id,
+    status: lot.status,
+    secondMarket: !!lot.secondMarket,
+    item: lot.item || '',
+    current: currentOf(lot.machineId, lot.half),
+    half: lot.half,
+    machineId: lot.machineId,
+    lot: { ...lot }
+  };
+}
+
+function restoreCurrent(snap) {
+  if (!snap) return;
+  const half = snap.half || state.currentHalf;
+  if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+  state.currentNumbers[half][snap.machineId] = snap.current;
+}
+
+function offerUndo(snap, msg) {
+  undoStack = snap;
+  toast(msg, 2800, { label: '復原', fn: undoLast });
+}
+
+function undoLast() {
+  const snap = undoStack;
+  undoStack = null;
+  toastMsg = '';
+  toastAction = null;
+  if (!snap) return;
+  if (snap.kind === 'delete' && snap.lot) {
+    if (!state.lots.some((l) => l.id === snap.lot.id)) state.lots.push(snap.lot);
+    restoreCurrent(snap);
+    saveState();
+    toast('已復原');
+    render();
+    return;
+  }
+  const lot = state.lots.find((l) => l.id === snap.id);
+  if (!lot) {
+    toast('無法復原');
+    return;
+  }
+  lot.status = snap.status;
+  lot.secondMarket = snap.secondMarket;
+  lot.item = snap.item;
+  restoreCurrent(snap);
+  saveState();
+  toast('已復原');
+  render();
+}
+
+function cycleLotStatus(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  const snap = snapshotLot(lot);
+  let next;
+  let label;
+  if (lot.status === 'flow') {
+    next = 'pending';
+    lot.secondMarket = false;
+    label = '已取消流標';
+  } else if (lot.status === 'pending') {
+    next = 'won';
+    lot.secondMarket = false;
+    label = '已標到';
+  } else if (lot.status === 'won') {
+    next = 'lost';
+    label = '沒標到';
+  } else {
+    next = 'pending';
+    label = '改回未拍';
+  }
+  lot.status = next;
+  if (next === 'won' || next === 'lost') jumpToLot(lot, { force: false });
+  saveState();
+  checkAlerts();
+  offerUndo(snap, `${label} ${lotLabel(lot)}`);
+  buzz(12);
+  render();
+}
+
+function markFlow(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  const snap = snapshotLot(lot);
+  lot.status = 'flow';
+  lot.secondMarket = true;
+  jumpToLot(lot, { force: false });
+  saveState();
+  checkAlerts();
+  offerUndo(snap, `流標・二市 ${lotLabel(lot)}`);
+  buzz(16);
+  render();
+}
+
+function cancelFlow(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || lot.status !== 'flow') return;
+  const snap = snapshotLot(lot);
+  lot.status = 'pending';
+  lot.secondMarket = false;
+  saveState();
+  offerUndo(snap, `已取消流標 ${lotLabel(lot)}`);
+  render();
+}
+
+function openLotActions(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  modal = { type: 'lot-actions', id };
+  buzz(20);
+  render();
+}
+
+function openPickItemForLot(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  modal = { type: 'pick-item', id, half: lot.half || state.currentHalf };
+  render();
+}
+
+function openSecondSheet() {
+  modal = { type: 'second-sheet' };
+  render();
+}
+
+
 function recentLots() {
   return state.lots
     .filter((l) => l.day === state.day && l.half === state.currentHalf)
@@ -226,41 +408,130 @@ function lotLabel(lot) {
   return lot.item ? `${lot.number} ${lot.item}` : String(lot.number);
 }
 
-function allItems() {
+function migrateItemLists(merged) {
+  if (!merged.customItemsByHalf || typeof merged.customItemsByHalf !== 'object') {
+    merged.customItemsByHalf = { morning: [], afternoon: [] };
+  }
+  for (const half of ['morning', 'afternoon']) {
+    if (!Array.isArray(merged.customItemsByHalf[half])) merged.customItemsByHalf[half] = [];
+  }
+  if (!merged.itemCountsByHalf || typeof merged.itemCountsByHalf !== 'object') {
+    merged.itemCountsByHalf = { morning: {}, afternoon: {} };
+  }
+  for (const half of ['morning', 'afternoon']) {
+    if (!merged.itemCountsByHalf[half] || typeof merged.itemCountsByHalf[half] !== 'object') {
+      merged.itemCountsByHalf[half] = {};
+    }
+  }
+  if (merged.itemsMigratedV2) return;
+  const old = Array.isArray(merged.customItems) ? merged.customItems : [];
+  for (const name of old) {
+    const n = String(name || '').trim();
+    if (!n) continue;
+    for (const half of ['morning', 'afternoon']) {
+      if (!defaultItems(half).includes(n) && !merged.customItemsByHalf[half].includes(n)) {
+        merged.customItemsByHalf[half].push(n);
+      }
+    }
+  }
+  const oldCounts = merged.itemCounts || {};
+  for (const [key, val] of Object.entries(oldCounts)) {
+    const n = Number(val) || 0;
+    if (!n) continue;
+    for (const half of ['morning', 'afternoon']) {
+      if (defaultItems(half).includes(key) || merged.customItemsByHalf[half].includes(key)) {
+        merged.itemCountsByHalf[half][key] = (merged.itemCountsByHalf[half][key] || 0) + n;
+      }
+    }
+  }
+  merged.itemsMigratedV2 = true;
+}
+
+function defaultItems(half) {
+  return half === 'afternoon' ? DEFAULT_ITEMS_AFTERNOON : DEFAULT_ITEMS_MORNING;
+}
+
+function customItemsOf(half) {
+  const h = half || state.currentHalf;
+  if (!state.customItemsByHalf) state.customItemsByHalf = { morning: [], afternoon: [] };
+  if (!Array.isArray(state.customItemsByHalf[h])) state.customItemsByHalf[h] = [];
+  return state.customItemsByHalf[h];
+}
+
+function itemCountsOf(half) {
+  const h = half || state.currentHalf;
+  if (!state.itemCountsByHalf) state.itemCountsByHalf = { morning: {}, afternoon: {} };
+  if (!state.itemCountsByHalf[h] || typeof state.itemCountsByHalf[h] !== 'object') {
+    state.itemCountsByHalf[h] = {};
+  }
+  return state.itemCountsByHalf[h];
+}
+
+function itemPreferGroup(half) {
+  if (half !== 'morning') return null;
+  let machineId = null;
+  const parsed = draftNum ? parseInt(draftNum, 10) : NaN;
+  if (Number.isFinite(parsed)) machineId = detectMachineId(parsed, half);
+  if (!machineId && itemTargetId) {
+    const lot = state.lots.find((l) => l.id === itemTargetId);
+    if (lot && lot.half === 'morning') machineId = lot.machineId;
+  }
+  if (!machineId) return null;
+  const name = machineById(machineId, half)?.name || '';
+  if (/大宗/.test(name)) return 'bulk';
+  if (/水菜/.test(name)) return 'leafy';
+  return null;
+}
+
+function itemGroup(name, prefer) {
+  if (!prefer) return 1;
+  const bulk = DEFAULT_ITEMS_BULK.includes(name);
+  const leafy = DEFAULT_ITEMS_LEAFY.includes(name);
+  if (prefer === 'bulk') return bulk ? 0 : 1;
+  if (prefer === 'leafy') return leafy ? 0 : 1;
+  return 1;
+}
+
+function allItems(half) {
+  const h = half || state.currentHalf;
   const seen = new Set();
   const list = [];
-  for (const name of [...(state.customItems || []), ...DEFAULT_ITEMS]) {
+  for (const name of [...customItemsOf(h), ...defaultItems(h)]) {
     const n = String(name || '').trim();
     if (!n || seen.has(n)) continue;
     seen.add(n);
     list.push(n);
   }
-  const counts = state.itemCounts || {};
+  const counts = itemCountsOf(h);
+  const customs = customItemsOf(h);
+  const prefer = itemPreferGroup(h);
   list.sort((a, b) => {
+    const dg = itemGroup(a, prefer) - itemGroup(b, prefer);
+    if (dg) return dg;
     const dc = (counts[b] || 0) - (counts[a] || 0);
     if (dc) return dc;
-    const ac = (state.customItems || []).includes(a);
-    const bc = (state.customItems || []).includes(b);
+    const ac = customs.includes(a);
+    const bc = customs.includes(b);
     if (ac !== bc) return ac ? -1 : 1;
     return 0;
   });
   return list;
 }
 
-function isCustomItem(name) {
-  return (state.customItems || []).includes(name);
+function isCustomItem(name, half) {
+  return customItemsOf(half || state.currentHalf).includes(name);
 }
 
-function bumpItemUse(name) {
+function bumpItemUse(name, half) {
   if (!name) return;
-  if (!state.itemCounts) state.itemCounts = {};
-  state.itemCounts[name] = (state.itemCounts[name] || 0) + 1;
+  const counts = itemCountsOf(half || state.currentHalf);
+  counts[name] = (counts[name] || 0) + 1;
 }
 
 function applyItemToLot(lot, name) {
   if (!lot) return;
   lot.item = name;
-  bumpItemUse(name);
+  bumpItemUse(name, lot.half || state.currentHalf);
   saveState();
   toast(`${lot.number}　${name}`);
   buzz(12);
@@ -298,39 +569,56 @@ function selectRecentForItem(id) {
   render();
 }
 
-function addCustomItem(name) {
+function addCustomItem(name, half) {
   name = String(name || '').trim();
+  const h = half || state.currentHalf;
   if (!name) {
     toast('請輸入品項名稱');
     return false;
   }
-  if (DEFAULT_ITEMS.includes(name) || (state.customItems || []).includes(name)) {
+  if (defaultItems(h).includes(name) || customItemsOf(h).includes(name)) {
     toast('這個品項已經有了');
     return false;
   }
-  state.customItems = state.customItems || [];
-  state.customItems.push(name);
+  customItemsOf(h).push(name);
   saveState();
   toast(`已新增「${name}」`);
   return true;
 }
 
-function renameCustomItem(oldName, newName) {
+function ensureCustomItem(name, half) {
+  name = String(name || '').trim();
+  const h = half || state.currentHalf;
+  if (!name) {
+    toast('請輸入品項名稱');
+    return '';
+  }
+  if (!defaultItems(h).includes(name) && !customItemsOf(h).includes(name)) {
+    customItemsOf(h).push(name);
+    saveState();
+  }
+  return name;
+}
+
+function renameCustomItem(oldName, newName, half) {
   newName = String(newName || '').trim();
+  const h = half || (modal && modal.half) || state.currentHalf;
   if (!newName) return false;
-  const i = (state.customItems || []).indexOf(oldName);
+  const list = customItemsOf(h);
+  const i = list.indexOf(oldName);
   if (i < 0) return false;
-  if (newName !== oldName && (DEFAULT_ITEMS.includes(newName) || state.customItems.includes(newName))) {
+  if (newName !== oldName && (defaultItems(h).includes(newName) || list.includes(newName))) {
     toast('這個品項已經有了');
     return false;
   }
-  state.customItems[i] = newName;
-  if (state.itemCounts && state.itemCounts[oldName] != null) {
-    state.itemCounts[newName] = (state.itemCounts[newName] || 0) + state.itemCounts[oldName];
-    delete state.itemCounts[oldName];
+  list[i] = newName;
+  const counts = itemCountsOf(h);
+  if (counts[oldName] != null) {
+    counts[newName] = (counts[newName] || 0) + counts[oldName];
+    delete counts[oldName];
   }
   for (const lot of state.lots) {
-    if (lot.item === oldName) lot.item = newName;
+    if (lot.item === oldName && (!lot.half || lot.half === h)) lot.item = newName;
   }
   if (draftItem === oldName) draftItem = newName;
   saveState();
@@ -338,18 +626,25 @@ function renameCustomItem(oldName, newName) {
   return true;
 }
 
-function deleteCustomItem(name) {
-  state.customItems = (state.customItems || []).filter((n) => n !== name);
+function deleteCustomItem(name, half) {
+  const h = half || (modal && modal.half) || state.currentHalf;
+  state.customItemsByHalf[h] = customItemsOf(h).filter((n) => n !== name);
   saveState();
   toast(`已刪「${name}」`);
 }
 
-function openItemEditor(name) {
-  if (!isCustomItem(name)) {
-    toast('內建品項不能改，可在設定新增自己的');
+function openItemEditor(name, half) {
+  const h = half || state.currentHalf;
+  if (!isCustomItem(name, h)) {
+    toast('內建品項不能改，可點「＋自己輸入」或到設定新增');
     return;
   }
-  modal = { type: 'edit-item', name, value: name };
+  modal = { type: 'edit-item', name, value: name, half: h };
+  render();
+}
+
+function openTypeItem(half, lotId) {
+  modal = { type: 'type-item', half: half || state.currentHalf, value: '', lotId: lotId || itemTargetId || null };
   render();
 }
 
@@ -368,21 +663,37 @@ function buzz(pattern) {
   }
 }
 
-function toast(msg, ms) {
+function toast(msg, ms, action) {
   toastMsg = msg;
+  toastAction = action || null;
   const el = document.getElementById('toast');
-  if (el) {
-    el.textContent = msg;
-    el.classList.remove('hidden');
-  } else {
-    render();
-  }
+  if (el) paintToast(el);
+  else render();
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     toastMsg = '';
-    const t = document.getElementById('toast');
-    if (t) t.classList.add('hidden');
-  }, ms || 1600);
+    toastAction = null;
+    const node = document.getElementById('toast');
+    if (node) {
+      node.classList.add('hidden');
+      node.innerHTML = '';
+    }
+  }, ms || (action ? 2800 : 1600));
+}
+
+function paintToast(el) {
+  if (!el) return;
+  el.classList.toggle('hidden', !toastMsg);
+  el.classList.toggle('has-action', !!(toastMsg && toastAction));
+  if (!toastMsg) {
+    el.innerHTML = '';
+    return;
+  }
+  if (toastAction) {
+    el.innerHTML = `<span>${escapeHtml(toastMsg)}</span><button type="button" data-act="undo">${escapeHtml(toastAction.label || '復原')}</button>`;
+  } else {
+    el.textContent = toastMsg;
+  }
 }
 
 function isSetupNeeded() {
@@ -506,11 +817,13 @@ function pickMachineForDraft(machineId) {
   commitLot(num, machineId, state.currentHalf);
 }
 
-function deleteLot(id) {
+function deleteLot(id, { undoable } = {}) {
   const lot = state.lots.find((l) => l.id === id);
+  const snap = lot ? { ...snapshotLot(lot), kind: 'delete' } : null;
   state.lots = state.lots.filter((l) => l.id !== id);
   saveState();
-  toast(lot ? `已刪 ${lot.number}` : '已刪除');
+  if (undoable && snap) offerUndo(snap, lot ? `已刪 ${lot.number}` : '已刪除');
+  else toast(lot ? `已刪 ${lot.number}` : '已刪除');
   render();
 }
 
@@ -551,19 +864,22 @@ function goToHere(id) {
 function moveToSecond(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
+  const snap = snapshotLot(lot);
   lot.secondMarket = true;
   secondOpen = true;
   saveState();
-  toast(`${lotLabel(lot)} 已轉二市`);
+  offerUndo(snap, `${lotLabel(lot)} 已轉二市`);
   render();
 }
 
 function returnFromSecond(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
+  const snap = snapshotLot(lot);
   lot.secondMarket = false;
+  if (lot.status === 'flow') lot.status = 'pending';
   saveState();
-  toast(`${lotLabel(lot)} 已移回`);
+  offerUndo(snap, `${lotLabel(lot)} 已移回`);
   render();
 }
 
@@ -832,13 +1148,17 @@ function resultText() {
   let lost = 0;
   let pending = 0;
   let passed = 0;
+  let flowN = 0;
   for (const half of ['morning', 'afternoon']) {
-    const lots = todayLots(half).filter((l) => !l.secondMarket);
-    if (!lots.length) continue;
+    const dayLots = todayLots(half);
+    const lots = dayLots.filter((l) => !l.secondMarket);
+    const hasFlow = dayLots.some((l) => l.status === 'flow');
+    if (!lots.length && !hasFlow) continue;
     lines.push('', halfLabel(half));
     for (const m of state.machines[half]) {
       const group = lots.filter((l) => l.machineId === m.id);
-      if (!group.length) continue;
+      const flowG = dayLots.filter((l) => l.machineId === m.id && l.status === 'flow');
+      if (!group.length && !flowG.length) continue;
       const cur = currentOf(m.id, half);
       const w = group.filter((l) => l.status === 'won');
       const x = group.filter((l) => l.status === 'lost');
@@ -848,23 +1168,31 @@ function resultText() {
       lost += x.length;
       passed += over.length;
       pending += p.length;
+      flowN += flowG.length;
       lines.push(m.name);
       if (w.length) lines.push(`  標到：${w.map(lotLabel).join('、')}（${w.length}）`);
       if (x.length) lines.push(`  沒標到：${x.map(lotLabel).join('、')}（${x.length}）`);
+      if (flowG.length) lines.push(`  流標・二市：${flowG.map(lotLabel).join('、')}（${flowG.length}）`);
       if (over.length) lines.push(`  過號：${over.map(lotLabel).join('、')}（${over.length}）`);
       if (p.length) lines.push(`  未拍：${p.map(lotLabel).join('、')}（${p.length}）`);
     }
   }
   const second = secondLots();
+  const flowS = second.filter((l) => l.status === 'flow');
+  const moved = second.filter((l) => l.status !== 'flow');
   if (second.length) {
     lines.push('', `二市（${second.length}）`);
-    for (const l of second) {
-      lines.push(`  ${lotLabel(l)}　${machineNameOf(l)}`);
+    if (flowS.length) lines.push(`  流標・二市：${flowS.map(lotLabel).join('、')}（${flowS.length}）`);
+    for (const l of moved) {
+      const why = l.status === 'lost' ? '沒標到轉入' : '過號轉入';
+      lines.push(`  ${lotLabel(l)}　${machineNameOf(l)}（${why}）`);
     }
   }
   if (won + lost + pending + passed + second.length === 0) lines.push('', '今天還沒有抄號。');
   else {
     let sum = `合計 標到 ${won}、沒標到 ${lost}`;
+    if (flowS.length) sum += `、流標・二市 ${flowS.length}`;
+    if (moved.length) sum += `、二市轉入 ${moved.length}`;
     if (passed) sum += `、過號 ${passed}`;
     sum += `、未拍 ${pending}`;
     if (second.length) sum += `、二市 ${second.length}`;
@@ -938,15 +1266,28 @@ function render() {
     return;
   }
 
+  captureLiveScroll();
+  const liveCls = state.tab === 'live' && !showSettings ? ' live-mode' : '';
+  const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
   app.innerHTML =
     renderHeader() +
-    `<main class="main${state.tab === 'note' && !showSettings ? ' note-mode' : ''}" id="main">${renderTab()}</main>` +
+    `<main class="main${noteCls}${liveCls}" id="main">${renderTab()}</main>` +
     renderNav() +
     (paddleOpen ? renderPaddle() : '') +
     (modal ? renderModal() : '') +
-    `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}">${escapeHtml(toastMsg)}</div>`;
+    `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
 
+  paintToast(document.getElementById('toast'));
   restoreFocus(focusId, start, end);
+  restoreLiveScroll();
+  if (modal?.type === 'type-item') {
+    const input = document.getElementById('type-item-input');
+    if (input && document.activeElement !== input) {
+      input.focus();
+      const len = input.value.length;
+      try { input.setSelectionRange(len, len); } catch { /* ignore */ }
+    }
+  }
   if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
 }
 
@@ -1059,13 +1400,13 @@ function renderNote() {
     : (selectedLot ? `為 ${selectedLot.number} 選品項` : '存號後點品項，或先點上面的貨號');
   const itemPick = `<div class="item-pick-wrap">
       <div class="item-pick-label">${escapeHtml(itemHint)}</div>
-      <div class="item-pick">${allItems()
+      <div class="item-pick">${allItems(state.currentHalf)
         .map((name) => {
           const on = activeItem === name ? ' on' : '';
-          const custom = isCustomItem(name) ? ' custom' : '';
+          const custom = isCustomItem(name, state.currentHalf) ? ' custom' : '';
           return `<button type="button" class="item-btn${on}${custom}" data-act="pick-item" data-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
         })
-        .join('')}</div>
+        .join('')}<button type="button" class="item-btn item-add" data-act="type-item">＋自己輸入</button></div>
     </div>`;
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
@@ -1130,126 +1471,88 @@ function renderLive() {
   const second = secondLots();
   let won = 0;
   let lost = 0;
-  let pending = 0;
-  let passed = 0;
   for (const l of allToday) {
-    if (l.secondMarket) continue;
     if (l.status === 'won') won += 1;
     else if (l.status === 'lost') lost += 1;
-    else if (isPassed(l, currentOf(l.machineId, l.half))) passed += 1;
-    else pending += 1;
   }
 
-  const cards = state.machines[half]
+  const cols = state.machines[half]
     .map((m) => {
       const cur = currentOf(m.id);
-      const lots = lotsForMachine(m.id, half);
-      const upcoming = lots.filter((l) => l.status === 'pending' && (cur == null || l.number >= cur));
-      const next = upcoming.slice().sort((a, b) => a.number - b.number)[0];
-      const dist = next && cur != null ? next.number - cur : null;
-      const isNow = dist === 0;
-      const isNear = dist != null && dist > 0 && dist <= gapN;
-      const cardClass = isNow ? 'machine-card now' : isNear ? 'machine-card alert' : 'machine-card';
-
-      const rank = (l) => {
-        if (l.status === 'pending' && !isPassed(l, cur)) return 0;
-        if (l.status === 'won' || l.status === 'lost') return 1;
-        return 2;
-      };
-      const sorted = lots.slice().sort((a, b) => rank(a) - rank(b) || a.number - b.number);
-
-      const list = sorted.length
-        ? sorted
+      const lots = columnLots(m.id, half);
+      const upcoming = lots.filter(
+        (l) => l.status === 'pending' && !l.secondMarket && (cur == null || l.number >= cur)
+      );
+      const next = upcoming[0] || null;
+      const title = columnTitle(m, half);
+      const curLabel = cur == null ? '—' : String(cur);
+      const pop = progressPopId === m.id
+        ? `<div class="prog-pop" data-stop="1">
+            <button type="button" class="step-btn" data-act="bump" data-id="${m.id}" data-d="-1">−</button>
+            <span class="prog-val">${curLabel}</span>
+            <button type="button" class="step-btn" data-act="bump" data-id="${m.id}" data-d="1">＋</button>
+            <button type="button" class="linkish" data-act="edit-cur" data-id="${m.id}">輸入</button>
+          </div>`
+        : '';
+      const cells = lots.length
+        ? lots
             .map((l) => {
-              const over = isPassed(l, cur);
+              const over = isPassed(l, cur) || (l.status === 'pending' && l.secondMarket && cur != null && l.number < cur);
               const isNext = next && l.id === next.id;
-              const now = isNext && isNow;
-              let cls = 'lot-item';
-              if (now) cls += ' now';
-              else if (isNext) cls += ' next';
-              if (over) cls += ' passed';
-              const d = cur != null ? l.number - cur : null;
-              let gap = '';
-              if (l.status === 'won') gap = '<span class="status-pill won">標到</span>';
-              else if (l.status === 'lost') gap = '<span class="status-pill lost">沒標到</span>';
-              else if (over) gap = '<span class="status-pill pending">過號</span>';
-              else if (d === 0) gap = '<span class="gap-tag now">就是這號！</span>';
-              else if (d != null && d > 0) gap = `<span class="gap-tag">還差 ${d} 號</span>`;
-              const bits = [l.item, l.note].filter(Boolean).map(escapeHtml);
-              const meta = bits.length ? bits.join('　') : '';
-              const canSecond = over || l.status === 'lost';
-              return `<div class="${cls}">
-                <div class="lot-top">
-                  <div>
-                    <div class="ln">${l.number}${gap}</div>
-                    <div class="meta">${meta || '&nbsp;'}</div>
-                  </div>
-                </div>
-                <div class="result-actions">
-                  <button type="button" class="btn-won${l.status === 'won' ? ' on' : ''}" data-act="status" data-id="${escapeHtml(l.id)}" data-v="won">標到</button>
-                  <button type="button" class="btn-lost${l.status === 'lost' ? ' on' : ''}" data-act="status" data-id="${escapeHtml(l.id)}" data-v="lost">沒標到</button>
-                </div>
-                <div class="lot-more">
-                  <button type="button" class="btn-here" data-act="go-here" data-id="${escapeHtml(l.id)}">打到這裡</button>
-                  ${canSecond ? `<button type="button" class="btn-second" data-act="to-second" data-id="${escapeHtml(l.id)}">轉二市</button>` : ''}
-                </div>
-              </div>`;
+              const d = cur != null && l.status === 'pending' && !l.secondMarket ? l.number - cur : null;
+              const near = d != null && d >= 0 && d <= gapN;
+              let cls = 'lot-cell';
+              if (l.status === 'won') cls += ' won';
+              else if (l.status === 'lost') cls += ' lost';
+              else if (l.status === 'flow') cls += ' flow';
+              else if (over) cls += ' passed';
+              if (isNext) cls += ' next';
+              if (l.status === 'lost') cls += ' strike';
+              let badge = '';
+              if (near && d === 0) badge = '<span class="cell-badge now">到</span>';
+              else if (near && d > 0) badge = `<span class="cell-badge">差${d}</span>`;
+              const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
+              const item = l.item
+                ? `<span class="cell-item">${escapeHtml(l.item)}</span>`
+                : '<span class="cell-item dim">　</span>';
+              return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
+                <span class="cell-top">
+                  <span class="cell-num">${l.number}</span>
+                  ${badge}${er}
+                </span>
+                ${item}
+              </button>`;
             })
             .join('')
-        : `<div class="empty-hint">這台還沒有抄號</div>`;
-
-      const curLabel = cur == null ? '尚未開始' : String(cur);
-      return `<section class="${cardClass}">
-        <div class="title">
-          <span>${escapeHtml(m.name)}</span>
-          <span class="ranges">${escapeHtml(formatRange(m))}</span>
+        : '<div class="col-empty">還沒抄號</div>';
+      return `<section class="live-col">
+        <div class="live-col-head">
+          <div class="col-name">${escapeHtml(title)}</div>
+          <button type="button" class="live-cur" data-act="toggle-progress" data-id="${m.id}">${curLabel}</button>
+          ${pop}
         </div>
-        <div class="cur-row mini">
-          <button type="button" class="step-btn" data-act="bump" data-id="${m.id}" data-d="-1">−</button>
-          <button type="button" class="cur-num" data-act="edit-cur" data-id="${m.id}">${curLabel}</button>
-          <button type="button" class="step-btn" data-act="bump" data-id="${m.id}" data-d="1">＋</button>
-        </div>
-        <div class="lot-list">${list}</div>
+        <div class="live-col-list" data-id="${m.id}">${cells}</div>
       </section>`;
     })
     .join('');
 
-  const secondList = second.length
-    ? second
-        .map((l) => `<div class="second-item">
-          <div>
-            <div class="ln">${escapeHtml(lotLabel(l))}</div>
-            <div class="meta">${escapeHtml(machineNameOf(l))}${l.half ? '　' + halfLabel(l.half) : ''}</div>
-          </div>
-          <button type="button" class="btn-here" data-act="from-second" data-id="${escapeHtml(l.id)}">移回</button>
-        </div>`)
-        .join('')
-    : '<div class="empty-hint">還沒有轉到二市的貨</div>';
+  const empty = allToday.length === 0
+    ? '<div class="live-empty">到「抄號」把紙上的號碼存進來，三台會並排顯示。</div>'
+    : '';
 
-  const hasLots = allToday.length > 0;
   return `
-    ${cards || '<div class="empty-hint">請先在設定裡確認三台號碼</div>'}
-    ${hasLots ? `<div class="summary">
-      <div class="h-label">今日統計（上、下半場合計）</div>
-      <div class="totals">
-        <div class="tot"><b>${won}</b><span>標到</span></div>
-        <div class="tot"><b>${lost}</b><span>沒標到</span></div>
-        <div class="tot"><b>${passed}</b><span>過號</span></div>
-        <div class="tot"><b>${pending}</b><span>未拍</span></div>
+    <div class="live-screen">
+      <div class="live-bar">
+        <div class="live-counts">
+          <span><b>${won}</b>標到</span>
+          <span><b>${lost}</b>沒標到</span>
+          <span><b>${second.length}</b>二市</span>
+        </div>
+        <button type="button" class="live-sheet-btn" data-act="open-second">清單</button>
       </div>
-      <div class="share-row">
-        <button type="button" class="btn" data-act="copy">複製文字</button>
-        <button type="button" class="btn primary" data-act="share">分享</button>
-      </div>
-    </div>` : '<div class="empty-hint">到「抄號」輸入貨號後，來這裡點標到或沒標到。</div>'}
-    <section class="second-section">
-      <button type="button" class="second-toggle" data-act="toggle-second">
-        <span>二市${second.length ? `（${second.length}）` : ''}</span>
-        <span class="muted">${secondOpen ? '收合' : '展開'}</span>
-      </button>
-      ${secondOpen ? secondList : ''}
-    </section>
-  `;
+      <div class="live-cols">${cols || '<div class="empty-hint">請先在設定裡確認三台號碼</div>'}</div>
+      ${empty}
+    </div>`;
 }
 
 function renderSettings() {
@@ -1317,27 +1620,27 @@ function renderSettings() {
       </div>
     </div>
     ${halfBlocks}
-    <div class="setting-block">
-      <h2>自訂品項</h2>
-      <p class="empty-hint" style="text-align:left;padding:0 0 8px">加在快選列前面。長按快選鈕也可改名或刪除。</p>
-      <div class="custom-item-row">
-        <input id="new-item" maxlength="12" placeholder="例如：玉米筍" data-act="new-item" />
-        <button type="button" class="btn primary" data-act="add-item">新增</button>
-      </div>
-      <div class="custom-list">${
-        (state.customItems || []).length
-          ? state.customItems
-              .map(
-                (n) => `<div class="custom-chip">
-                  <span>${escapeHtml(n)}</span>
-                  <button type="button" class="linkish" data-act="edit-item" data-name="${escapeHtml(n)}">改</button>
-                  <button type="button" class="linkish" data-act="del-item" data-name="${escapeHtml(n)}">刪</button>
-                </div>`
-              )
-              .join('')
-          : '<div class="empty-hint" style="padding:8px 0">還沒有自訂品項</div>'
-      }</div>
-    </div>
+    ${['morning', 'afternoon'].map((half) => {
+      const title = half === 'afternoon' ? '下半場品項（瓜果）' : '上半場品項（大宗、水菜）';
+      const built = defaultItems(half).join('、');
+      const customs = customItemsOf(half);
+      const list = customs.length
+        ? customs.map((n) => `<div class="custom-chip">
+            <span>${escapeHtml(n)}</span>
+            <button type="button" class="linkish" data-act="edit-item" data-name="${escapeHtml(n)}" data-half="${half}">改</button>
+            <button type="button" class="linkish" data-act="del-item" data-name="${escapeHtml(n)}" data-half="${half}">刪</button>
+          </div>`).join('')
+        : '<div class="empty-hint" style="padding:8px 0">還沒有自己輸入的品項</div>';
+      return `<div class="setting-block">
+        <h2>${title}</h2>
+        <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">內建：${escapeHtml(built)}</p>
+        <div class="custom-item-row">
+          <input id="new-item-${half}" maxlength="12" placeholder="例如：自己常標的菜" data-act="new-item" data-half="${half}" />
+          <button type="button" class="btn primary" data-act="add-item" data-half="${half}">新增</button>
+        </div>
+        <div class="custom-list">${list}</div>
+      </div>`;
+    }).join('')}
     <div class="setting-block">
       <h2>安裝到手機</h2>
       ${install || '<p class="empty-hint" style="text-align:left;padding:0">已用主畫面開啟。</p>'}
@@ -1441,6 +1744,96 @@ function renderModal() {
       </div>
     </div>`;
   }
+  if (modal.type === 'lot-actions') {
+    const lot = state.lots.find((l) => l.id === modal.id);
+    if (!lot) return '';
+    const flowBtn = lot.status === 'flow'
+      ? `<button type="button" class="action-btn" data-act="cancel-flow" data-id="${escapeHtml(lot.id)}">取消流標</button>`
+      : `<button type="button" class="action-btn flow" data-act="mark-flow" data-id="${escapeHtml(lot.id)}">流標・二市</button>`;
+    const secondBtn = lot.status === 'flow'
+      ? ''
+      : lot.secondMarket
+        ? `<button type="button" class="action-btn" data-act="from-second" data-id="${escapeHtml(lot.id)}">移回（取消轉二市）</button>`
+        : lot.status === 'won'
+          ? ''
+          : `<button type="button" class="action-btn" data-act="to-second" data-id="${escapeHtml(lot.id)}">轉二市</button>`;
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet action-sheet" data-stop="1">
+        <h3>${escapeHtml(lotLabel(lot))}</h3>
+        <p>${escapeHtml(machineNameOf(lot))}</p>
+        ${flowBtn}
+        <button type="button" class="action-btn" data-act="go-here" data-id="${escapeHtml(lot.id)}">打到這裡</button>
+        ${secondBtn}
+        <button type="button" class="action-btn" data-act="pick-lot-item" data-id="${escapeHtml(lot.id)}">改品項</button>
+        <button type="button" class="action-btn danger" data-act="del-lot-live" data-id="${escapeHtml(lot.id)}">刪除</button>
+        <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="modal-cancel">取消</button>
+      </div>
+    </div>`;
+  }
+  if (modal.type === 'pick-item') {
+    const lot = state.lots.find((l) => l.id === modal.id);
+    const h = modal.half || lot?.half || state.currentHalf;
+    const items = allItems(h).map((name) => {
+      const on = lot?.item === name ? ' on' : '';
+      return `<button type="button" class="item-btn${on}" data-act="lot-item" data-id="${escapeHtml(modal.id)}" data-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+    }).join('');
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet" data-stop="1">
+        <h3>改品項${lot ? `　${lot.number}` : ''}</h3>
+        <div class="item-pick sheet-items">${items}<button type="button" class="item-btn item-add" data-act="type-item" data-id="${escapeHtml(modal.id || '')}" data-half="${h}">＋自己輸入</button></div>
+        ${lot?.item ? `<button type="button" class="btn" style="width:100%;margin-top:8px" data-act="clear-lot-item" data-id="${escapeHtml(lot.id)}">清除品項</button>` : ''}
+        <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="modal-cancel">取消</button>
+      </div>
+    </div>`;
+  }
+  if (modal.type === 'type-item') {
+    const h = modal.half || state.currentHalf;
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet" data-stop="1">
+        <h3>自己輸入品項</h3>
+        <p>${halfLabel(h)}的快選清單</p>
+        <input id="type-item-input" maxlength="12" placeholder="品項名稱" value="${escapeHtml(modal.value || '')}" data-act="type-item-name" autocomplete="off" />
+        <div class="sheet-actions">
+          <button type="button" class="btn" data-act="modal-cancel">取消</button>
+          <button type="button" class="btn primary" data-act="type-item-ok">確定</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (modal.type === 'second-sheet') {
+    const second = secondLots();
+    const allToday = state.lots.filter((l) => l.day === state.day);
+    const won = allToday.filter((l) => l.status === 'won').length;
+    const lost = allToday.filter((l) => l.status === 'lost').length;
+    const list = second.length
+      ? second.map((l) => {
+          const tag = l.status === 'flow' ? '流標・二市' : (l.status === 'lost' ? '沒標到轉入' : '過號轉入');
+          return `<div class="second-item">
+            <div>
+              <div class="ln">${escapeHtml(lotLabel(l))}</div>
+              <div class="meta">${escapeHtml(machineNameOf(l))}　${escapeHtml(tag)}</div>
+            </div>
+            <button type="button" class="btn-here" data-act="from-second" data-id="${escapeHtml(l.id)}">移回</button>
+          </div>`;
+        }).join('')
+      : '<div class="empty-hint">還沒有轉到二市的貨</div>';
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet second-sheet" data-stop="1">
+        <h3>二市與今日摘要</h3>
+        <div class="live-counts sheet-counts">
+          <span><b>${won}</b>標到</span>
+          <span><b>${lost}</b>沒標到</span>
+          <span><b>${second.length}</b>二市</span>
+        </div>
+        <div class="second-list">${list}</div>
+        <div class="share-row" style="margin-top:12px">
+          <button type="button" class="btn" data-act="copy">複製文字</button>
+          <button type="button" class="btn primary" data-act="share">分享</button>
+        </div>
+        <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="modal-cancel">關閉</button>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -1464,6 +1857,13 @@ function onClick(e) {
   if (t.closest('[data-stop]') && !btn) {
     e.stopPropagation();
     return;
+  }
+  if (progressPopId && !t.closest('.prog-pop') && !t.closest('[data-act="toggle-progress"]')) {
+    progressPopId = null;
+    if (!btn) {
+      render();
+      return;
+    }
   }
   if (!btn) {
     if (t.closest('.overlay') && t.classList.contains('overlay')) {
@@ -1512,29 +1912,30 @@ function onClick(e) {
       assignItem(btn.dataset.name);
       break;
     case 'add-item': {
-      const input = document.getElementById('new-item');
-      if (addCustomItem(input ? input.value : '')) {
+      const half = btn.dataset.half || state.currentHalf;
+      const input = document.getElementById('new-item-' + half) || document.getElementById('new-item');
+      if (addCustomItem(input ? input.value : '', half)) {
         if (input) input.value = '';
         render();
       }
       break;
     }
     case 'edit-item':
-      openItemEditor(btn.dataset.name);
+      openItemEditor(btn.dataset.name, btn.dataset.half || state.currentHalf);
       break;
     case 'del-item':
-      deleteCustomItem(btn.dataset.name);
+      deleteCustomItem(btn.dataset.name, btn.dataset.half || state.currentHalf);
       render();
       break;
     case 'del-item-ok':
-      if (modal?.name) deleteCustomItem(modal.name);
+      if (modal?.name) deleteCustomItem(modal.name, modal.half);
       modal = null;
       render();
       break;
     case 'rename-item-ok': {
       const input = document.getElementById('edit-item-name');
       const next = input ? input.value : modal?.value;
-      if (modal?.name && renameCustomItem(modal.name, next)) {
+      if (modal?.name && renameCustomItem(modal.name, next, modal.half)) {
         modal = null;
         render();
       }
@@ -1560,13 +1961,85 @@ function onClick(e) {
       render();
       break;
     case 'go-here':
+      modal = null;
       goToHere(btn.dataset.id);
       break;
     case 'to-second':
+      modal = modal?.type === 'second-sheet' ? modal : null;
       moveToSecond(btn.dataset.id);
       break;
     case 'from-second':
+      if (modal?.type === 'lot-actions') modal = null;
       returnFromSecond(btn.dataset.id);
+      break;
+    case 'cycle-lot':
+      if (ignoreLotClick) {
+        ignoreLotClick = false;
+        break;
+      }
+      cycleLotStatus(btn.dataset.id);
+      break;
+    case 'undo':
+      if (toastAction?.fn) toastAction.fn();
+      else undoLast();
+      break;
+    case 'toggle-progress':
+      progressPopId = progressPopId === btn.dataset.id ? null : btn.dataset.id;
+      render();
+      break;
+    case 'mark-flow':
+      modal = null;
+      markFlow(btn.dataset.id);
+      break;
+    case 'cancel-flow':
+      modal = null;
+      cancelFlow(btn.dataset.id);
+      break;
+    case 'pick-lot-item':
+      openPickItemForLot(btn.dataset.id);
+      break;
+    case 'lot-item': {
+      const lot = state.lots.find((l) => l.id === btn.dataset.id);
+      modal = null;
+      if (lot) applyItemToLot(lot, btn.dataset.name);
+      render();
+      break;
+    }
+    case 'type-item':
+      openTypeItem(btn.dataset.half || state.currentHalf, btn.dataset.id || null);
+      break;
+    case 'type-item-ok': {
+      const input = document.getElementById('type-item-input');
+      const half = modal?.half || state.currentHalf;
+      const lotId = modal?.lotId;
+      const name = ensureCustomItem(input ? input.value : '', half);
+      modal = null;
+      if (name) {
+        const lot = lotId ? state.lots.find((l) => l.id === lotId) : null;
+        if (lot) {
+          applyItemToLot(lot, name);
+          render();
+        } else assignItem(name);
+      } else render();
+      break;
+    }
+    case 'clear-lot-item': {
+      const lot = state.lots.find((l) => l.id === btn.dataset.id);
+      if (lot) {
+        lot.item = '';
+        saveState();
+        toast(`${lot.number} 已清除品項`);
+      }
+      modal = null;
+      render();
+      break;
+    }
+    case 'open-second':
+      openSecondSheet();
+      break;
+    case 'del-lot-live':
+      modal = null;
+      deleteLot(btn.dataset.id, { undoable: true });
       break;
     case 'toggle-second':
       secondOpen = !secondOpen;
@@ -1576,6 +2049,8 @@ function onClick(e) {
       state.currentHalf = v;
       draftMachineId = '';
       showMachinePicker = false;
+      progressPopId = null;
+      draftItem = '';
       saveState();
       render();
       break;
@@ -1724,8 +2199,9 @@ function onInput(e) {
     draftNote = el.value;
     return;
   }
-  if (act === 'new-item' || act === 'edit-item-name') {
+  if (act === 'new-item' || act === 'edit-item-name' || act === 'type-item-name') {
     if (act === 'edit-item-name' && modal) modal.value = el.value;
+    if (act === 'type-item-name' && modal) modal.value = el.value;
     return;
   }
   if (act === 'seller') {
@@ -1803,35 +2279,69 @@ function bind() {
     }
   });
   document.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip')) {
+    if (e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell')) {
       e.preventDefault();
     }
   });
   document.addEventListener('pointerdown', (e) => {
-    const btn = e.target.closest('[data-act="pick-item"]');
-    if (!btn) return;
     clearTimeout(longPressTimer);
-    const name = btn.dataset.name;
-    longPressTimer = setTimeout(() => {
-      longPressTimer = null;
-      ignoreItemClick = true;
-      openItemEditor(name);
-    }, 520);
+    longPressTimer = null;
+    pressOrigin = { x: e.clientX, y: e.clientY };
+    const itemBtn = e.target.closest('[data-act="pick-item"]');
+    const cell = e.target.closest('[data-act="cycle-lot"]');
+    if (itemBtn) {
+      const name = itemBtn.dataset.name;
+      const half = state.currentHalf;
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        ignoreItemClick = true;
+        openItemEditor(name, half);
+      }, 520);
+      return;
+    }
+    if (cell) {
+      const id = cell.dataset.id;
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        ignoreLotClick = true;
+        openLotActions(id);
+      }, 480);
+    }
   });
-  document.addEventListener('pointerup', () => clearTimeout(longPressTimer));
-  document.addEventListener('pointercancel', () => clearTimeout(longPressTimer));
+  document.addEventListener('pointerup', () => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  });
+  document.addEventListener('pointercancel', () => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  });
   document.addEventListener('pointermove', (e) => {
-    if (!longPressTimer) return;
-    // cancel if finger drifts
-    if (e.movementX * e.movementX + e.movementY * e.movementY > 64) {
+    if (!longPressTimer || !pressOrigin) return;
+    const dx = e.clientX - pressOrigin.x;
+    const dy = e.clientY - pressOrigin.y;
+    if (dx * dx + dy * dy > 64) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.target?.dataset?.act === 'new-item' || e.target?.id === 'new-item')) {
+    if (e.key !== 'Enter') return;
+    const act = e.target?.dataset?.act;
+    const id = e.target?.id || '';
+    if (act === 'type-item-name' || id === 'type-item-input') {
       e.preventDefault();
-      if (addCustomItem(e.target.value)) {
+      const half = modal?.half || state.currentHalf;
+      const name = ensureCustomItem(e.target.value, half);
+      modal = null;
+      if (name) assignItem(name);
+      else render();
+      return;
+    }
+    if (act === 'new-item' || id.startsWith('new-item')) {
+      e.preventDefault();
+      const half = e.target.dataset.half || state.currentHalf;
+      if (addCustomItem(e.target.value, half)) {
         e.target.value = '';
         render();
       }
