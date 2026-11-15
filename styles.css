@@ -1,5 +1,5 @@
 :root {
-  --paddle-font: "Paddle Black", "Archivo Black", sans-serif;
+  --paddle-font: "Paddle Inter", Inter, sans-serif;
   --bg: #090909;
   --bg-elev: #121212;
   --bg-card: #1a1a1a;
@@ -24,9 +24,9 @@
 }
 
 @font-face {
-  font-family: "Paddle Black";
-  src: url("fonts/archivo-black.woff2") format("woff2");
-  font-weight: 400;
+  font-family: "Paddle Inter";
+  src: url("fonts/inter-800.woff2") format("woff2");
+  font-weight: 800;
   font-style: normal;
   font-display: swap;
 }
@@ -812,14 +812,13 @@ input:focus, textarea:focus {
 
 #paddle-code {
   font-family: var(--paddle-font);
-  font-weight: 400;
+  font-weight: 800;
   font-style: normal;
   font-synthesis: none;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.05em;
-  line-height: 0.8;
-  -webkit-text-stroke: 0.045em currentColor;
-  paint-order: stroke fill;
+  letter-spacing: 0.04em;
+  line-height: 0.82;
+  -webkit-text-stroke: 0;
   text-rendering: geometricPrecision;
   user-select: none;
   -webkit-user-select: none;
@@ -977,7 +976,7 @@ input:focus, textarea:focus {
 }
 #paddle-code {
   font-family: var(--paddle-font);
-  font-weight: 400;
+  font-weight: 800;
   font-synthesis: none;
   text-rendering: geometricPrecision;
 }
@@ -1439,13 +1438,12 @@ input:focus, textarea:focus {
 }
 #paddle-code {
   font-family: var(--paddle-font);
-  font-weight: 400;
+  font-weight: 800;
   font-style: normal;
   font-synthesis: none;
-  letter-spacing: 0.05em;
-  line-height: 0.8;
-  -webkit-text-stroke: 0.045em currentColor;
-  paint-order: stroke fill;
+  letter-spacing: 0.04em;
+  line-height: 0.82;
+  -webkit-text-stroke: 0;
   text-rendering: geometricPrecision;
 }
 #paddle.css-landscape #paddle-stage {

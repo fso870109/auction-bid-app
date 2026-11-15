@@ -1552,7 +1552,7 @@ function fitPaddleDigits() {
   if (!el || !box) return;
   if (document.fonts && !fitPaddleDigits._armed) {
     fitPaddleDigits._armed = true;
-    Promise.resolve(document.fonts.load('400 200px "Paddle Black"'))
+    Promise.resolve(document.fonts.load('800 200px "Paddle Inter"'))
       .then(() => document.fonts.ready)
       .then(() => { if (paddleOpen) fitPaddleDigits(); })
       .catch(() => {});
@@ -1562,10 +1562,11 @@ function fitPaddleDigits() {
   const h = box.clientHeight * 0.94;
   if (w < 20 || h < 20) return;
   el.style.whiteSpace = 'nowrap';
-  el.style.lineHeight = '0.8';
-  el.style.letterSpacing = '0.05em';
-  el.style.fontWeight = '400';
-  el.style.fontFamily = '"Paddle Black", "Archivo Black", sans-serif';
+  el.style.lineHeight = '0.82';
+  el.style.letterSpacing = '0.04em';
+  el.style.fontWeight = '800';
+  el.style.fontFamily = '"Paddle Inter", Inter, sans-serif';
+  el.style.webkitTextStroke = '0';
   let lo = 24;
   let hi = Math.max(w * 1.35, h * 1.5);
   for (let i = 0; i < 28; i++) {
