@@ -807,7 +807,15 @@ function defaultState() {
     planItems: [],
     boughtHistory: [],
     syncRoom: '',
+    syncLabel: '',
     peerId: '',
+    syncDeviceId: '',
+    syncDeviceToken: '',
+    syncRestoreToken: '',
+    syncRole: '',
+    syncPending: false,
+    syncDevices: [],
+    syncJoinRequests: [],
     syncQueue: [],
     syncKvTs: {},
     syncTombstones: { lots: {}, plan: {} }
@@ -870,8 +878,19 @@ function loadState() {
     }
     merged.planItems = normalizePlanItems(merged.planItems);
     merged.boughtHistory = normalizeBoughtHistory(merged.boughtHistory);
-    if (!/^\d{6}$/.test(String(merged.syncRoom || ''))) merged.syncRoom = '';
+    const roomCode = String(merged.syncRoom || '');
+    const isSecret = /^[A-Za-z0-9_-]{22,64}$/.test(roomCode);
+    const isLegacy = /^\d{6}$/.test(roomCode);
+    if (!isSecret && !isLegacy) merged.syncRoom = '';
+    if (typeof merged.syncLabel !== 'string') merged.syncLabel = '';
     if (typeof merged.peerId !== 'string') merged.peerId = '';
+    if (typeof merged.syncDeviceId !== 'string') merged.syncDeviceId = '';
+    if (typeof merged.syncDeviceToken !== 'string') merged.syncDeviceToken = '';
+    if (typeof merged.syncRestoreToken !== 'string') merged.syncRestoreToken = '';
+    if (merged.syncRole !== 'owner' && merged.syncRole !== 'member') merged.syncRole = '';
+    merged.syncPending = !!merged.syncPending;
+    if (!Array.isArray(merged.syncDevices)) merged.syncDevices = [];
+    if (!Array.isArray(merged.syncJoinRequests)) merged.syncJoinRequests = [];
     if (!Array.isArray(merged.syncQueue)) merged.syncQueue = [];
     if (!merged.syncKvTs || typeof merged.syncKvTs !== 'object') merged.syncKvTs = {};
     if (!merged.syncTombstones || typeof merged.syncTombstones !== 'object') {
@@ -2410,6 +2429,7 @@ function render() {
   }
   if (state.tab === 'live' && !showSettings) requestAnimationFrame(fitLotCellNames);
   if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
+  if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
 }
 
 function restoreFocus(focusId, start, end) {

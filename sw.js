@@ -1,4 +1,4 @@
-const CACHE = 'auction-bid-v21';
+const CACHE = 'auction-bid-v22';
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   './app.js',
   './items-catalog.js',
   './sync-core.js',
+  './qrcode.js',
   './sync.js',
   './manifest.json',
   './manifest.webmanifest',
