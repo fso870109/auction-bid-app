@@ -2176,3 +2176,112 @@ button.lot-cell {
 .plan-add input { min-height: 44px; font-size: 16px; }
 .plan-add-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .plan-add-btns .btn { min-height: 44px; font-weight: 800; }
+
+.plan-sec h2.plan-target { cursor: pointer; min-height: 32px; }
+.plan-sec h2.plan-target em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  color: #7dcca0;
+  margin-left: 6px;
+}
+.plan-sec.on h2.plan-target { color: #fff; }
+.plan-input-wrap { position: relative; margin-top: 8px; }
+.plan-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  background: #1a1a1a;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 5;
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.45);
+}
+.plan-suggest-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 800;
+  font-size: 15px;
+  border-bottom: 1px solid var(--line);
+  min-height: 44px;
+}
+.plan-suggest-item:last-child { border-bottom: 0; }
+.plan-suggest-item:active { background: #262626; }
+.plan-picks { margin: 0 0 8px; }
+.plan-picks.muted { margin-bottom: 4px; }
+.plan-picks-toggle {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 10px;
+  background: #171717;
+  border: 1px solid var(--line);
+  font-weight: 800;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text);
+}
+.plan-picks-toggle span {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #038736;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.plan-picks-toggle.dim {
+  color: var(--dim);
+  border-style: dashed;
+  pointer-events: none;
+}
+.plan-picks.open .plan-picks-toggle { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.plan-pick-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: #141414;
+  max-height: 132px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.plan-pick {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #1a1a1a;
+  font-weight: 800;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.plan-pick span {
+  font-size: 10px;
+  font-weight: 900;
+  color: var(--muted);
+}
+.plan-pick.on {
+  background: #038736;
+  border-color: #038736;
+  color: #fff;
+}
+.plan-pick.on span { color: #cfe9d8; }

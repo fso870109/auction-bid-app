@@ -330,6 +330,8 @@ let draftMachineId = '';
 let planOpen = false;
 let planHistoryPushed = false;
 let planDraft = '';
+let planPickOpen = false;
+let planAddTarget = 'tomorrow';
 let showMachinePicker = false;
 let paddleOpen = false;
 let wakeLock = null;
@@ -408,9 +410,204 @@ function normalizePlanItems(list) {
   return out;
 }
 
+function lotPlanText(lot) {
+  if (!lot || !lot.item) return '';
+  const name = itemDisplayName(lot.item);
+  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
+  return String(name + size).trim();
+}
+
+function normalizeBoughtHistory(list) {
+  if (!Array.isArray(list)) return [];
+  const cut = addDaysIso(todayStr(), -14);
+  const byDay = new Map();
+  for (const raw of list) {
+    if (!raw || !raw.day || raw.day < cut) continue;
+    const items = [];
+    for (const it of raw.items || []) {
+      const text = String(it.text || it.name || '').trim();
+      const count = Number(it.count) || 0;
+      if (!text || count < 1) continue;
+      items.push({ text, count });
+    }
+    if (!items.length) continue;
+    byDay.set(raw.day, { day: raw.day, items });
+  }
+  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+function rememberBoughtLots(lots) {
+  if (!state) return;
+  if (!Array.isArray(state.boughtHistory)) state.boughtHistory = [];
+  const daysInLots = new Set();
+  const groups = {};
+  for (const l of lots || []) {
+    if (l.status !== 'won' || !l.item) continue;
+    const text = lotPlanText(l);
+    if (!text) continue;
+    const day = l.day || state.day;
+    daysInLots.add(day);
+    if (!groups[day]) groups[day] = {};
+    groups[day][text] = (groups[day][text] || 0) + 1;
+  }
+  const byDay = new Map((state.boughtHistory || []).map((h) => [h.day, h]));
+  for (const day of daysInLots) {
+    const items = Object.entries(groups[day]).map(([text, count]) => ({ text, count }));
+    byDay.set(day, { day, items });
+  }
+  state.boughtHistory = normalizeBoughtHistory([...byDay.values()]);
+}
+
+function boughtCountsByDay() {
+  const map = new Map();
+  for (const h of state.boughtHistory || []) {
+    const inner = new Map();
+    for (const it of h.items || []) inner.set(it.text, it.count);
+    map.set(h.day, inner);
+  }
+  const daysWithLots = new Set((state.lots || []).map((l) => l.day).filter(Boolean));
+  for (const day of daysWithLots) {
+    const inner = new Map();
+    for (const l of state.lots || []) {
+      if (l.day !== day || l.status !== 'won' || !l.item) continue;
+      const text = lotPlanText(l);
+      if (!text) continue;
+      inner.set(text, (inner.get(text) || 0) + 1);
+    }
+    if (inner.size) map.set(day, inner);
+    else map.delete(day);
+  }
+  return map;
+}
+
+function planQuickPicks() {
+  const today = todayStr();
+  const byDay = boughtCountsByDay();
+  const days = [...byDay.keys()].sort().reverse();
+  const primary = days.find((d) => d < today) || days.find((d) => d === today) || days[0] || '';
+  const counts = new Map();
+  if (primary) {
+    for (const [text, n] of byDay.get(primary)) counts.set(text, (counts.get(text) || 0) + n);
+  }
+  const usedPrimary = counts.size > 0;
+  if (!usedPrimary) {
+    for (const day of days) {
+      for (const [text, n] of byDay.get(day)) counts.set(text, (counts.get(text) || 0) + n);
+    }
+  }
+  let source = 'none';
+  let label = '最近買過';
+  if (usedPrimary && primary === addDaysIso(today, -1)) {
+    source = 'yesterday';
+    label = '昨天買過';
+  } else if (usedPrimary && primary === today) {
+    source = 'today';
+    label = '今天買過';
+  } else if (usedPrimary) {
+    source = 'recent';
+    const [y, m, d] = primary.split('-').map(Number);
+    label = `${m}/${d} 買過`;
+  }
+  if (!counts.size) {
+    const seen = new Set();
+    const planned = (state.planItems || []).slice().reverse();
+    for (const p of planned) {
+      const text = String(p.text || '').trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      counts.set(text, 1);
+      if (counts.size >= 24) break;
+    }
+    if (counts.size) {
+      source = 'planned';
+      label = '最近預計';
+    }
+  }
+  const chips = [...counts.entries()].map(([text, count]) => ({
+    text,
+    count,
+    vol: itemVolume(text)
+  }));
+  chips.sort((a, b) => b.count - a.count || b.vol - a.vol || a.text.localeCompare(b.text, 'zh-Hant'));
+  return { source, label, day: primary || '', chips: chips.slice(0, 24) };
+}
+
+function planTargetDay(which) {
+  const today = todayStr();
+  return (which || planAddTarget) === 'today' ? today : tomorrowStr(today);
+}
+
+function activePlanItems() {
+  const today = todayStr();
+  const forDay = planTargetDay();
+  return (state.planItems || []).filter((p) => !p.done && (forDay === today ? p.forDay <= today : p.forDay > today));
+}
+
+function planHasText(text) {
+  const t = String(text || '').trim();
+  return activePlanItems().some((p) => p.text === t);
+}
+
+function addPlanText(text, which) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  const today = todayStr();
+  const target = which || planAddTarget || 'tomorrow';
+  const forDay = planTargetDay(target);
+  if (!Array.isArray(state.planItems)) state.planItems = [];
+  if ((state.planItems || []).some((p) => !p.done && p.text === value && p.forDay === forDay)) return false;
+  state.planItems.push({
+    id: uid(),
+    text: value,
+    forDay,
+    done: false,
+    doneOn: '',
+    createdOn: today
+  });
+  saveState();
+  return true;
+}
+
+function togglePlanPick(text) {
+  const value = String(text || '').trim();
+  if (!value) return;
+  const today = todayStr();
+  const forDay = planTargetDay();
+  if (!Array.isArray(state.planItems)) state.planItems = [];
+  const existing = state.planItems.find((p) => !p.done && p.text === value && (forDay === today ? p.forDay <= today : p.forDay > today));
+  if (existing) {
+    state.planItems = state.planItems.filter((p) => p.id !== existing.id);
+    saveState();
+    render();
+    return;
+  }
+  addPlanText(value);
+  render();
+}
+
+function planSuggestList(q) {
+  q = String(q || '').trim();
+  if (!q) return [];
+  const seen = new Set();
+  const out = [];
+  const halves = HALVES;
+  for (const half of halves) {
+    for (const crop of visibleCrops(half, q)) {
+      const label = crop.l || crop.n;
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      out.push(label);
+      if (out.length >= 8) return out;
+    }
+  }
+  return out;
+}
+
 function openPlan() {
   if (planOpen) return;
   planOpen = true;
+  planPickOpen = false;
+  planAddTarget = 'tomorrow';
   try {
     history.pushState({ auctionPlan: true }, '');
     planHistoryPushed = true;
@@ -505,11 +702,31 @@ function renderPlanScreen() {
       <div class="plan-text">${escapeHtml(p.text)}</div>
       <button type="button" class="plan-del" data-act="plan-del" data-id="${escapeHtml(p.id)}" aria-label="刪除">刪</button>
     </div>`;
-  const section = (title, hint, list, kind) => `<section class="plan-sec">
-      <h2>${title}${list.length ? `<span>${list.length}</span>` : ''}</h2>
+  const section = (title, hint, list, kind) => {
+    const target = kind === 'today' || kind === 'tomorrow';
+    const on = target && planAddTarget === kind ? ' on' : '';
+    const headAct = target ? ` data-act="plan-target" data-v="${kind}"` : '';
+    return `<section class="plan-sec${on}">
+      <h2${headAct} class="${target ? 'plan-target' : ''}${on}">${title}${list.length ? `<span>${list.length}</span>` : ''}${target && planAddTarget === kind ? '<em>點選加入到這</em>' : ''}</h2>
       ${hint ? `<p class="plan-hint">${hint}</p>` : ''}
       ${list.length ? list.map((p) => row(p, kind)).join('') : '<div class="plan-empty">還沒有項目</div>'}
     </section>`;
+  };
+  const picks = planQuickPicks();
+  const suggest = planSuggestList(planDraft);
+  const pickChips = picks.chips.map((c) => {
+    const on = planHasText(c.text) ? ' on' : '';
+    return `<button type="button" class="plan-pick${on}" data-act="plan-pick" data-v="${escapeHtml(c.text)}">${escapeHtml(c.text)}${c.count > 1 ? `<span>${c.count}</span>` : ''}</button>`;
+  }).join('');
+  const pickBar = picks.chips.length
+    ? `<div class="plan-picks${planPickOpen ? ' open' : ''}">
+        <button type="button" class="plan-picks-toggle" data-act="toggle-plan-picks">${planPickOpen ? '收起' : '＋'}${escapeHtml(picks.label)} <span>${picks.chips.length}</span></button>
+        ${planPickOpen ? `<div class="plan-pick-tray">${pickChips}</div>` : ''}
+      </div>`
+    : `<div class="plan-picks muted"><div class="plan-picks-toggle dim">還沒有買過的紀錄（標到後會出現快選）</div></div>`;
+  const suggestBox = suggest.length
+    ? `<div class="plan-suggest">${suggest.map((s) => `<button type="button" class="plan-suggest-item" data-act="plan-suggest" data-v="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
+    : '';
   return `<div class="plan-screen" id="plan-screen">
     <header class="plan-bar">
       <button type="button" class="plan-back" data-act="close-plan">返回</button>
@@ -517,15 +734,19 @@ function renderPlanScreen() {
       <span class="plan-bar-spacer"></span>
     </header>
     <div class="plan-body">
-      ${section('今日預計', '昨天先記下、今天要批的會留在這裡。開始新的一天也不會清掉。', todayItems, 'today')}
-      ${section('明日預計', '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow')}
+      ${section('今日預計', '昨天先記下、今天要批的會留在這裡。開始新的一天也不會清掉。點標題可改成加到今日。', todayItems, 'today')}
+      ${section('明日預計', '先記下來，明天會自動變成今日預計。點標題可改成加到明日。', tomorrowItems, 'tomorrow')}
       ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
     </div>
     <div class="plan-add">
-      <input id="plan-input" maxlength="40" placeholder="例如：高麗菜 2 車、番茄要大的" value="${escapeHtml(planDraft)}" data-act="plan-draft" autocomplete="off" />
+      ${pickBar}
+      <div class="plan-input-wrap">
+        <input id="plan-input" maxlength="40" placeholder="輸入或搜尋品項，例如：高麗菜" value="${escapeHtml(planDraft)}" data-act="plan-draft" autocomplete="off" />
+        ${suggestBox}
+      </div>
       <div class="plan-add-btns">
-        <button type="button" class="btn" data-act="plan-add" data-v="today">加入今日</button>
-        <button type="button" class="btn primary" data-act="plan-add" data-v="tomorrow">加入明日</button>
+        <button type="button" class="btn${planAddTarget === 'today' ? ' primary' : ''}" data-act="plan-add" data-v="today">加入今日</button>
+        <button type="button" class="btn${planAddTarget === 'tomorrow' ? ' primary' : ''}" data-act="plan-add" data-v="tomorrow">加入明日</button>
       </div>
     </div>
   </div>`;
@@ -581,7 +802,8 @@ function defaultState() {
     dayRules: [],
     machinesMigratedV9: true,
     itemsMigratedV17: true,
-    planItems: []
+    planItems: [],
+    boughtHistory: []
   };
 }
 
@@ -637,6 +859,7 @@ function loadState() {
       merged.progressV2 = true;
     }
     merged.planItems = normalizePlanItems(merged.planItems);
+    merged.boughtHistory = normalizeBoughtHistory(merged.boughtHistory);
     return merged;
   } catch {
     return base;
@@ -1005,6 +1228,7 @@ function cycleLotStatus(id) {
   }
   lot.status = next;
   if (next === 'won' || next === 'lost') jumpToLot(lot, { force: false });
+  rememberBoughtLots(state.lots);
   saveState();
   checkAlerts();
   offerUndo(snap, `${label} ${lotLabel(lot)}`);
@@ -1655,6 +1879,7 @@ function setLotStatus(id, status) {
     if (status === 'won') lot.secondMarket = false;
     if (status === 'won' || status === 'lost') jumpToLot(lot, { force: false });
   }
+  rememberBoughtLots(state.lots);
   saveState();
   checkAlerts();
   render();
@@ -1926,6 +2151,7 @@ function startNewDay(confirmed) {
     render();
     return;
   }
+  rememberBoughtLots(state.lots);
   state.lots = [];
   state.alerted = {};
   state.day = todayStr();
@@ -2893,7 +3119,24 @@ function onClick(e) {
       closePlan();
       break;
     case 'plan-add':
-      addPlanItem(v === 'today' ? 'today' : 'tomorrow');
+      planAddTarget = v === 'today' ? 'today' : 'tomorrow';
+      addPlanItem(planAddTarget);
+      break;
+    case 'plan-target':
+      planAddTarget = v === 'today' ? 'today' : 'tomorrow';
+      render();
+      break;
+    case 'toggle-plan-picks':
+      planPickOpen = !planPickOpen;
+      render();
+      break;
+    case 'plan-pick':
+      togglePlanPick(v);
+      break;
+    case 'plan-suggest':
+      planDraft = '';
+      addPlanText(v);
+      render();
       break;
     case 'plan-done':
       setPlanDone(btn.dataset.id, true);
@@ -3209,6 +3452,7 @@ function onInput(e) {
   }
   if (act === 'plan-draft' || el.id === 'plan-input') {
     planDraft = el.value;
+    render();
     return;
   }
   if (act === 'new-item' || act === 'edit-item-name' || act === 'type-item-name') {
@@ -3695,7 +3939,7 @@ function bind() {
     if (act === 'plan-draft' || id === 'plan-input') {
       e.preventDefault();
       planDraft = e.target.value;
-      addPlanItem('tomorrow');
+      addPlanItem(planAddTarget || 'tomorrow');
     }
   });
   window.addEventListener('beforeinstallprompt', (e) => {
