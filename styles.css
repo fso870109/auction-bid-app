@@ -921,7 +921,10 @@ input:focus, textarea:focus {
   border-radius: 999px;
   z-index: 1200;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.35;
+  max-width: calc(100vw - 24px);
 }
 
 .setup {
@@ -2124,14 +2127,16 @@ button.lot-cell {
   text-align: center;
 }
 .plan-back {
-  min-width: 64px;
-  min-height: 40px;
+  min-width: 48px;
+  min-height: 36px;
+  padding: 0 6px;
   font-weight: 800;
   color: var(--yellow);
-  font-size: 15px;
+  font-size: 14px;
   text-align: left;
+  border-radius: 8px;
 }
-.plan-bar-spacer { min-width: 64px; }
+.plan-bar-spacer { min-width: 48px; }
 .plan-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -2208,9 +2213,32 @@ button.lot-cell {
 }
 .plan-add {
   flex: 0 0 auto;
-  padding: 10px 16px calc(12px + var(--safe-b));
+  padding: 10px 16px 8px;
   border-top: 1px solid var(--line);
   background: #101010;
+}
+.plan-footer {
+  flex: 0 0 auto;
+  padding: 0 16px calc(12px + var(--safe-b));
+  background: #101010;
+}
+.plan-back-lg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 56px;
+  border-radius: 14px;
+  background: var(--yellow);
+  color: var(--yellow-text);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  box-shadow: 0 4px 18px rgba(255, 229, 0, 0.22);
+}
+.plan-back-lg:active { filter: brightness(0.94); }
+#app:has(#plan-screen) .toast {
+  bottom: calc(12px + 56px + 12px + var(--safe-b) + 8px);
 }
 .plan-add input { min-height: 44px; font-size: 16px; }
 .plan-add-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
@@ -2468,4 +2496,22 @@ button.lot-cell {
   .header-right { gap: 5px; }
   .gear-btn { width: 32px; height: 32px; font-size: 15px; border-radius: 9px; }
   .sync-dot { width: 20px; height: 20px; }
+}
+@media (max-width: 360px) {
+  .header { gap: 4px; padding: 0 4px 0 6px; }
+  .header-left { gap: 4px; }
+  .header-date { font-size: 12px; }
+  .half-switch { padding: 2px; gap: 1px; }
+  .half-switch button { padding: 5px 2px; font-size: 10px; min-height: 30px; }
+  .app-logo { width: 22px; height: 22px; }
+  .save-row { grid-template-columns: minmax(96px, 0.8fr) minmax(0, 1.3fr); }
+  .prio-toggle button { font-size: 10px; }
+  .live-bar { gap: 6px; }
+  .live-counts { gap: 6px; font-size: 11px; }
+  .sync-qr { width: 200px; height: 200px; padding: 10px; }
+  .sync-qr svg { width: 180px; height: 180px; }
+}
+@media (max-width: 330px) {
+  .header-date { font-size: 11px; }
+  .half-switch button { font-size: 9px; letter-spacing: -0.02em; }
 }

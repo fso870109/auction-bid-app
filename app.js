@@ -750,6 +750,9 @@ function renderPlanScreen() {
         <button type="button" class="btn${planAddTarget === 'tomorrow' ? ' primary' : ''}" data-act="plan-add" data-v="tomorrow">加入明日</button>
       </div>
     </div>
+    <div class="plan-footer">
+      <button type="button" class="plan-back-lg" data-act="close-plan">返回</button>
+    </div>
   </div>`;
 }
 
