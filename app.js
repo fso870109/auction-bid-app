@@ -11,6 +11,10 @@ const GROUP_RANK = {
   morning: { '大宗': 0, '水菜': 1 },
   afternoon: { '瓜果': 0, '菇菌': 1, '醃製': 2 }
 };
+/* Official items below this 桃農 12-month volume (kg) are hidden from the
+   default item grid. Search, custom items, and previously used items stay. */
+const VOLUME_GRID_MIN = 500;
+const ITEM_SIZES = ['大', '中', '小'];
 let itemQuery = '';
 let variantPick = null; // crop official name when variant sheet is open
 let itemPickScroll = 0;
@@ -49,8 +53,11 @@ function catalogNameSet(half) {
 function findCrop(name, half) {
   if (!name) return null;
   const pools = half ? catalogCrops(half) : (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : []);
-  const exact = pools.find((c) => c.n === name || c.l === name) || null;
-  if (exact) return exact;
+  const exacts = pools.filter((c) => c.n === name || c.l === name);
+  if (exacts.length) {
+    exacts.sort((a, b) => (b.v || 0) - (a.v || 0));
+    return exacts[0];
+  }
   for (const c of pools) {
     if ((c.a || []).includes(name)) return c;
     if (name.startsWith(c.n + '-')) return c;
@@ -68,6 +75,15 @@ function itemDisplayName(name) {
   const v = (crop.s || []).find((x) => x.n === name || x.l === name || (x.a || []).includes(name));
   if (!v || v.n === crop.n || v.l === crop.l || v.l === '其他') return crop.l;
   return crop.l + ' ' + v.l;
+}
+
+function itemCellName(name) {
+  if (!name) return '';
+  const crop = findCrop(name);
+  if (!crop) return name;
+  const v = (crop.s || []).find((x) => x.n === name || x.l === name || (x.a || []).includes(name));
+  if (v && v.l && v.l !== '其他' && v.n !== crop.n && v.l !== crop.l) return v.l;
+  return crop.l;
 }
 
 function itemIsActive(crop, stored) {
@@ -88,6 +104,33 @@ function cropMatchesQuery(crop, q) {
   return fields.some((f) => f === q || (f && String(f).startsWith(q)));
 }
 
+function dedupeCrops(list) {
+  const best = new Map();
+  for (const c of list) {
+    const key = c.n || c.l;
+    const prev = best.get(key);
+    if (!prev || (c.v || 0) > (prev.v || 0)) best.set(key, c);
+  }
+  return [...best.values()];
+}
+
+function cropShownOnGrid(crop, counts) {
+  if ((crop.v || 0) >= VOLUME_GRID_MIN) return true;
+  const used = (counts && (counts[crop.l] || counts[crop.n])) || 0;
+  return used > 0;
+}
+
+function itemNeedsSize(name) {
+  if (!name) return false;
+  const crop = findCrop(name);
+  if (crop) return crop.n === '番茄' || crop.n === '小番茄';
+  return String(name).includes('番茄');
+}
+
+function sizeLabel(size) {
+  return ITEM_SIZES.includes(size) ? size : '';
+}
+
 function visibleCrops(half, q) {
   const h = half || (state && state.currentHalf) || 'morning';
   const counts = itemCountsOf(h);
@@ -97,7 +140,10 @@ function visibleCrops(half, q) {
     ranks['水菜'] = 0;
     ranks['大宗'] = 1;
   }
-  const list = catalogCrops(h).filter((c) => cropMatchesQuery(c, q));
+  let list = dedupeCrops(catalogCrops(h).filter((c) => cropMatchesQuery(c, q)));
+  if (!String(q || '').trim()) {
+    list = list.filter((c) => cropShownOnGrid(c, counts));
+  }
   list.sort((a, b) => {
     const ga = ranks[a.g] ?? 9;
     const gb = ranks[b.g] ?? 9;
@@ -130,13 +176,20 @@ function catalogCounts() {
 }
 
 function catalogSummary(half) {
-  const tally = catalogCounts()[half] || {};
+  const counts = itemCountsOf(half);
+  const crops = dedupeCrops(catalogCrops(half));
   const groups = half === 'fruit' ? ['水果']
     : half === 'afternoon' ? ['瓜果', '菇菌', '醃製']
     : ['大宗', '水菜'];
+  const shown = crops.filter((c) => cropShownOnGrid(c, counts));
+  const hidden = crops.length - shown.length;
+  const tally = {};
+  for (const c of shown) tally[c.g] = (tally[c.g] || 0) + 1;
   const parts = groups.map((g) => `${g} ${tally[g] || 0}`);
-  const total = groups.reduce((s, g) => s + (tally[g] || 0), 0);
-  return `內建 ${parts.join('、')}，共 ${total} 項，依桃農近一年交易量排序，完整名單請在抄號頁搜尋。`;
+  const hideHint = hidden
+    ? `，另有 ${hidden} 項冷門品項已從按鈕拿掉，可搜尋`
+    : '';
+  return `按鈕顯示 ${parts.join('、')}，共 ${shown.length} 項${hideHint}。依桃農近一年交易量排序（不到 ${VOLUME_GRID_MIN} 公斤的不出現在選單）。`;
 }
 
 function variantCount(crop) {
@@ -270,7 +323,11 @@ let state;
 let draftNum = '';
 let draftNote = '';
 let draftShowNote = false;
+let draftSize = '';
 let draftMachineId = '';
+let planOpen = false;
+let planHistoryPushed = false;
+let planDraft = '';
 let showMachinePicker = false;
 let paddleOpen = false;
 let wakeLock = null;
@@ -311,6 +368,165 @@ function formatDateLabel(iso) {
   const [y, m, d] = iso.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
   return `${m}/${d}（${WEEKDAYS[dt.getDay()]}）`;
+}
+
+function addDaysIso(iso, n) {
+  const [y, m, d] = String(iso || todayStr()).split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function tomorrowStr(from) {
+  return addDaysIso(from || todayStr(), 1);
+}
+
+function normalizePlanItems(list) {
+  if (!Array.isArray(list)) return [];
+  const today = todayStr();
+  const cut = addDaysIso(today, -14);
+  const out = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    const text = String(raw.text || '').trim();
+    if (!text) continue;
+    const item = {
+      id: raw.id || uid(),
+      text,
+      forDay: raw.forDay || today,
+      done: !!raw.done,
+      doneOn: raw.doneOn || '',
+      createdOn: raw.createdOn || raw.forDay || today
+    };
+    if (item.done && item.doneOn && item.doneOn < cut) continue;
+    out.push(item);
+  }
+  return out;
+}
+
+function openPlan() {
+  if (planOpen) return;
+  planOpen = true;
+  try {
+    history.pushState({ auctionPlan: true }, '');
+    planHistoryPushed = true;
+  } catch {
+    planHistoryPushed = false;
+  }
+  render();
+}
+
+function closePlan(fromPop) {
+  if (!planOpen) return;
+  planOpen = false;
+  if (!fromPop && planHistoryPushed) {
+    planHistoryPushed = false;
+    try { history.back(); } catch { /* ignore */ }
+  } else {
+    planHistoryPushed = false;
+  }
+  render();
+}
+
+function onPlanPopState() {
+  if (planOpen) closePlan(true);
+}
+
+function addPlanItem(which) {
+  const text = String(planDraft || '').trim();
+  if (!text) {
+    toast('請先輸入預計要批的品項或備註');
+    return;
+  }
+  const today = todayStr();
+  const forDay = which === 'today' ? today : tomorrowStr(today);
+  if (!Array.isArray(state.planItems)) state.planItems = [];
+  state.planItems.push({
+    id: uid(),
+    text,
+    forDay,
+    done: false,
+    doneOn: '',
+    createdOn: today
+  });
+  planDraft = '';
+  saveState();
+  toast(which === 'today' ? '已加入今日預計' : '已加入明日預計，明天還在');
+  render();
+}
+
+function setPlanDone(id, done) {
+  const item = (state.planItems || []).find((p) => p.id === id);
+  if (!item) return;
+  item.done = !!done;
+  item.doneOn = item.done ? todayStr() : '';
+  saveState();
+  render();
+}
+
+function deletePlanItem(id) {
+  state.planItems = (state.planItems || []).filter((p) => p.id !== id);
+  saveState();
+  render();
+}
+
+function planTodayCount() {
+  const today = todayStr();
+  return (state.planItems || []).filter((p) => !p.done && p.forDay <= today).length;
+}
+
+function renderSizeChips(current, opts) {
+  opts = opts || {};
+  const act = opts.lotId ? 'set-size' : 'set-draft-size';
+  const lotAttr = opts.lotId ? ` data-id="${escapeHtml(opts.lotId)}"` : '';
+  const cls = opts.sheet ? 'size-chips sheet-size' : 'size-chips';
+  return `<div class="${cls}" role="group" aria-label="大小">
+    <span class="size-lbl">大小</span>
+    ${ITEM_SIZES.map((s) => {
+      const on = current === s ? ' on' : '';
+      return `<button type="button" class="size-chip${on}" data-act="${act}" data-v="${s}"${lotAttr}>${s}</button>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderPlanScreen() {
+  if (!planOpen) return '';
+  const today = todayStr();
+  const items = state.planItems || [];
+  const todayItems = items.filter((p) => !p.done && p.forDay <= today);
+  const tomorrowItems = items.filter((p) => !p.done && p.forDay > today);
+  const doneItems = items.filter((p) => p.done).slice().reverse().slice(0, 20);
+  const row = (p, kind) => `<div class="plan-row${kind === 'done' ? ' done' : ''}">
+      <button type="button" class="plan-check${p.done ? ' on' : ''}" data-act="${p.done ? 'plan-undone' : 'plan-done'}" data-id="${escapeHtml(p.id)}" aria-label="${p.done ? '取消完成' : '完成'}">${p.done ? '✓' : ''}</button>
+      <div class="plan-text">${escapeHtml(p.text)}</div>
+      <button type="button" class="plan-del" data-act="plan-del" data-id="${escapeHtml(p.id)}" aria-label="刪除">刪</button>
+    </div>`;
+  const section = (title, hint, list, kind) => `<section class="plan-sec">
+      <h2>${title}${list.length ? `<span>${list.length}</span>` : ''}</h2>
+      ${hint ? `<p class="plan-hint">${hint}</p>` : ''}
+      ${list.length ? list.map((p) => row(p, kind)).join('') : '<div class="plan-empty">還沒有項目</div>'}
+    </section>`;
+  return `<div class="plan-screen" id="plan-screen">
+    <header class="plan-bar">
+      <button type="button" class="plan-back" data-act="close-plan">返回</button>
+      <h1>備註</h1>
+      <span class="plan-bar-spacer"></span>
+    </header>
+    <div class="plan-body">
+      ${section('今日預計', '昨天先記下、今天要批的會留在這裡。開始新的一天也不會清掉。', todayItems, 'today')}
+      ${section('明日預計', '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow')}
+      ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
+    </div>
+    <div class="plan-add">
+      <input id="plan-input" maxlength="40" placeholder="例如：高麗菜 2 車、番茄要大的" value="${escapeHtml(planDraft)}" data-act="plan-draft" autocomplete="off" />
+      <div class="plan-add-btns">
+        <button type="button" class="btn" data-act="plan-add" data-v="today">加入今日</button>
+        <button type="button" class="btn primary" data-act="plan-add" data-v="tomorrow">加入明日</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function uid() {
@@ -361,7 +577,8 @@ function defaultState() {
     itemsMigratedV2: true,
     lastPriority: 'watch',
     dayRules: [],
-    machinesMigratedV9: true
+    machinesMigratedV9: true,
+    planItems: []
   };
 }
 
@@ -413,6 +630,7 @@ function loadState() {
       merged.currentNumbers = defaultCurrents(merged.machines);
       merged.progressV2 = true;
     }
+    merged.planItems = normalizePlanItems(merged.planItems);
     return merged;
   } catch {
     return base;
@@ -900,7 +1118,9 @@ function recentLots() {
 
 function lotLabel(lot) {
   if (!lot) return '';
-  return lot.item ? `${lot.number} ${itemDisplayName(lot.item)}` : String(lot.number);
+  if (!lot.item) return String(lot.number);
+  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
+  return `${lot.number} ${itemDisplayName(lot.item)}${size}`;
 }
 
 function migrateItemLists(merged) {
@@ -1022,15 +1242,50 @@ function bumpItemUse(name, half) {
 function applyItemToLot(lot, name) {
   if (!lot) return;
   lot.item = name;
+  if (!itemNeedsSize(name)) lot.size = '';
   bumpItemUse(name, lot.half || state.currentHalf);
   saveState();
   toast(`${lot.number}　${name}`);
   buzz(12);
 }
 
+function setLotSize(id, size) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || !itemNeedsSize(lot.item)) return;
+  const next = sizeLabel(size);
+  lot.size = lot.size === next ? '' : next;
+  saveState();
+  render();
+}
+
+function cycleLotSize(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || !itemNeedsSize(lot.item)) return;
+  const i = ITEM_SIZES.indexOf(lot.size);
+  lot.size = ITEM_SIZES[(i + 1) % ITEM_SIZES.length];
+  saveState();
+  render();
+}
+
+function setDraftSize(size) {
+  const next = sizeLabel(size);
+  if (itemTargetId) {
+    const lot = state.lots.find((l) => l.id === itemTargetId);
+    if (lot && itemNeedsSize(lot.item || draftItem)) {
+      lot.size = lot.size === next ? '' : next;
+      saveState();
+      render();
+      return;
+    }
+  }
+  draftSize = draftSize === next ? '' : next;
+  render();
+}
+
 function assignItem(name) {
   name = String(name || '').trim();
   if (!name) return;
+  if (!itemNeedsSize(name)) draftSize = '';
   if (draftNum && (itemTargetAuto || !itemTargetId)) {
     draftItem = name;
     toast(`下一筆 ${draftNum} 會記成「${name}」`);
@@ -1200,6 +1455,7 @@ function typeDigit(d) {
   dupFlash = false;
   if (startingFresh) {
     draftItem = '';
+    draftSize = '';
     if (itemTargetAuto) {
       itemTargetId = null;
       itemTargetAuto = false;
@@ -1224,6 +1480,7 @@ function clearDraft() {
   draftNum = '';
   draftNote = '';
   draftItem = '';
+  draftSize = '';
   draftMachineId = '';
   showMachinePicker = false;
   dupFlash = false;
@@ -1270,6 +1527,7 @@ function commitLot(num, machineId, half) {
     number: num,
     note: draftNote.trim(),
     item: draftItem || '',
+    size: itemNeedsSize(draftItem) ? sizeLabel(draftSize) : '',
     status: 'pending',
     priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
     createdAt: Date.now()
@@ -1279,6 +1537,7 @@ function commitLot(num, machineId, half) {
   draftNum = '';
   draftNote = '';
   draftItem = '';
+  draftSize = '';
   draftMachineId = '';
   draftShowNote = false;
   showMachinePicker = false;
@@ -1434,6 +1693,7 @@ async function enterPaddle() {
     toast('請先設定我的承銷人代號');
     return;
   }
+  if (planOpen) closePlan();
   paddleOpen = true;
   render();
   const el = document.getElementById('paddle');
@@ -1590,7 +1850,7 @@ function startNewDay(confirmed) {
     modal = {
       type: 'confirm',
       title: '開始新的一天？',
-      body: '會清空今天的抄號與標貨結果，台別號碼和承銷人代號會保留。',
+      body: '會清空今天的抄號與標貨結果。預計備註會保留，台別號碼和承銷人代號也會保留。',
       ok: '確定清空',
       cancel: '取消',
       danger: true,
@@ -1605,15 +1865,17 @@ function startNewDay(confirmed) {
   state.currentNumbers = defaultCurrents(state.machines);
   state.tab = 'note';
   state.currentHalf = 'fruit';
+  showSettings = false;
   modal = null;
   draftNum = '';
   draftNote = '';
   draftItem = '';
+  draftSize = '';
   draftMachineId = '';
   itemTargetId = null;
   itemTargetAuto = false;
   saveState();
-  toast('已開始新的一天，先從水果場開始');
+  toast('已開始新的一天，預計備註還在，先從水果場開始');
   render();
 }
 
@@ -1798,6 +2060,7 @@ function render() {
     renderNav() +
     (paddleOpen ? renderPaddle() : '') +
     (modal ? renderModal() : '') +
+    renderPlanScreen() +
     `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
 
   paintToast(document.getElementById('toast'));
@@ -1842,7 +2105,7 @@ function renderHeader() {
       </div>
       <div class="header-right">
         <div class="half-switch" role="tablist">
-          ${HALVES.map((h) => `<button type="button" data-act="half" data-v="${h}" class="${half === h ? 'on' : ''}">${halfLabel(h)}</button>`).join('')}
+          ${HALVES.map((h) => `<button type="button" data-act="half" data-v="${h}" class="sess-${h}${half === h ? ' on' : ''}">${halfLabel(h)}</button>`).join('')}
         </div>
         <button type="button" class="gear-btn${showSettings ? ' on' : ''}" data-act="settings" aria-label="設定">${showSettings ? '✕' : '⚙'}</button>
       </div>
@@ -1953,9 +2216,12 @@ function renderNote() {
       .join('')}</div>`;
   }
 
-  const noteBlock = draftShowNote
-    ? `<div class="remark"><input id="draft-note" data-act="draft-note" maxlength="40" placeholder="備註（選填）" value="${escapeHtml(draftNote)}" /></div>`
+  const sizeItem = (itemTargetId && state.lots.find((l) => l.id === itemTargetId)?.item) || draftItem;
+  const sizeLot = itemTargetId ? state.lots.find((l) => l.id === itemTargetId) : null;
+  const sizeBlock = itemNeedsSize(sizeItem)
+    ? renderSizeChips(sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.size : draftSize, { lotId: sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.id : '' })
     : '';
+  const planN = planTodayCount();
 
   return `
     <div class="note-screen">
@@ -1978,10 +2244,10 @@ function renderNote() {
         </div>
         <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
       </div>
+      ${sizeBlock}
       <div class="note-tools">
-        <button type="button" class="linkish" data-act="toggle-note">${draftShowNote ? '收起備註' : '＋備註'}</button>
+        <button type="button" class="linkish plan-open-btn" data-act="open-plan">備註${planN ? `<span class="plan-count">${planN}</span>` : ''}</button>
       </div>
-      ${noteBlock}
     </div>`;
 }
 
@@ -2044,8 +2310,11 @@ function renderLive() {
               if (near && d === 0) badge = '<span class="cell-badge now">到</span>';
               else if (near && d > 0) badge = `<span class="cell-badge">差${d}</span>`;
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
+              const size = itemNeedsSize(l.item) && l.item
+                ? `<span class="size-badge${sizeLabel(l.size) ? ' on s-' + l.size : ' empty'}" data-act="cycle-size" data-id="${escapeHtml(l.id)}">${sizeLabel(l.size) || '規'}</span>`
+                : '';
               const item = l.item
-                ? `<span class="cell-item">${escapeHtml(itemDisplayName(l.item))}</span>`
+                ? `<span class="cell-item"><span class="cell-item-name">${escapeHtml(itemCellName(l.item))}</span>${size}</span>`
                 : '<span class="cell-item dim"></span>';
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
                 <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
@@ -2319,6 +2588,7 @@ function renderModal() {
             return `<button type="button" class="prio-${p}${on}" data-act="set-prio" data-id="${escapeHtml(lot.id)}" data-v="${p}">${prioLabel(p)}</button>`;
           }).join('')}
         </div>
+        ${itemNeedsSize(lot.item) ? renderSizeChips(lot.size || '', { lotId: lot.id, sheet: true }) : ''}
         <div class="move-lot-row">
           <div class="move-lot-label">移到別台</div>
           ${state.machines[lot.half || state.currentHalf].filter((m) => m.id !== lot.machineId).map((m) =>
@@ -2549,8 +2819,40 @@ function onClick(e) {
       render();
       break;
     case 'toggle-note':
-      draftShowNote = !draftShowNote;
-      render();
+    case 'open-plan':
+      openPlan();
+      break;
+    case 'close-plan':
+      closePlan();
+      break;
+    case 'plan-add':
+      addPlanItem(v === 'today' ? 'today' : 'tomorrow');
+      break;
+    case 'plan-done':
+      setPlanDone(btn.dataset.id, true);
+      break;
+    case 'plan-undone':
+      setPlanDone(btn.dataset.id, false);
+      break;
+    case 'plan-del':
+      deletePlanItem(btn.dataset.id);
+      break;
+    case 'set-draft-size':
+      setDraftSize(v);
+      buzz(8);
+      break;
+    case 'set-size':
+      setLotSize(btn.dataset.id, v);
+      buzz(8);
+      break;
+    case 'cycle-size':
+      e.stopPropagation();
+      if (ignoreLotClick || dragState) {
+        ignoreLotClick = false;
+        break;
+      }
+      cycleLotSize(btn.dataset.id);
+      buzz(8);
       break;
     case 'tab':
       state.tab = v === 'track' || v === 'result' ? 'live' : v;
@@ -2680,6 +2982,7 @@ function onClick(e) {
       showMachinePicker = false;
       progressPopId = null;
       draftItem = '';
+      draftSize = '';
       itemQuery = '';
       variantPick = null;
       resetItemPickScroll = true;
@@ -2835,6 +3138,10 @@ function onInput(e) {
   }
   if (act === 'draft-note') {
     draftNote = el.value;
+    return;
+  }
+  if (act === 'plan-draft' || el.id === 'plan-input') {
+    planDraft = el.value;
     return;
   }
   if (act === 'new-item' || act === 'edit-item-name' || act === 'type-item-name') {
@@ -3263,6 +3570,7 @@ function bind() {
   }
   document.addEventListener('click', onClick);
   document.addEventListener('input', onInput);
+  window.addEventListener('popstate', onPlanPopState);
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
   document.addEventListener('visibilitychange', onVisibility);
@@ -3316,6 +3624,11 @@ function bind() {
         e.target.value = '';
         render();
       }
+    }
+    if (act === 'plan-draft' || id === 'plan-input') {
+      e.preventDefault();
+      planDraft = e.target.value;
+      addPlanItem('tomorrow');
     }
   });
   window.addEventListener('beforeinstallprompt', (e) => {

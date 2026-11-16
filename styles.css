@@ -115,28 +115,43 @@ input:focus, textarea:focus {
 
 .half-switch {
   display: flex;
-  background: var(--bg-card);
-  border-radius: 999px;
-  padding: 3px;
-  border: 1px solid var(--line);
+  background: #0c0c0c;
+  border-radius: 10px;
+  padding: 2px;
+  border: 1px solid #2a2a2a;
+  gap: 2px;
 }
 
 .half-switch button {
-  padding: 6px 9px;
-  border-radius: 999px;
+  padding: 6px 8px;
+  border-radius: 8px;
   font-weight: 800;
   font-size: 12px;
-  color: var(--muted);
   min-height: 32px;
   white-space: nowrap;
+  border: 1px solid transparent;
 }
 @media (max-width: 380px) {
-  .half-switch button { padding: 6px 7px; font-size: 11px; }
+  .half-switch button { padding: 5px 6px; font-size: 11px; }
 }
 
-.half-switch button.on {
-  background: var(--yellow);
-  color: var(--yellow-text);
+.half-switch button.sess-fruit { color: #7dcca0; background: rgba(3, 135, 54, 0.18); }
+.half-switch button.sess-morning { color: #f0c35a; background: rgba(240, 160, 0, 0.18); }
+.half-switch button.sess-afternoon { color: #8eb0ff; background: rgba(47, 107, 255, 0.2); }
+.half-switch button.sess-fruit.on {
+  background: #038736;
+  color: #fff;
+  box-shadow: 0 0 0 1px #04c24e;
+}
+.half-switch button.sess-morning.on {
+  background: #f0a000;
+  color: #1a1000;
+  box-shadow: 0 0 0 1px #ffcc4d;
+}
+.half-switch button.sess-afternoon.on {
+  background: #2f6bff;
+  color: #fff;
+  box-shadow: 0 0 0 1px #7aa0ff;
 }
 
 /* Main sits above in-flow nav; no extra padding for a fixed bar */
@@ -1817,7 +1832,9 @@ button.lot-cell {
   line-height: 1;
 }
 .cell-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 3px;
   flex: 1 1 auto;
   min-width: 0;
   font-size: 10px;
@@ -1826,9 +1843,33 @@ button.lot-cell {
   line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   margin: 0;
 }
+.cell-item-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.size-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 14px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.size-badge.empty { background: #2a2a2a; color: #8a8a8a; }
+.size-badge.s-大 { background: #3a1608; color: #ff8a3d; }
+.size-badge.s-中 { background: #3a2e08; color: #ffcc33; }
+.size-badge.s-小 { background: #0d2a18; color: #5ee08a; }
 .cell-item.dim { color: transparent; }
 .cell-flags {
   display: flex;
@@ -1970,3 +2011,168 @@ button.lot-cell {
   min-height: 28px;
   font-size: 13px;
 }
+
+/* v16: 備註 page, size chips, plan badge */
+.plan-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+}
+.plan-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #038736;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 0 5px;
+}
+.size-chips {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 0;
+}
+.size-chips.sheet-size { padding: 10px 0 6px; }
+.size-lbl { font-size: 11px; font-weight: 800; color: var(--muted); }
+.size-chip {
+  min-width: 44px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #1a1a1a;
+  font-weight: 800;
+  font-size: 14px;
+}
+.size-chip.on { border-color: transparent; }
+.size-chip[data-v="大"].on { background: #ff6a1a; color: #fff; }
+.size-chip[data-v="中"].on { background: #f0a000; color: #1a1000; }
+.size-chip[data-v="小"].on { background: #038736; color: #fff; }
+
+.plan-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding-top: var(--safe-t);
+  height: 100%;
+  height: var(--app-h, 100dvh);
+}
+.plan-bar {
+  flex: 0 0 auto;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.plan-bar h1 {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 800;
+  margin: 0;
+  text-align: center;
+}
+.plan-back {
+  min-width: 64px;
+  min-height: 40px;
+  font-weight: 800;
+  color: var(--yellow);
+  font-size: 15px;
+  text-align: left;
+}
+.plan-bar-spacer { min-width: 64px; }
+.plan-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 16px 16px;
+}
+.plan-sec { margin-bottom: 20px; }
+.plan-sec h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-sec h2 span {
+  font-size: 11px;
+  font-weight: 800;
+  background: #1c3a28;
+  color: #7dcca0;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.plan-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.plan-empty {
+  color: var(--dim);
+  font-size: 13px;
+  padding: 10px 0;
+}
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.plan-row.done .plan-text { text-decoration: line-through; color: var(--dim); }
+.plan-check {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid #3a3a3a;
+  background: #151515;
+  font-weight: 900;
+  font-size: 14px;
+  color: #fff;
+}
+.plan-check.on {
+  background: #038736;
+  border-color: #038736;
+}
+.plan-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  word-break: break-word;
+}
+.plan-del {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 13px;
+  min-height: 32px;
+  padding: 0 8px;
+}
+.plan-add {
+  flex: 0 0 auto;
+  padding: 10px 16px calc(12px + var(--safe-b));
+  border-top: 1px solid var(--line);
+  background: #101010;
+}
+.plan-add input { min-height: 44px; font-size: 16px; }
+.plan-add-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.plan-add-btns .btn { min-height: 44px; font-weight: 800; }
