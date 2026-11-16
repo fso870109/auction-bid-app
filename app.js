@@ -17,6 +17,7 @@ const VOLUME_GRID_MIN = 500;
 const ITEM_SIZES = ['大', '中', '小'];
 const MUSHROOM_CROPS = ['金絲菇', '杏鮑菇', '其他菇類', '鴻喜菇', '濕木耳', '濕香菇', '洋菇', '秀珍菇', '草菇', '珊瑚菇', '蠔菇', '巴西蘑菇', '松茸', '柳松菇', '猴頭菇'];
 const GOURD_FROM_BULK_CROPS = ['芋', '大蒜', '青花苔', '薑', '甘藷', '馬鈴薯', '薯蕷', '豆薯', '菊芋'];
+const GOURD_FROM_BULK_V21_CROPS = ['花椰菜', '球莖甘藍', '竹筍', '萵苣莖', '蓮藕', '蘆筍', '牛蒡'];
 let itemQuery = '';
 let variantPick = null; // crop official name when variant sheet is open
 let itemPickScroll = 0;
@@ -802,6 +803,7 @@ function defaultState() {
     dayRules: [],
     machinesMigratedV9: true,
     itemsMigratedV17: true,
+    itemsMigratedV21: true,
     planItems: [],
     boughtHistory: [],
     syncRoom: '',
@@ -851,6 +853,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV17) {
       migrateItemsV17(merged);
+    }
+    if (!saved.itemsMigratedV21) {
+      migrateItemsV21(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -1467,6 +1472,11 @@ function migrateItemsV17(merged) {
   moveCustomsAndCounts(merged, 'afternoon', 'morning', officialNameSet(MUSHROOM_CROPS));
   moveCustomsAndCounts(merged, 'morning', 'afternoon', officialNameSet(GOURD_FROM_BULK_CROPS));
   merged.itemsMigratedV17 = true;
+}
+
+function migrateItemsV21(merged) {
+  moveCustomsAndCounts(merged, 'morning', 'afternoon', officialNameSet(GOURD_FROM_BULK_V21_CROPS));
+  merged.itemsMigratedV21 = true;
 }
 
 function defaultItems(half) {
@@ -2347,6 +2357,18 @@ function restoreItemPickScroll() {
 }
 
 /* ---------- Render ---------- */
+function fitLotCellNames() {
+  document.querySelectorAll('.lot-cell .cell-item-name').forEach((el) => {
+    el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize) || 11;
+    const min = 8;
+    while (size > min && el.scrollWidth > el.clientWidth + 0.5) {
+      size -= 0.5;
+      el.style.fontSize = size + 'px';
+    }
+  });
+}
+
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -2386,6 +2408,7 @@ function render() {
       try { input.setSelectionRange(len, len); } catch { /* ignore */ }
     }
   }
+  if (state.tab === 'live' && !showSettings) requestAnimationFrame(fitLotCellNames);
   if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
 }
 
@@ -2624,16 +2647,20 @@ function renderLive() {
                 ? `<span class="size-badge${sizeLabel(l.size) ? ' on s-' + l.size : ' empty'}" data-act="cycle-size" data-id="${escapeHtml(l.id)}">${sizeLabel(l.size) || '規'}</span>`
                 : '';
               const item = l.item
-                ? `<span class="cell-item"><span class="cell-item-name">${escapeHtml(itemCellName(l.item))}</span>${size}</span>`
+                ? `<span class="cell-item"><span class="cell-item-name">${escapeHtml(itemCellName(l.item))}</span></span>`
                 : '<span class="cell-item dim"></span>';
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
                 <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
                   <span class="prio-bar"></span>
                   <span class="prio-tag">${prioShort(prio)}</span>
                 </span>
-                <span class="cell-num">${l.number}</span>
-                ${item}
-                <span class="cell-flags">${badge}${er}</span>
+                <span class="cell-main">
+                  <span class="cell-top">
+                    <span class="cell-num">${l.number}</span>
+                    <span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span>
+                  </span>
+                  ${item}
+                </span>
               </button>`;
             })
             .join('')
@@ -2752,7 +2779,7 @@ function renderSettings() {
     ${halfBlocks}
     ${HALVES.map((half) => {
       const title = half === 'fruit' ? '水果場品項（水果）'
-        : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、薑、薯類屬瓜果）'
+        : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、花椰菜、竹筍、蓮藕等屬瓜果）'
         : '上半場品項（大宗、水菜；香菇類屬大宗第一台）';
       const built = catalogSummary(half);
       const customs = customItemsOf(half);
