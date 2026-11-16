@@ -803,7 +803,12 @@ function defaultState() {
     machinesMigratedV9: true,
     itemsMigratedV17: true,
     planItems: [],
-    boughtHistory: []
+    boughtHistory: [],
+    syncRoom: '',
+    peerId: '',
+    syncQueue: [],
+    syncKvTs: {},
+    syncTombstones: { lots: {}, plan: {} }
   };
 }
 
@@ -860,6 +865,16 @@ function loadState() {
     }
     merged.planItems = normalizePlanItems(merged.planItems);
     merged.boughtHistory = normalizeBoughtHistory(merged.boughtHistory);
+    if (!/^\d{6}$/.test(String(merged.syncRoom || ''))) merged.syncRoom = '';
+    if (typeof merged.peerId !== 'string') merged.peerId = '';
+    if (!Array.isArray(merged.syncQueue)) merged.syncQueue = [];
+    if (!merged.syncKvTs || typeof merged.syncKvTs !== 'object') merged.syncKvTs = {};
+    if (!merged.syncTombstones || typeof merged.syncTombstones !== 'object') {
+      merged.syncTombstones = { lots: {}, plan: {} };
+    } else {
+      if (!merged.syncTombstones.lots || typeof merged.syncTombstones.lots !== 'object') merged.syncTombstones.lots = {};
+      if (!merged.syncTombstones.plan || typeof merged.syncTombstones.plan !== 'object') merged.syncTombstones.plan = {};
+    }
     return merged;
   } catch {
     return base;
@@ -872,6 +887,7 @@ function saveState() {
   } catch (err) {
     toast('儲存失敗，空間可能不足');
   }
+  if (typeof onLocalStateSaved === 'function') onLocalStateSaved();
 }
 
 function halfLabel(half) {
@@ -2142,7 +2158,9 @@ function startNewDay(confirmed) {
     modal = {
       type: 'confirm',
       title: '開始新的一天？',
-      body: '會清空今天的抄號與標貨結果。預計備註會保留，台別號碼和承銷人代號也會保留。',
+      body: state.syncRoom
+        ? '會清空今天的抄號與標貨結果。房間裡兩支手機的抄號都會一起清空。預計備註會保留，台別號碼和承銷人代號也會保留。'
+        : '會清空今天的抄號與標貨結果。預計備註會保留，台別號碼和承銷人代號也會保留。',
       ok: '確定清空',
       cancel: '取消',
       danger: true,
@@ -2400,6 +2418,7 @@ function renderHeader() {
         <div class="half-switch" role="tablist">
           ${HALVES.map((h) => `<button type="button" data-act="half" data-v="${h}" class="sess-${h}${half === h ? ' on' : ''}">${halfLabel(h)}</button>`).join('')}
         </div>
+        ${typeof renderSyncPill === 'function' ? renderSyncPill() : ''}
         <button type="button" class="gear-btn${showSettings ? ' on' : ''}" data-act="settings" aria-label="設定">${showSettings ? '✕' : '⚙'}</button>
       </div>
     </header>`;
@@ -2593,6 +2612,7 @@ function renderLive() {
               const near = d != null && d >= 0 && d <= gapN;
               const prio = lotPriority(l);
               let cls = `lot-cell prio-${prio}`;
+              if (typeof lotHasRemoteFlash === 'function' && lotHasRemoteFlash(l.id)) cls += ' remote-flash';
               if (l.status === 'won') cls += ' won';
               else if (l.status === 'lost') cls += ' lost';
               else if (l.status === 'flow') cls += ' flow';
@@ -2712,6 +2732,7 @@ function renderSettings() {
       <input id="seller-code" class="code-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" value="${escapeHtml(state.sellerCode)}" data-act="seller" placeholder="四位數" />
       <p class="empty-hint" style="text-align:left;padding:8px 0 0">只存在這支手機，給拍賣員看的舉牌號碼。</p>
     </div>
+    ${typeof renderSyncSettings === 'function' ? renderSyncSettings() : ''}
     <div class="setting-block">
       <h2>舉牌顏色</h2>
       <div class="color-pick" style="grid-template-columns:1fr 1fr 1fr">
@@ -3003,6 +3024,8 @@ function onClick(e) {
 
   const act = btn.dataset.act;
   const v = btn.dataset.v;
+
+  if (typeof handleSyncAction === 'function' && handleSyncAction(act, v, e)) return;
 
   switch (act) {
     case 'digit':
@@ -3440,6 +3463,7 @@ function onClick(e) {
 function onInput(e) {
   const el = e.target;
   const act = el.dataset.act;
+  if (typeof handleSyncInput === 'function' && handleSyncInput(el, act)) return;
   if (act === 'item-search') {
     itemQuery = el.value;
     resetItemPickScroll = true;
@@ -3940,6 +3964,11 @@ function bind() {
       e.preventDefault();
       planDraft = e.target.value;
       addPlanItem(planAddTarget || 'tomorrow');
+      return;
+    }
+    if (act === 'sync-join-input' || id === 'sync-join-code') {
+      e.preventDefault();
+      if (typeof joinSyncRoom === 'function') joinSyncRoom(e.target.value);
     }
   });
   window.addEventListener('beforeinstallprompt', (e) => {
@@ -3959,6 +3988,7 @@ function init() {
   checkNewDay();
   bind();
   registerSW();
+  if (typeof initSync === 'function') initSync();
   render();
 }
 

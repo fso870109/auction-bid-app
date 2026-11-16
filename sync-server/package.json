@@ -1,0 +1,14 @@
+{
+  "name": "auction-bid-sync",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Realtime room sync for 拍賣標貨助手",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "redis": "^4.7.1",
+    "ws": "^8.18.3"
+  }
+}

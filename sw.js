@@ -1,10 +1,12 @@
-const CACHE = 'auction-bid-v18';
+const CACHE = 'auction-bid-v19';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './items-catalog.js',
+  './sync-core.js',
+  './sync.js',
   './manifest.json',
   './manifest.webmanifest',
   './icons/icon-192.png',

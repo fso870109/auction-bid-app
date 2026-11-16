@@ -1,2 +1,5 @@
 screenshot-*.png
 .DS_Store
+p2.txt
+node_modules/
+sync-server/node_modules/
