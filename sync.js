@@ -62,23 +62,19 @@ function syncStatusLabel() {
   return '離線';
 }
 
+function paintSyncDot(el) {
+  if (!el) return;
+  const label = syncStatusLabel();
+  el.className = 'sync-dot ' + currentStatus();
+  el.hidden = !state.syncRoom;
+  el.setAttribute('aria-label', label);
+  el.title = label;
+  if (!el.querySelector('i')) el.innerHTML = '<i></i>';
+}
+
 function setSyncStatus(s) {
-  if (syncStatus === s && document.getElementById('sync-pill')) {
-    const el = document.getElementById('sync-pill');
-    if (el) {
-      el.className = 'sync-pill ' + currentStatus();
-      el.textContent = syncStatusLabel();
-      el.hidden = !state.syncRoom;
-    }
-    return;
-  }
-  syncStatus = s;
-  const el = document.getElementById('sync-pill');
-  if (el) {
-    el.className = 'sync-pill ' + currentStatus();
-    el.textContent = syncStatusLabel();
-    el.hidden = !state.syncRoom;
-  }
+  if (syncStatus !== s) syncStatus = s;
+  paintSyncDot(document.getElementById('sync-pill'));
 }
 
 function writeStampsToState(next) {
@@ -486,7 +482,8 @@ function renderSyncSettings() {
 
 function renderSyncPill() {
   if (!state || !state.syncRoom) return '';
-  return `<button type="button" class="sync-pill ${currentStatus()}" id="sync-pill" data-act="settings">${escapeHtml(syncStatusLabel())}</button>`;
+  const label = syncStatusLabel();
+  return `<button type="button" class="sync-dot ${currentStatus()}" id="sync-pill" data-act="settings" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><i></i></button>`;
 }
 
 function lotHasRemoteFlash(id) {

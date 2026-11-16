@@ -2408,11 +2408,8 @@ function renderHeader() {
   return `
     <header class="header">
       <div class="header-left">
-        <img class="app-logo" src="icons/icon-192.png" alt="" width="28" height="28" />
-        <div class="header-titles">
-          <div class="header-date">${escapeHtml(formatDateLabel(state.day))}</div>
-          <div class="header-sub">拍賣標貨助手</div>
-        </div>
+        <img class="app-logo" src="icons/icon-192.png" alt="拍賣標貨助手" width="24" height="24" />
+        <div class="header-date">${escapeHtml(formatDateLabel(state.day))}</div>
       </div>
       <div class="header-right">
         <div class="half-switch" role="tablist">
