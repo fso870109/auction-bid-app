@@ -9,12 +9,14 @@ const SESSION_MACHINE_MAX = { fruit: 2, morning: 3, afternoon: 3 };
 const GROUP_RANK = {
   fruit: { '水果': 0 },
   morning: { '大宗': 0, '水菜': 1 },
-  afternoon: { '瓜果': 0, '菇菌': 1, '醃製': 2 }
+  afternoon: { '瓜果': 0, '醃製': 1 }
 };
 /* Official items below this 桃農 12-month volume (kg) are hidden from the
    default item grid. Search, custom items, and previously used items stay. */
 const VOLUME_GRID_MIN = 500;
 const ITEM_SIZES = ['大', '中', '小'];
+const MUSHROOM_CROPS = ['金絲菇', '杏鮑菇', '其他菇類', '鴻喜菇', '濕木耳', '濕香菇', '洋菇', '秀珍菇', '草菇', '珊瑚菇', '蠔菇', '巴西蘑菇', '松茸', '柳松菇', '猴頭菇'];
+const GOURD_FROM_BULK_CROPS = ['芋', '大蒜', '青花苔', '薑', '甘藷', '馬鈴薯', '薯蕷', '豆薯', '菊芋'];
 let itemQuery = '';
 let variantPick = null; // crop official name when variant sheet is open
 let itemPickScroll = 0;
@@ -179,7 +181,7 @@ function catalogSummary(half) {
   const counts = itemCountsOf(half);
   const crops = dedupeCrops(catalogCrops(half));
   const groups = half === 'fruit' ? ['水果']
-    : half === 'afternoon' ? ['瓜果', '菇菌', '醃製']
+    : half === 'afternoon' ? ['瓜果', '醃製']
     : ['大宗', '水菜'];
   const shown = crops.filter((c) => cropShownOnGrid(c, counts));
   const hidden = crops.length - shown.length;
@@ -578,6 +580,7 @@ function defaultState() {
     lastPriority: 'watch',
     dayRules: [],
     machinesMigratedV9: true,
+    itemsMigratedV17: true,
     planItems: []
   };
 }
@@ -618,6 +621,9 @@ function loadState() {
     if (!saved.machinesMigratedV9) {
       migrateMorning3500(merged);
       merged.machinesMigratedV9 = true;
+    }
+    if (!saved.itemsMigratedV17) {
+      migrateItemsV17(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -1160,6 +1166,67 @@ function migrateItemLists(merged) {
     }
   }
   merged.itemsMigratedV2 = true;
+}
+
+function officialNameSet(cropNames) {
+  const names = new Set(cropNames);
+  const catalog = typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : [];
+  for (const c of catalog) {
+    if (!cropNames.includes(c.n)) continue;
+    names.add(c.n);
+    names.add(c.l);
+    for (const a of c.a || []) names.add(a);
+    for (const v of c.s || []) {
+      names.add(v.n);
+      names.add(v.l);
+      for (const a of v.a || []) names.add(a);
+    }
+  }
+  return names;
+}
+
+function moveCustomsAndCounts(merged, fromHalf, toHalf, names) {
+  if (!merged.customItemsByHalf || typeof merged.customItemsByHalf !== 'object') {
+    merged.customItemsByHalf = { fruit: [], morning: [], afternoon: [] };
+  }
+  if (!Array.isArray(merged.customItemsByHalf[fromHalf])) merged.customItemsByHalf[fromHalf] = [];
+  if (!Array.isArray(merged.customItemsByHalf[toHalf])) merged.customItemsByHalf[toHalf] = [];
+  if (!merged.itemCountsByHalf || typeof merged.itemCountsByHalf !== 'object') {
+    merged.itemCountsByHalf = { fruit: {}, morning: {}, afternoon: {} };
+  }
+  if (!merged.itemCountsByHalf[fromHalf] || typeof merged.itemCountsByHalf[fromHalf] !== 'object') {
+    merged.itemCountsByHalf[fromHalf] = {};
+  }
+  if (!merged.itemCountsByHalf[toHalf] || typeof merged.itemCountsByHalf[toHalf] !== 'object') {
+    merged.itemCountsByHalf[toHalf] = {};
+  }
+  const destOfficial = catalogNameSet(toHalf);
+  const fromCust = merged.customItemsByHalf[fromHalf];
+  const toCust = merged.customItemsByHalf[toHalf];
+  const keep = [];
+  for (const raw of fromCust) {
+    const n = String(raw || '').trim();
+    if (!n) continue;
+    if (names.has(n)) {
+      if (!destOfficial.has(n) && !toCust.includes(n)) toCust.push(n);
+      continue;
+    }
+    keep.push(n);
+  }
+  merged.customItemsByHalf[fromHalf] = keep;
+  const fromCounts = merged.itemCountsByHalf[fromHalf];
+  const toCounts = merged.itemCountsByHalf[toHalf];
+  for (const [key, val] of Object.entries(fromCounts)) {
+    if (!names.has(key)) continue;
+    toCounts[key] = (toCounts[key] || 0) + (Number(val) || 0);
+    delete fromCounts[key];
+  }
+}
+
+function migrateItemsV17(merged) {
+  moveCustomsAndCounts(merged, 'afternoon', 'morning', officialNameSet(MUSHROOM_CROPS));
+  moveCustomsAndCounts(merged, 'morning', 'afternoon', officialNameSet(GOURD_FROM_BULK_CROPS));
+  merged.itemsMigratedV17 = true;
 }
 
 function defaultItems(half) {
@@ -2441,8 +2508,8 @@ function renderSettings() {
     ${halfBlocks}
     ${HALVES.map((half) => {
       const title = half === 'fruit' ? '水果場品項（水果）'
-        : half === 'afternoon' ? '下半場品項（瓜果、菇菌、醃製）'
-        : '上半場品項（大宗、水菜）';
+        : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、薑、薯類屬瓜果）'
+        : '上半場品項（大宗、水菜；香菇類屬大宗第一台）';
       const built = catalogSummary(half);
       const customs = customItemsOf(half);
       const list = customs.length
