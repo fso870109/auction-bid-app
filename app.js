@@ -2586,11 +2586,14 @@ function cycleLotStatus(id) {
     lot.secondMarket = false;
     label = '已標到';
   } else if (lot.status === 'won') {
+    next = 'lost';
+    label = '沒標到';
+  } else if (lot.status === 'lost') {
     next = 'moved';
     label = '已搬貨';
   } else if (lot.status === 'moved') {
-    next = 'lost';
-    label = '沒標到';
+    next = 'pending';
+    label = '改回未拍';
   } else {
     next = 'pending';
     label = '改回未拍';
