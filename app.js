@@ -387,6 +387,11 @@ let planDraft = '';
 let planQty = 1;
 let planPickOpen = false;
 let planAddTarget = 'tomorrow';
+let planGridTab = 'bulk';
+let planGridOpen = true;
+let planVariantPick = null;
+let planGridScroll = 0;
+let planUndo = null;
 let lastPlanWon = {};
 let lastPlanEvents = [];
 let planProgressLock = false;
@@ -1497,14 +1502,115 @@ function planHasText(text) {
   return activePlanItems().some((p) => p.text === t);
 }
 
-function addPlanText(text, which) {
+
+const PLAN_GRID_TABS = [
+  { id: 'fruit', label: '水果場', half: 'fruit', groups: null },
+  { id: 'bulk', label: '大宗', half: 'morning', groups: ['大宗'] },
+  { id: 'leafy', label: '水菜', half: 'morning', groups: ['水菜'] },
+  { id: 'gourd', label: '瓜果', half: 'afternoon', groups: ['瓜果', '醃製'] }
+];
+
+function snapshotPlanItems() {
+  return (state.planItems || []).map((p) => Object.assign({}, p));
+}
+
+function offerPlanUndo(snap, msg) {
+  planUndo = snap;
+  toast(msg, 2800, { label: '復原', fn: undoPlanLast });
+}
+
+function undoPlanLast() {
+  const snap = planUndo;
+  planUndo = null;
+  toastMsg = '';
+  toastAction = null;
+  if (!snap) return;
+  state.planItems = snap;
+  saveState();
+  toast('已復原');
+  buzz(24);
+  render();
+}
+
+function parsePlanDraft(text) {
+  const raw = String(text || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { text: '', qty: 1, explicit: false };
+  const m = raw.match(/^(.*?)(?:\s*[x×*]\s*|\s+)(\d{1,2})$/);
+  if (m && String(m[1]).trim()) {
+    const n = parseInt(m[2], 10);
+    if (Number.isFinite(n) && n >= 0 && n <= 99) {
+      return { text: m[1].trim(), qty: n, explicit: true };
+    }
+  }
+  return { text: raw, qty: 1, explicit: false };
+}
+
+function findPlanOnTarget(text, which) {
   const value = String(text || '').trim();
+  if (!value) return null;
+  const today = todayStr();
+  const target = which || planAddTarget || 'tomorrow';
+  return (state.planItems || []).find((p) => (
+    !p.done && p.text === value && (target === 'today' ? p.forDay <= today : p.forDay > today)
+  )) || null;
+}
+
+function planQtyOnTarget(text, which) {
+  const item = findPlanOnTarget(text, which);
+  return item ? planQtyOf(item) : 0;
+}
+
+function planCountBadge(text) {
+  const n = planQtyOnTarget(text);
+  if (n <= 0) return { cls: '', html: '', n: 0 };
+  return { cls: ' has-plan-qty', html: `<span class="plan-grid-badge">×${n}</span>`, n };
+}
+
+function addOrBumpPlanItem(text, which, opts) {
+  opts = opts || {};
+  const parsed = opts.parsed || {
+    text: String(text || '').trim(),
+    qty: opts.qty != null ? opts.qty : 1,
+    explicit: !!opts.explicit || opts.qty != null
+  };
+  const value = String(parsed.text || '').trim();
   if (!value) return false;
   const today = todayStr();
   const target = which || planAddTarget || 'tomorrow';
   const forDay = planTargetDay(target);
   if (!Array.isArray(state.planItems)) state.planItems = [];
-  if ((state.planItems || []).some((p) => !p.done && p.text === value && p.forDay === forDay)) return false;
+  const existing = findPlanOnTarget(value, target);
+  const snap = snapshotPlanItems();
+  if (existing) {
+    if (parsed.explicit) {
+      if (parsed.qty <= 0) {
+        state.planItems = state.planItems.filter((p) => p.id !== existing.id);
+        saveState();
+        offerPlanUndo(snap, `已刪除 ${value}`);
+        buzz(24);
+        render();
+        return true;
+      }
+      existing.qty = Math.min(99, parsed.qty);
+      saveState();
+      offerPlanUndo(snap, `${value}　${existing.qty} 件`);
+      buzz(24);
+      render();
+      return true;
+    }
+    existing.qty = Math.min(99, planQtyOf(existing) + 1);
+    saveState();
+    toast(`${value} +1（共${existing.qty}件）`);
+    buzz(24);
+    render();
+    revealPlanRow(value);
+    return true;
+  }
+  if (parsed.explicit && parsed.qty <= 0) {
+    toast('沒有這個品項');
+    return false;
+  }
+  const qty = parsed.explicit ? Math.min(99, Math.max(1, parsed.qty)) : 1;
   state.planItems.push({
     id: uid(),
     text: value,
@@ -1512,30 +1618,211 @@ function addPlanText(text, which) {
     done: false,
     doneOn: '',
     createdOn: today,
-    qty: planQtyOf({ qty: planQty }),
+    qty,
     doneBy: '',
     lockCount: 0
   });
-  planQty = 1;
   saveState();
+  if (parsed.explicit) {
+    toast(`${value}　${qty} 件`);
+  } else {
+    toast(`${value} +1（共${qty}件）`);
+  }
+  buzz(24);
+  render();
+  revealPlanRow(value);
   return true;
 }
 
-function togglePlanPick(text) {
-  const value = String(text || '').trim();
-  if (!value) return;
-  const today = todayStr();
-  const forDay = planTargetDay();
-  if (!Array.isArray(state.planItems)) state.planItems = [];
-  const existing = state.planItems.find((p) => !p.done && p.text === value && (forDay === today ? p.forDay <= today : p.forDay > today));
-  if (existing) {
-    state.planItems = state.planItems.filter((p) => p.id !== existing.id);
-    saveState();
+function revealPlanRow(text) {
+  const want = String(text || '').trim();
+  if (!want) return;
+  requestAnimationFrame(() => {
+    const nodes = document.querySelectorAll('.plan-row .plan-text');
+    for (const n of nodes) {
+      if ((n.textContent || '').trim() === want) {
+        const row = n.closest('.plan-row');
+        if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+        break;
+      }
+    }
+  });
+}
+
+function planGridCrops(tabId) {
+  const tab = PLAN_GRID_TABS.find((t) => t.id === tabId) || PLAN_GRID_TABS[1];
+  let list = visibleCrops(tab.half, '');
+  if (tab.groups) list = list.filter((c) => tab.groups.includes(c.g));
+  return { tab, list };
+}
+
+function cropPlanCount(crop) {
+  const keys = new Set();
+  const add = (t) => { const v = String(t || '').trim(); if (v) keys.add(v); };
+  const label = crop.l || crop.n;
+  add(label);
+  add(crop.n);
+  if (itemNeedsSize(crop.n) || itemNeedsSize(crop.l)) {
+    for (const s of ITEM_SIZES) add(label + ' ' + s);
+  }
+  for (const v of pickerVariants(crop, '')) {
+    add(v.l || v.n);
+    add(v.n);
+  }
+  let n = 0;
+  for (const k of keys) n += planQtyOnTarget(k);
+  return n;
+}
+
+function renderPlanGrid() {
+  const tabId = planGridTab || 'bulk';
+  const tabBtns = PLAN_GRID_TABS.map((t) => {
+    const on = t.id === tabId ? ' on' : '';
+    return `<button type="button" class="plan-grid-tab${on}" data-act="plan-grid-tab" data-v="${t.id}">${escapeHtml(t.label)}</button>`;
+  }).join('');
+
+  let body;
+  if (planVariantPick && planVariantPick.crop) {
+    const crop = planVariantPick.crop;
+    const label = crop.l || crop.n;
+    const kind = planVariantPick.kind;
+    const btns = [];
+    if (kind === 'size') {
+      const none = planCountBadge(label);
+      btns.push(`<button type="button" class="item-btn${none.cls}${peelClass(crop.n)}" data-act="plan-tap-item" data-name="${escapeHtml(label)}">不指定大小${none.html}</button>`);
+      for (const s of ITEM_SIZES) {
+        const text = label + ' ' + s;
+        const badge = planCountBadge(text);
+        btns.push(`<button type="button" class="item-btn${badge.cls}${peelClass(crop.n)}" data-act="plan-tap-item" data-name="${escapeHtml(text)}">${escapeHtml(s)}${badge.html}</button>`);
+      }
+      const vars = pickerVariants(crop, '');
+      if (vars.length > 1) {
+        btns.push('<div class="item-group-h">品種</div>');
+        for (const v of vars) {
+          const vlabel = v.l || v.n;
+          const badge = planCountBadge(vlabel);
+          btns.push(`<button type="button" class="item-btn${badge.cls}${peelClass(v.n)}" data-act="plan-tap-item" data-name="${escapeHtml(vlabel)}">${escapeHtml(vlabel)}${badge.html}</button>`);
+        }
+      }
+    } else {
+      const none = planCountBadge(label);
+      btns.push(`<button type="button" class="item-btn${none.cls}${peelClass(crop.n)}" data-act="plan-tap-item" data-name="${escapeHtml(label)}">不指定品種${none.html}</button>`);
+      for (const v of pickerVariants(crop, '')) {
+        const vlabel = v.l || v.n;
+        const badge = planCountBadge(vlabel);
+        btns.push(`<button type="button" class="item-btn${badge.cls}${peelClass(v.n)}" data-act="plan-tap-item" data-name="${escapeHtml(vlabel)}">${escapeHtml(vlabel)}${badge.html}</button>`);
+      }
+    }
+    const title = kind === 'size' ? escapeHtml(label) + ' 大小' : escapeHtml(label);
+    body = `<div class="plan-var-sheet">
+      <div class="var-sheet-head">
+        <button type="button" class="var-back" data-act="plan-close-vars">返回</button>
+        <div class="var-title">${title}</div>
+      </div>
+      <div class="item-pick plan-grid-list">${btns.join('')}</div>
+    </div>`;
+  } else {
+    const { tab, list } = planGridCrops(tabId);
+    const parts = [];
+    const customs = customItemsOf(tab.half)
+      .map((n) => String(n || '').trim())
+      .filter((n) => n);
+    if (customs.length) {
+      parts.push('<div class="item-group-h">自己輸入</div>');
+      for (const name of customs) {
+        const badge = planCountBadge(name);
+        parts.push(`<button type="button" class="item-btn custom${badge.cls}" data-act="plan-tap-item" data-name="${escapeHtml(name)}">${escapeHtml(name)}${badge.html}</button>`);
+      }
+    }
+    let lastGroup = null;
+    const showGroup = !tab.groups || tab.groups.length > 1;
+    for (const crop of list) {
+      if (showGroup && crop.g !== lastGroup) {
+        lastGroup = crop.g;
+        parts.push(`<div class="item-group-h">${escapeHtml(crop.g)}</div>`);
+      }
+      const needsSize = itemNeedsSize(crop.n) || itemNeedsSize(crop.l);
+      const hasVars = shouldOpenVariants(crop, '');
+      const n = cropPlanCount(crop);
+      const badge = n > 0 ? { cls: ' has-plan-qty', html: `<span class="plan-grid-badge">×${n}</span>` } : planCountBadge(crop.l);
+      const main = `<button type="button" class="item-btn${badge.cls}${peelClass(crop.n)}" data-act="plan-tap-item" data-name="${escapeHtml(crop.l)}">${escapeHtml(crop.l)}${badge.html}</button>`;
+      if (needsSize) {
+        parts.push(`<div class="plan-item-cell">${main}<button type="button" class="plan-var-nudge" data-act="plan-open-size" data-crop="${escapeHtml(crop.n)}" aria-label="${escapeHtml(crop.l)} 大小">▾</button></div>`);
+      } else if (hasVars) {
+        parts.push(`<div class="plan-item-cell">${main}<button type="button" class="plan-var-nudge" data-act="plan-open-vars" data-crop="${escapeHtml(crop.n)}" aria-label="${escapeHtml(crop.l)} 品種">▾</button></div>`);
+      } else {
+        parts.push(main);
+      }
+    }
+    body = `<div class="item-pick plan-grid-list">${parts.join('') || '<div class="plan-empty">這個分類沒有品項</div>'}</div>`;
+  }
+
+  return `<div class="plan-grid-tabs" role="tablist">${tabBtns}</div>${body}`;
+}
+
+function capturePlanGridScroll() {
+  const el = document.querySelector('.plan-grid-list');
+  if (el) planGridScroll = el.scrollTop;
+}
+
+function restorePlanGridScroll() {
+  const el = document.querySelector('.plan-grid-list');
+  if (el) el.scrollTop = planGridScroll;
+}
+
+function openPlanQtyEdit(id) {
+  const item = (state.planItems || []).find((p) => p.id === id);
+  if (!item) return;
+  modal = { type: 'plan-qty', id, value: String(planQtyOf(item)) };
+  render();
+}
+
+function applyPlanQtyDigit(d) {
+  if (!modal || modal.type !== 'plan-qty') return;
+  const cur = String(modal.value || '');
+  if (cur.length >= 2) return;
+  modal.value = (cur === '0' ? '' : cur) + String(d);
+  render();
+}
+
+function commitPlanQtyEdit() {
+  if (!modal || modal.type !== 'plan-qty') return;
+  const id = modal.id;
+  const raw = String(modal.value || '').trim();
+  const n = raw === '' ? NaN : parseInt(raw, 10);
+  modal = null;
+  setPlanQtyExact(id, n);
+}
+
+function setPlanQtyExact(id, qty) {
+  const item = (state.planItems || []).find((p) => p.id === id);
+  if (!item) {
     render();
     return;
   }
-  addPlanText(value);
+  const snap = snapshotPlanItems();
+  const n = parseInt(qty, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    state.planItems = state.planItems.filter((p) => p.id !== item.id);
+    saveState();
+    offerPlanUndo(snap, `已刪除 ${item.text}`);
+    buzz(24);
+    render();
+    return;
+  }
+  item.qty = Math.min(99, n);
+  saveState();
+  offerPlanUndo(snap, `${item.text}　${item.qty} 件`);
+  buzz(24);
   render();
+}
+
+function addPlanText(text, which) {
+  return addOrBumpPlanItem(text, which);
+}
+
+function togglePlanPick(text) {
+  addOrBumpPlanItem(text);
 }
 
 function planSuggestList(q) {
@@ -1561,6 +1848,8 @@ function openPlan() {
   planOpen = true;
   planPickOpen = false;
   planAddTarget = 'tomorrow';
+  planVariantPick = null;
+  planGridOpen = true;
   try {
     history.pushState({ auctionPlan: true }, '');
     planHistoryPushed = true;
@@ -1587,30 +1876,14 @@ function onPlanPopState() {
 }
 
 function addPlanItem(which) {
-  const text = String(planDraft || '').trim();
-  if (!text) {
+  const parsed = parsePlanDraft(planDraft);
+  if (!parsed.text) {
     toast('請先輸入預計要批的品項或備註');
     return;
   }
-  const today = todayStr();
-  const forDay = which === 'today' ? today : tomorrowStr(today);
-  if (!Array.isArray(state.planItems)) state.planItems = [];
-  state.planItems.push({
-    id: uid(),
-    text,
-    forDay,
-    done: false,
-    doneOn: '',
-    createdOn: today,
-    qty: planQtyOf({ qty: planQty }),
-    doneBy: '',
-    lockCount: 0
-  });
   planDraft = '';
   planQty = 1;
-  saveState();
-  toast(which === 'today' ? '已加入今日預計' : '已加入明日預計，明天還在');
-  render();
+  addOrBumpPlanItem(parsed.text, which || planAddTarget, { parsed });
 }
 
 function setPlanDone(id, done) {
@@ -1626,14 +1899,23 @@ function setPlanDone(id, done) {
 
 function planWonCount(plan) {
   if (!plan) return 0;
-  const map = assignWonToPlans();
-  return (map.get(plan.id) || []).length;
+  return planWonPieces(plan, assignWonToPlans());
 }
 
 function bumpPlanQty(id, delta) {
   const item = (state.planItems || []).find((p) => p.id === id);
   if (!item) return;
-  item.qty = Math.max(1, Math.min(99, planQtyOf(item) + delta));
+  const snap = snapshotPlanItems();
+  const next = planQtyOf(item) + (Number(delta) || 0);
+  if (next <= 0) {
+    state.planItems = state.planItems.filter((p) => p.id !== item.id);
+    saveState();
+    offerPlanUndo(snap, `已刪除 ${item.text}`);
+    buzz(24);
+    render();
+    return;
+  }
+  item.qty = Math.min(99, next);
   saveState();
   render();
 }
@@ -1644,8 +1926,12 @@ function bumpDraftQty(delta) {
 }
 
 function deletePlanItem(id) {
+  const item = (state.planItems || []).find((p) => p.id === id);
+  const snap = snapshotPlanItems();
   state.planItems = (state.planItems || []).filter((p) => p.id !== id);
   saveState();
+  offerPlanUndo(snap, item ? `已刪除 ${item.text}` : '已刪除');
+  buzz(24);
   render();
 }
 
@@ -1681,15 +1967,16 @@ function renderPlanScreen() {
     const won = kind === 'tomorrow' ? 0 : planWonPieces(p, wonMap);
     const remain = Math.max(0, qty - won);
     let remainHtml = '';
-    if (kind !== 'tomorrow' && qty > 1) {
+    if (kind !== 'tomorrow' && qty >= 1) {
       remainHtml = p.done && remain === 0
         ? `<span class="plan-remain ok">已完成<span class="plan-frac">${qty} 件</span></span>`
         : `<span class="plan-remain">還差 ${remain} 件<span class="plan-frac">${Math.min(won, qty)}/${qty}</span></span>`;
     }
-    const qtyCtrl = `<span class="plan-qty-mini">
-        <button type="button" class="plan-qty-btn" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少件數">−</button>
-        <span class="plan-qty-val">${qty}</span>
-        <button type="button" class="plan-qty-btn" data-act="plan-item-qty-inc" data-id="${escapeHtml(p.id)}" aria-label="增加件數">＋</button>
+    const qtyCtrl = kind === 'done'
+      ? `<span class="plan-qty-read">${qty}<span>件</span></span>`
+      : `<span class="plan-qty-row">
+        <button type="button" class="plan-qty-dec-lg" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少一件">−</button>
+        <button type="button" class="plan-qty-edit" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
       </span>`;
     return `<div class="plan-row${kind === 'done' ? ' done' : ''}">
       <button type="button" class="plan-check${p.done ? ' on' : ''}" data-act="${p.done ? 'plan-undone' : 'plan-done'}" data-id="${escapeHtml(p.id)}" aria-label="${p.done ? '取消完成' : '完成'}">${p.done ? '✓' : ''}</button>
@@ -1706,26 +1993,37 @@ function renderPlanScreen() {
     const on = target && planAddTarget === kind ? ' on' : '';
     const headAct = target ? ` data-act="plan-target" data-v="${kind}"` : '';
     return `<section class="plan-sec${on}">
-      <h2${headAct} class="${target ? 'plan-target' : ''}${on}">${title}${list.length ? `<span>${list.length}</span>` : ''}${target && planAddTarget === kind ? '<em>點選加入到這</em>' : ''}</h2>
+      <h2${headAct} class="${target ? 'plan-target' : ''}${on}">${title}${list.length ? `<span>${list.length}</span>` : ''}</h2>
       ${hint ? `<p class="plan-hint">${hint}</p>` : ''}
       ${list.length ? list.map((p) => row(p, kind)).join('') : '<div class="plan-empty">還沒有項目</div>'}
     </section>`;
   };
   const picks = planQuickPicks();
   const suggest = planSuggestList(planDraft);
-  const pickChips = picks.chips.map((c) => {
-    const on = planHasText(c.text) ? ' on' : '';
-    return `<button type="button" class="plan-pick${on}${peelClass(c.text)}" data-act="plan-pick" data-v="${escapeHtml(c.text)}">${escapeHtml(c.text)}${c.count > 1 ? `<span>${c.count}</span>` : ''}</button>`;
+  const pickBtns = picks.chips.map((c) => {
+    const badge = planCountBadge(c.text);
+    return `<button type="button" class="item-btn${badge.cls}${peelClass(c.text)}" data-act="plan-tap-item" data-name="${escapeHtml(c.text)}">${escapeHtml(c.text)}${badge.html}</button>`;
   }).join('');
   const pickBar = picks.chips.length
-    ? `<div class="plan-picks${planPickOpen ? ' open' : ''}">
-        <button type="button" class="plan-picks-toggle" data-act="toggle-plan-picks">${planPickOpen ? '收起' : '＋'}${escapeHtml(picks.label)} <span>${picks.chips.length}</span></button>
-        ${planPickOpen ? `<div class="plan-pick-tray">${pickChips}</div>` : ''}
+    ? `<div class="plan-yest">
+        <div class="plan-yest-label">${escapeHtml(picks.label)}</div>
+        <div class="item-pick plan-yest-list">${pickBtns}</div>
       </div>`
-    : `<div class="plan-picks muted"><div class="plan-picks-toggle dim">還沒有買過的紀錄（標到後會出現快選）</div></div>`;
+    : '';
   const suggestBox = suggest.length
     ? `<div class="plan-suggest">${suggest.map((s) => `<button type="button" class="plan-suggest-item${peelClass(s)}" data-act="plan-suggest" data-v="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
     : '';
+  const todayOn = planAddTarget === 'today' ? ' on' : '';
+  const tomoOn = planAddTarget === 'tomorrow' ? ' on' : '';
+  const targetRow = `<div class="plan-target-row">
+      <div class="plan-target-seg" role="tablist" aria-label="加到哪一天">
+        <span class="plan-target-lbl">加到</span>
+        <button type="button" class="${todayOn}" data-act="plan-target" data-v="today">今日</button>
+        <button type="button" class="${tomoOn}" data-act="plan-target" data-v="tomorrow">明日</button>
+      </div>
+      <button type="button" class="plan-grid-toggle" data-act="toggle-plan-grid">${planGridOpen ? '收起' : '選品項'}</button>
+    </div>`;
+  const gridBox = planGridOpen ? renderPlanGrid() : '';
   return `<div class="plan-screen" id="plan-screen">
     <header class="plan-bar">
       <button type="button" class="plan-back" data-act="close-plan">返回</button>
@@ -1733,25 +2031,17 @@ function renderPlanScreen() {
       <button type="button" class="plan-bar-link" data-act="open-summary">今日總結</button>
     </header>
     <div class="plan-body">
-      ${section('今日預計', '昨天先記下、今天要批的會留在這裡。開始新的一天也不會清掉。點標題可改成加到今日。', todayItems, 'today')}
-      ${section('明日預計', '先記下來，明天會自動變成今日預計。點標題可改成加到明日。', tomorrowItems, 'tomorrow')}
+      ${(todayItems.length || !planGridOpen) ? section('今日預計', planGridOpen ? '' : '昨天記下的會留在這裡，開始新的一天也不會清掉。', todayItems, 'today') : ''}
+      ${(tomorrowItems.length || !planGridOpen) ? section('明日預計', planGridOpen ? '' : '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow') : ''}
       ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
     </div>
     <div class="plan-add">
+      ${targetRow}
       ${pickBar}
+      ${gridBox}
       <div class="plan-input-wrap">
-        <input id="plan-input" maxlength="40" placeholder="輸入或搜尋品項，例如：高麗菜" value="${escapeHtml(planDraft)}" data-act="plan-draft" autocomplete="off" />
+        <input id="plan-input" maxlength="40" placeholder="搜尋品項，或輸入「高麗菜 5」直接設件數" value="${escapeHtml(planDraft)}" data-act="plan-draft" inputmode="search" autocomplete="off" />
         ${suggestBox}
-      </div>
-      <div class="plan-add-btns">
-        <div class="plan-qty" aria-label="件數">
-          <button type="button" class="plan-qty-btn" data-act="plan-qty-dec" aria-label="減少件數">−</button>
-          <span class="plan-qty-val">${planQtyOf({ qty: planQty })}</span>
-          <span class="plan-qty-unit">件</span>
-          <button type="button" class="plan-qty-btn" data-act="plan-qty-inc" aria-label="增加件數">＋</button>
-        </div>
-        <button type="button" class="btn${planAddTarget === 'today' ? ' primary' : ''}" data-act="plan-add" data-v="today">加入今日</button>
-        <button type="button" class="btn${planAddTarget === 'tomorrow' ? ' primary' : ''}" data-act="plan-add" data-v="tomorrow">加入明日</button>
       </div>
     </div>
     <div class="plan-footer">
@@ -3722,6 +4012,7 @@ function render() {
 
   captureLiveScroll();
   captureItemPickScroll();
+  capturePlanGridScroll();
   const liveCls = state.tab === 'live' && !showSettings ? ' live-mode' : '';
   const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
   app.innerHTML =
@@ -3739,11 +4030,20 @@ function render() {
   restoreFocus(focusId, start, end);
   restoreLiveScroll();
   restoreItemPickScroll();
+  restorePlanGridScroll();
   if (modal?.type === 'type-item') {
     const input = document.getElementById('type-item-input');
     if (input && document.activeElement !== input) {
       input.focus();
       const len = input.value.length;
+      try { input.setSelectionRange(len, len); } catch { /* ignore */ }
+    }
+  }
+  if (modal?.type === 'plan-qty') {
+    const input = document.getElementById('plan-qty-input');
+    if (input && document.activeElement !== input) {
+      input.focus();
+      const len = String(input.value || '').length;
       try { input.setSelectionRange(len, len); } catch { /* ignore */ }
     }
   }
@@ -4225,6 +4525,30 @@ function renderModal() {
       </div>
     </div>`;
   }
+  if (modal.type === 'plan-qty') {
+    const item = (state.planItems || []).find((p) => p.id === modal.id);
+    const val = modal.value != null ? String(modal.value) : (item ? String(planQtyOf(item)) : '');
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
+    const keypad = keys
+      .map((k) => {
+        if (k === '⌫') return `<button type="button" class="key muted" data-act="plan-qty-back">⌫</button>`;
+        if (k === 'C') return `<button type="button" class="key muted" data-act="plan-qty-clear">清除</button>`;
+        return `<button type="button" class="key" data-act="plan-qty-digit" data-v="${k}">${k}</button>`;
+      })
+      .join('');
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet plan-qty-sheet" data-stop="1">
+        <h3>件數${item ? '　' + escapeHtml(item.text) : ''}</h3>
+        <input id="plan-qty-input" class="plan-qty-input" inputmode="numeric" pattern="[0-9]*" maxlength="2" value="${escapeHtml(val)}" data-act="plan-qty-type" autocomplete="off" />
+        <div class="keypad">${keypad}</div>
+        <p class="empty-hint">輸入 0 再按確定會刪掉這一列，可再按復原。</p>
+        <div class="sheet-actions">
+          <button type="button" class="btn" data-act="modal-cancel">取消</button>
+          <button type="button" class="btn primary" data-act="plan-qty-ok">確定</button>
+        </div>
+      </div>
+    </div>`;
+  }
   if (modal.type === 'edit-cur' || editCurrent) {
     const ed = editCurrent;
     const m = machineById(ed.machineId);
@@ -4569,8 +4893,65 @@ function onClick(e) {
       break;
     case 'plan-suggest':
       planDraft = '';
-      addPlanText(v);
+      addOrBumpPlanItem(v);
+      break;
+    case 'plan-tap-item':
+      addOrBumpPlanItem(btn.dataset.name);
+      break;
+    case 'plan-open-size': {
+      const crop = findCrop(btn.dataset.crop);
+      if (crop) {
+        planVariantPick = { kind: 'size', crop };
+        planGridOpen = true;
+        render();
+      }
+      break;
+    }
+    case 'plan-open-vars': {
+      const crop = findCrop(btn.dataset.crop);
+      if (crop) {
+        planVariantPick = { kind: 'vars', crop };
+        planGridOpen = true;
+        render();
+      }
+      break;
+    }
+    case 'plan-close-vars':
+      planVariantPick = null;
       render();
+      break;
+    case 'plan-grid-tab':
+      planGridTab = v || 'bulk';
+      planVariantPick = null;
+      planGridOpen = true;
+      planGridScroll = 0;
+      render();
+      break;
+    case 'toggle-plan-grid':
+      planGridOpen = !planGridOpen;
+      if (planGridOpen) planVariantPick = null;
+      render();
+      break;
+    case 'plan-qty-edit':
+      openPlanQtyEdit(btn.dataset.id);
+      break;
+    case 'plan-qty-digit':
+      applyPlanQtyDigit(v);
+      break;
+    case 'plan-qty-back':
+      if (modal && modal.type === 'plan-qty') {
+        modal.value = String(modal.value || '').slice(0, -1);
+        render();
+      }
+      break;
+    case 'plan-qty-clear':
+      if (modal && modal.type === 'plan-qty') {
+        modal.value = '';
+        render();
+      }
+      break;
+    case 'plan-qty-ok':
+      commitPlanQtyEdit();
       break;
     case 'plan-done':
       setPlanDone(btn.dataset.id, true);
@@ -4906,6 +5287,13 @@ function onInput(e) {
   if (act === 'plan-draft' || el.id === 'plan-input') {
     planDraft = el.value;
     render();
+    return;
+  }
+  if (act === 'plan-qty-type' || el.id === 'plan-qty-input') {
+    if (modal && modal.type === 'plan-qty') {
+      modal.value = String(el.value || '').replace(/\D/g, '').slice(0, 2);
+      if (el.value !== modal.value) el.value = modal.value;
+    }
     return;
   }
   if (act === 'new-item' || act === 'edit-item-name' || act === 'type-item-name') {
@@ -5461,6 +5849,12 @@ function bind() {
       e.preventDefault();
       planDraft = e.target.value;
       addPlanItem(planAddTarget || 'tomorrow');
+      return;
+    }
+    if (act === 'plan-qty-type' || id === 'plan-qty-input') {
+      e.preventDefault();
+      if (modal && modal.type === 'plan-qty') modal.value = e.target.value;
+      commitPlanQtyEdit();
       return;
     }
     if (act === 'sync-join-input' || id === 'sync-join-code') {

@@ -2831,3 +2831,255 @@ button.lot-cell {
   .sum-totals .tot b { font-size: 24px; }
   .item-btn .need-badge { font-size: 10px; height: 15px; line-height: 15px; }
 }
+
+
+/* v37: plan tap-to-add grid, typable qty, large minus */
+.plan-body { min-height: 80px; }
+.plan-add { padding: 8px 12px 6px; }
+.plan-target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.plan-target-seg {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  min-height: 48px;
+  background: #1a1a1a;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.plan-target-lbl {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--muted);
+  background: #141414;
+  white-space: nowrap;
+}
+.plan-target-seg button {
+  font-weight: 800;
+  font-size: clamp(16px, 4.4vw, 18px);
+  min-height: 48px;
+  color: var(--text);
+}
+.plan-target-seg button.on {
+  background: var(--yellow);
+  color: var(--yellow-text);
+}
+.plan-grid-toggle {
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 48px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #171717;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--text);
+}
+.plan-grid-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin: 0 0 6px;
+}
+.plan-grid-tab {
+  min-height: 40px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: clamp(13px, 3.6vw, 15px);
+  background: #1a1a1a;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 0 2px;
+}
+.plan-grid-tab.on {
+  background: var(--yellow);
+  color: var(--yellow-text);
+  border-color: var(--yellow);
+}
+.plan-add .item-pick.plan-grid-list,
+.plan-grid-list {
+  flex: 0 1 auto;
+  grid-template-columns: 1fr 1fr 1fr;
+  max-height: min(32vh, 220px);
+  min-height: 96px;
+}
+.plan-yest { margin: 0 0 6px; }
+.plan-yest-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.plan-add .item-pick.plan-yest-list,
+.plan-yest-list {
+  flex: 0 1 auto;
+  grid-template-columns: 1fr 1fr 1fr;
+  max-height: 108px;
+  min-height: 0;
+}
+.item-btn.has-plan-qty { padding-top: 14px; }
+.item-btn .plan-grid-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  min-width: 22px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #ffe500;
+  color: #111;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  letter-spacing: 0;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.plan-qty-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.plan-qty-dec-lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #171717;
+  border: 1px solid var(--line);
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--text);
+}
+.plan-qty-dec-lg:active { background: var(--bg-press); }
+.plan-qty-edit,
+.plan-qty-read {
+  min-width: 52px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #171717;
+  font-weight: 900;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.05;
+  color: var(--text);
+}
+.plan-qty-edit span,
+.plan-qty-read span {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.plan-qty-edit:active { background: var(--bg-press); }
+.plan-del {
+  min-height: 44px;
+  min-width: 40px;
+  font-size: 14px;
+}
+.plan-qty-input {
+  display: block;
+  width: 100%;
+  font-size: clamp(36px, 12vw, 52px);
+  font-weight: 900;
+  text-align: center;
+  min-height: 64px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  background: #111;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  margin: 8px 0;
+  padding: 4px 8px;
+}
+.plan-qty-sheet .empty-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.plan-var-sheet { min-height: 0; }
+@media (max-width: 360px) {
+  .plan-qty-dec-lg { width: 42px; height: 42px; font-size: 24px; }
+  .plan-qty-edit, .plan-qty-read { min-width: 48px; font-size: 18px; }
+  .plan-grid-tab { font-size: 12px; min-height: 38px; }
+  .item-btn .plan-grid-badge { font-size: 10px; height: 15px; line-height: 15px; }
+  .plan-target-lbl { padding: 0 8px; font-size: 13px; }
+}
+@media (max-width: 330px) {
+  .plan-add .item-pick.plan-grid-list,
+  .plan-grid-list { max-height: min(28vh, 180px); }
+}
+
+.plan-item-cell {
+  position: relative;
+  min-height: 48px;
+  display: flex;
+}
+.plan-item-cell .item-btn {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 48px;
+}
+.plan-var-nudge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px 0 8px 0;
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0;
+}
+.plan-var-nudge:active { background: rgba(0, 0, 0, 0.45); }
+
+/* v37-compact-list: keep counted rows visible above the grid */
+.plan-body { padding: 8px 14px 8px; min-height: 96px; }
+.plan-sec { margin-bottom: 10px; }
+.plan-sec h2 { margin: 0 0 2px; }
+.plan-empty { padding: 4px 0; font-size: 12px; }
+.plan-row { padding: 6px 0; }
+.plan-add .item-pick.plan-grid-list,
+.plan-grid-list {
+  max-height: min(26vh, 172px);
+  min-height: 96px;
+}
+@media (max-width: 330px) {
+  .plan-add .item-pick.plan-grid-list,
+  .plan-grid-list { max-height: min(24vh, 148px); min-height: 88px; }
+}
+
+@media (max-height: 700px) {
+  .plan-add .item-pick.plan-grid-list,
+  .plan-grid-list { max-height: 108px; min-height: 72px; }
+  .plan-yest-list, .plan-add .item-pick.plan-yest-list { max-height: 52px; }
+  .plan-footer { padding-bottom: calc(8px + var(--safe-b)); }
+  .plan-back-lg { min-height: 48px; font-size: 18px; }
+  .plan-target-row { margin-bottom: 6px; }
+  .plan-target-seg, .plan-target-seg button, .plan-grid-toggle { min-height: 42px; }
+  .plan-add input { min-height: 40px; }
+}
