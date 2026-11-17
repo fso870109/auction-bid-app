@@ -440,6 +440,10 @@ function formatDateLabel(iso) {
   return `${m}/${d}（${WEEKDAYS[dt.getDay()]}）`;
 }
 
+function thumbHand() {
+  return state && state.thumbHand === 'right' ? 'right' : 'left';
+}
+
 function addDaysIso(iso, n) {
   const [y, m, d] = String(iso || todayStr()).split('-').map(Number);
   const dt = new Date(y, m - 1, d + n);
@@ -2082,6 +2086,7 @@ function defaultState() {
     paddleTheme: 'yellow',
     vibrate: true,
     keepAwake: true,
+    thumbHand: 'left',
     alertGap: 3,
     autoSave4: true,
     currentHalf: 'fruit',
@@ -2155,6 +2160,7 @@ function loadState() {
     migrateItemLists(merged);
     if (!Array.isArray(merged.dayRules)) merged.dayRules = [];
     if (!['must', 'watch', 'skip'].includes(merged.lastPriority)) merged.lastPriority = 'watch';
+    if (merged.thumbHand !== 'right') merged.thumbHand = 'left';
     if (!saved.machinesMigratedV9) {
       migrateMorning3500(merged);
       merged.machinesMigratedV9 = true;
@@ -4218,8 +4224,8 @@ function renderNote() {
         <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
       </div>
       ${sizeBlock}
-      <div class="note-tools">
-        <button type="button" class="linkish plan-open-btn" data-act="open-plan">備註${planN ? `<span class="plan-count">${planN}</span>` : ''}</button>
+      <div class="note-tools hand-${thumbHand()}">
+        <button type="button" class="plan-open-btn" data-act="open-plan">備註${planN ? `<span class="plan-count">${planN}</span>` : ''}</button>
       </div>
     </div>`;
 }
@@ -4419,6 +4425,13 @@ function renderSettings() {
       <div class="switch-row">
         <div><div class="lbl">保持螢幕亮著</div><div class="sub">開著 App 時不讓螢幕休眠（裝置不支援會自動略過）</div></div>
         <button type="button" class="toggle${state.keepAwake ? ' on' : ''}" data-act="toggle-awake"><i></i></button>
+      </div>
+      <div class="switch-row hand-row">
+        <div><div class="lbl">備註按鈕位置</div><div class="sub">左手放左下，右手放右下，單手拇指比較好按</div></div>
+        <div class="hand-seg" role="group" aria-label="備註按鈕位置">
+          <button type="button" class="${thumbHand() === 'left' ? 'on' : ''}" data-act="set-hand" data-v="left">左手</button>
+          <button type="button" class="${thumbHand() === 'right' ? 'on' : ''}" data-act="set-hand" data-v="right">右手</button>
+        </div>
       </div>
     </div>
     ${halfBlocks}
@@ -5194,6 +5207,11 @@ function onClick(e) {
       break;
     case 'toggle-vibrate':
       state.vibrate = !state.vibrate;
+      saveState();
+      render();
+      break;
+    case 'set-hand':
+      state.thumbHand = v === 'right' ? 'right' : 'left';
       saveState();
       render();
       break;

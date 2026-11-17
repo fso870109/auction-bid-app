@@ -1290,23 +1290,13 @@ input:focus, textarea:focus {
 .note-tools {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 8px;
   margin: 0;
-  min-height: 24px;
+  min-height: 56px;
 }
-.note-tools .auto {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 800;
-  font-size: 12px;
-  color: var(--muted);
-}
-.note-tools .toggle { width: 42px; height: 24px; }
-.note-tools .toggle i { width: 18px; height: 18px; top: 3px; }
-.note-tools .toggle.on i { left: 20px; }
+.note-tools.hand-right { justify-content: flex-end; }
 .note-screen .remark { flex: 0 0 auto; margin: 0; }
 .note-screen .remark input { min-height: 36px; font-size: 14px; }
 
@@ -2182,24 +2172,68 @@ button.lot-cell {
 }
 
 /* v16: 備註 page, size chips, plan badge */
+/* v38: large thumb-zone 備註 button, left or right by handedness */
 .plan-open-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  min-height: 56px;
+  min-width: 112px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  color: var(--text);
   font-weight: 800;
+  font-size: clamp(16px, 4.4vw, 17px);
+  line-height: 1;
 }
+.plan-open-btn:active { background: var(--bg-press); }
 .plan-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
+  min-width: 22px;
+  height: 22px;
   border-radius: 999px;
   background: #038736;
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 900;
-  padding: 0 5px;
+  padding: 0 6px;
+}
+.hand-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 148px;
+  background: #0c0c0c;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 2px;
+}
+.hand-seg button {
+  min-height: 40px;
+  min-width: 56px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text);
+}
+.hand-seg button.on {
+  background: var(--yellow);
+  color: var(--yellow-text);
+}
+@media (max-width: 360px) {
+  .switch-row.hand-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hand-seg { width: 100%; min-width: 0; }
+  .plan-open-btn { min-width: 104px; padding: 0 14px; }
 }
 .size-chips {
   flex: 0 0 auto;
