@@ -2589,8 +2589,8 @@ function cycleLotStatus(id) {
     next = 'moved';
     label = '已搬貨';
   } else if (lot.status === 'moved') {
-    next = 'won';
-    label = '改回標到';
+    next = 'lost';
+    label = '沒標到';
   } else {
     next = 'pending';
     label = '改回未拍';
