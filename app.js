@@ -3511,7 +3511,7 @@ function renderNote() {
       chipClass += ' warn';
     } else {
       machineHint = '輸入後自動判斷台別';
-      chipClass += ' warn';
+      chipClass += ' idle';
     }
   }
 

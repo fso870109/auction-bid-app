@@ -1,4 +1,5 @@
 const CACHE = 'auction-bid-v34';
+const BUILD = 'note-head';
 const ASSETS = [
   './',
   './index.html',
@@ -20,7 +21,7 @@ const ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.delete(CACHE).then(() => caches.open(CACHE)).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
   );
 });
 
