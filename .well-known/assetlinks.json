@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.vegbid.helper",
+      "sha256_cert_fingerprints": [
+        "7B:B3:44:D6:5C:81:2F:0E:8D:47:7F:9A:BD:6F:63:6C:64:41:53:5F:AB:E2:F5:41:1A:DC:EE:A7:87:42:6B:2B"
+      ]
+    }
+  }
+]
