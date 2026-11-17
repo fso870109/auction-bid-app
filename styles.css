@@ -911,20 +911,34 @@ input:focus, textarea:focus {
 
 .toast {
   position: fixed;
-  left: 50%;
-  bottom: calc(var(--nav-h) + var(--safe-b) + 16px);
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  top: var(--safe-t);
+  bottom: auto;
+  transform: none;
+  width: 100%;
+  max-width: none;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
   background: #f6f6f6;
   color: #111;
   font-weight: 800;
-  padding: 10px 16px;
-  border-radius: 999px;
+  font-size: 13px;
+  padding: 0 10px 0 12px;
+  border-radius: 0 0 10px 10px;
   z-index: 1200;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  white-space: normal;
-  text-align: center;
-  line-height: 1.35;
-  max-width: calc(100vw - 24px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  text-align: left;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+}
+@media (max-width: 360px) {
+  .toast { height: 32px; min-height: 32px; max-height: 32px; font-size: 12px; padding: 0 8px 0 10px; }
 }
 
 .setup {
@@ -2097,30 +2111,32 @@ button.lot-cell {
   font-size: 11px;
 }
 
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: calc(100vw - 24px);
-}
-.toast.has-action { padding: 8px 8px 8px 16px; border-radius: 18px; align-items: center; }
-.toast.has-action span {
-  overflow: visible;
-  text-overflow: unset;
-  white-space: pre-wrap;
-  word-break: keep-all;
+.toast span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
   text-align: left;
-  line-height: 1.35;
+  line-height: 1.2;
 }
+.toast.has-action { padding-right: 6px; }
 .toast button {
   flex: 0 0 auto;
   font-weight: 900;
   color: #111;
   background: var(--yellow);
   border-radius: 999px;
-  padding: 4px 12px;
+  padding: 0 10px;
+  height: 28px;
   min-height: 28px;
+  min-width: 44px;
   font-size: 13px;
+  line-height: 1;
+}
+@media (max-width: 360px) {
+  .toast button { min-width: 40px; height: 26px; min-height: 26px; padding: 0 8px; font-size: 12px; }
 }
 
 /* v16: 備註 page, size chips, plan badge */
@@ -2370,7 +2386,8 @@ button.lot-cell {
 }
 .plan-back-lg:active { filter: brightness(0.94); }
 #app:has(#plan-screen) .toast {
-  bottom: calc(12px + 56px + 12px + var(--safe-b) + 8px);
+  top: var(--safe-t);
+  bottom: auto;
 }
 .plan-add input { min-height: 44px; font-size: 16px; }
 .plan-add-btns { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; margin-top: 8px; align-items: stretch; }

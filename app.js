@@ -1037,7 +1037,7 @@ function latestPlanToast() {
 function withPlanToast(base) {
   const note = latestPlanToast();
   if (!base) return note;
-  return note ? base + '\n' + note : base;
+  return note ? base + '　' + note : base;
 }
 
 function applyPlanProgressFromLots(opts) {
@@ -2511,10 +2511,24 @@ function paintToast(el) {
     el.innerHTML = '';
     return;
   }
+  const text = escapeHtml(String(toastMsg || '').replace(/\s+/g, ' ').trim());
   if (toastAction) {
-    el.innerHTML = `<span>${escapeHtml(toastMsg).replace(/\n/g, '<br>')}</span><button type="button" data-act="undo">${escapeHtml(toastAction.label || '復原')}</button>`;
+    el.innerHTML = `<span>${text}</span><button type="button" data-act="undo">${escapeHtml(toastAction.label || '復原')}</button>`;
   } else {
-    el.textContent = toastMsg;
+    el.innerHTML = `<span>${text}</span>`;
+  }
+  requestAnimationFrame(fitToastText);
+}
+
+function fitToastText() {
+  const label = document.querySelector('#toast:not(.hidden) span');
+  if (!label) return;
+  label.style.fontSize = '';
+  let size = parseFloat(getComputedStyle(label).fontSize) || 13;
+  const min = 11;
+  while (size > min && label.scrollWidth > label.clientWidth + 0.5) {
+    size -= 0.5;
+    label.style.fontSize = size + 'px';
   }
 }
 
@@ -3159,6 +3173,7 @@ function render() {
     `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
 
   paintToast(document.getElementById('toast'));
+  requestAnimationFrame(fitToastText);
   restoreFocus(focusId, start, end);
   restoreLiveScroll();
   restoreItemPickScroll();
