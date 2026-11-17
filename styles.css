@@ -1329,7 +1329,7 @@ input:focus, textarea:focus {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-auto-flow: row;
-  grid-auto-rows: minmax(36px, auto);
+  grid-auto-rows: auto;
   align-content: start;
   gap: 4px;
   overflow-x: hidden;
@@ -1340,13 +1340,13 @@ input:focus, textarea:focus {
 }
 .item-pick::-webkit-scrollbar { width: 0; height: 0; }
 .item-btn {
-  min-height: 36px;
-  padding: 2px 3px;
+  min-height: 48px;
+  padding: 3px 4px;
   border-radius: 8px;
   background: var(--bg-card);
   border: 1px solid var(--line);
   font-weight: 800;
-  font-size: 12px;
+  font-size: clamp(18px, 5vw, 20px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1355,6 +1355,8 @@ input:focus, textarea:focus {
   white-space: normal;
   line-height: 1.15;
   overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .item-btn:active { background: var(--bg-press); transform: scale(0.97); }
 .item-btn.on {
@@ -1459,13 +1461,18 @@ input:focus, textarea:focus {
   font-size: 10px;
   font-weight: 800;
   color: var(--muted);
-  padding: 6px 2px 0;
+  padding: 8px 2px 0;
+  margin: 0;
   letter-spacing: 0.08em;
   line-height: 1.2;
+  align-self: start;
+}
+.item-group-h:first-child {
+  padding-top: 2px;
 }
 .item-btn .var-n {
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   opacity: 0.7;
   margin-left: 1px;
@@ -1519,7 +1526,7 @@ input:focus, textarea:focus {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-auto-rows: minmax(36px, auto);
+  grid-auto-rows: auto;
   align-content: start;
   gap: 4px;
   overflow-y: auto;
@@ -2124,7 +2131,7 @@ button.lot-cell {
 .item-btn.item-add {
   border-style: dashed;
   color: var(--blue);
-  font-size: 11px;
+  font-size: clamp(15px, 4.2vw, 17px);
 }
 
 .toast span {
@@ -2440,7 +2447,7 @@ button.lot-cell {
   text-align: left;
   padding: 10px 12px;
   font-weight: 800;
-  font-size: 15px;
+  font-size: clamp(16px, 4.6vw, 18px);
   border-bottom: 1px solid var(--line);
   min-height: 44px;
 }
@@ -2495,13 +2502,13 @@ button.lot-cell {
   -webkit-overflow-scrolling: touch;
 }
 .plan-pick {
-  min-height: 34px;
+  min-height: 40px;
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid #3a3a3a;
   background: #1a1a1a;
   font-weight: 800;
-  font-size: 13px;
+  font-size: clamp(16px, 4.4vw, 18px);
   display: inline-flex;
   align-items: center;
   gap: 5px;

@@ -3346,6 +3346,25 @@ function restoreItemPickScroll() {
 }
 
 /* ---------- Render ---------- */
+
+function fitItemBtnLabels() {
+  document.querySelectorAll('.item-btn, .plan-pick').forEach((btn) => {
+    btn.style.fontSize = '';
+    btn.style.whiteSpace = '';
+    const cs = getComputedStyle(btn);
+    let size = parseFloat(cs.fontSize) || 18;
+    const oneLineMin = 16;
+    btn.style.whiteSpace = 'nowrap';
+    while (size > oneLineMin && btn.scrollWidth > btn.clientWidth + 0.5) {
+      size -= 0.5;
+      btn.style.fontSize = size + 'px';
+    }
+    if (btn.scrollWidth > btn.clientWidth + 0.5) {
+      btn.style.whiteSpace = 'normal';
+    }
+  });
+}
+
 function fitLotCellNames() {
   document.querySelectorAll('.lot-cell .cell-item-name').forEach((el) => {
     el.style.fontSize = '';
@@ -3401,6 +3420,7 @@ function render() {
   if (state.tab === 'live' && !showSettings) requestAnimationFrame(fitLotCellNames);
   if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
   if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
+  requestAnimationFrame(fitItemBtnLabels);
 }
 
 function restoreFocus(focusId, start, end) {
@@ -4941,6 +4961,7 @@ function bind() {
       applyCssLandscapeIfNeeded();
       fitPaddleDigits();
     }
+    requestAnimationFrame(fitItemBtnLabels);
   });
   window.addEventListener('orientationchange', () => {
     if (paddleOpen) {
