@@ -287,7 +287,7 @@ function renderItemPicker(half, opts) {
     const badge = shouldOpenVariants(crop, q) ? '<span class="var-n">▾</span>' : '';
     const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
     parts.push(
-      `<button type="button" class="item-btn${on}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}</button>`
+      `<button type="button" class="item-btn${on}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}</button>`
     );
     if (q) {
       for (const v of (crop.s || [])) {
@@ -295,7 +295,7 @@ function renderItemPicker(half, opts) {
         const von = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
         const vlabel = (v.imp ? '進口 ' : '') + (v.l || v.n);
         parts.push(
-          `<button type="button" class="item-btn${von}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(vlabel)}</button>`
+          `<button type="button" class="item-btn${von}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(vlabel)}</button>`
         );
       }
     }
@@ -313,7 +313,7 @@ function renderItemPicker(half, opts) {
       const vars = pickerVariants(crop, q);
       const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
       const vBtns = [
-        `<button type="button" class="item-btn${active === crop.l || active === crop.n ? ' on' : ''}" data-act="pick-item" data-name="${escapeHtml(crop.l)}"${lotAttr}>不指定品種</button>`
+        `<button type="button" class="item-btn${active === crop.l || active === crop.n ? ' on' : ''}${peelClass(crop.n)}" data-act="pick-item" data-name="${escapeHtml(crop.l)}"${lotAttr}>不指定品種</button>`
       ];
       for (const v of vars) {
         const on = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
@@ -324,7 +324,7 @@ function renderItemPicker(half, opts) {
           label = rest ? '進口 ' + rest : '進口';
         }
         vBtns.push(
-          `<button type="button" class="item-btn${on}${imp}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(label)}</button>`
+          `<button type="button" class="item-btn${on}${imp}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(label)}</button>`
         );
       }
       sheet = `<div class="var-sheet">
@@ -534,6 +534,191 @@ function resolvePlanName(name) {
     }
   }
   return { level: 'exact', exact: n, crop: null, variety: null };
+}
+
+
+/* 下半場 瓜果 buttons: typical peel/skin color. Only 瓜果, not 醃製. */
+const GOURD_PEEL_CROP = {
+  '花椰菜': 'cream',
+  '甘藷': 'copper',
+  '馬鈴薯': 'tan',
+  '青花苔': 'darkGreen',
+  '球莖甘藍': 'paleGreen',
+  '大蒜': 'white',
+  '芋': 'tan',
+  '竹筍': 'paleYellow',
+  '薑': 'tan',
+  '萵苣莖': 'paleGreen',
+  '薯蕷': 'tan',
+  '豆薯': 'tan',
+  '蓮藕': 'tan',
+  '蘆筍': 'green',
+  '牛蒡': 'tan',
+  '菊芋': 'tan',
+  '玉米': 'yellow',
+  '番茄': 'red',
+  '小黃瓜': 'green',
+  '南瓜': 'orange',
+  '絲瓜': 'green',
+  '苦瓜': 'paleGreen',
+  '茄子': 'purple',
+  '甜椒': 'green',
+  '扁蒲': 'paleGreen',
+  '胡瓜': 'green',
+  '冬瓜': 'darkGreen',
+  '敏豆': 'green',
+  '隼人瓜': 'paleGreen',
+  '菜豆': 'green',
+  '美人腿': 'cream',
+  '辣椒': 'chili',
+  '豌豆': 'green',
+  '秋葵': 'green',
+  '毛豆': 'green',
+  '萊豆': 'green',
+  '落花生': 'tan',
+  '虎豆': 'brown',
+  '金針花': 'orange',
+  '越瓜': 'paleGreen',
+  '鵲豆': 'brown',
+  '洛神花': 'crimson',
+  '花豆': 'brick',
+  '石蓮花': 'sage',
+  '藤川七': 'green',
+  '其他花類': 'lilac',
+  '樊花': 'lilac',
+  '瓊花': 'lilac',
+  '百果': 'lilac',
+  '蠶豆': 'green'
+};
+
+const GOURD_PEEL_VARIANT = {
+  '甘藷-臺農66號': 'copper',
+  '甘藷-臺農57號': 'gold',
+  '甘藷-芋仔甘薯': 'purple',
+  '甘藷-芋仔甘藷': 'purple',
+  '大蒜-蒜苔': 'paleGreen',
+  '大蒜-蔥蒜': 'paleGreen',
+  '薑-嫩薑': 'pink',
+  '薑-粉薑': 'pink',
+  '薑-老薑': 'brown',
+  '薑-薑黃': 'gold',
+  '薯蕷-白薯蕷': 'cream',
+  '薯蕷-白薯蕷人參': 'cream',
+  '薯蕷-紅薯蕷': 'copper',
+  '蓮藕-蓮子': 'cream',
+  '蘆筍-綠蘆筍': 'green',
+  '蘆筍-白蘆筍': 'cream',
+  '玉米-糯米黑': 'darkViolet',
+  '玉米-白龍王': 'white',
+  '玉米-超甜白': 'white',
+  '玉米-糯米白': 'white',
+  '玉米-白玉米': 'white',
+  '玉米-玉米筍': 'paleYellow',
+  '玉米-玉米筍 帶殼': 'paleGreen',
+  '番茄-牛蕃茄': 'red',
+  '番茄-黑柿': 'blackRed',
+  '番茄-粉柿': 'pink',
+  '南瓜-青如意': 'green',
+  '南瓜-栗子小黑': 'darkViolet',
+  '南瓜-東昇': 'orange',
+  '苦瓜-白大米': 'paleGreen',
+  '苦瓜-青大米': 'green',
+  '苦瓜-翠綠': 'green',
+  '苦瓜-山苦瓜': 'darkGreen',
+  '茄子-胭脂茄': 'crimson',
+  '甜椒-青椒': 'green',
+  '甜椒-彩色種': 'orange',
+  '甜椒-水果彩椒': 'orange',
+  '甜椒-彩椒橘色': 'orange',
+  '甜椒-彩椒紅色': 'red',
+  '甜椒-彩椒黃色': 'yellow',
+  '甜椒-彩椒其他': 'orange',
+  '甜椒-新香': 'green',
+  '冬瓜-白皮': 'white',
+  '冬瓜-青皮': 'darkGreen',
+  '冬瓜-毛瓜': 'paleGreen',
+  '敏豆-白豆': 'white',
+  '敏豆-粉豆': 'pink',
+  '敏豆-醜豆': 'green',
+  '敏豆-翼豆': 'green',
+  '敏豆-青豆': 'green',
+  '菜豆-青色': 'green',
+  '菜豆-紅色': 'red',
+  '菜豆-白色': 'white',
+  '辣椒-朝天椒': 'chili',
+  '辣椒-糯米椒': 'paleYellow',
+  '辣椒-紅小': 'red',
+  '辣椒-青小': 'green',
+  '辣椒-青龍': 'green',
+  '辣椒-雞心': 'red',
+  '越瓜-青色': 'paleGreen',
+  '越瓜-白色': 'white',
+  '絲瓜-白瓜': 'white',
+  '絲瓜-角瓜': 'green',
+  '絲瓜-長絲瓜': 'green',
+  '花椰菜-青梗': 'cream',
+  '花椰菜-白梗': 'cream',
+  '竹筍-烏殼綠': 'paleYellow',
+  '竹筍-麻竹筍': 'paleYellow',
+  '竹筍-綠竹筍': 'paleYellow',
+  '竹筍-去殼': 'paleYellow',
+  '竹筍-孟宗筍': 'paleYellow',
+  '竹筍-桂竹筍': 'paleYellow',
+  '竹筍-箭竹筍': 'paleYellow',
+  '青花苔-青花筍': 'darkGreen'
+};
+
+
+function isGourdCrop(crop) {
+  return !!(crop && crop.h === 'a' && crop.g === '瓜果');
+}
+
+function peelHintFromLabel(label) {
+  const s = String(label || '');
+  if (/黑|紫/.test(s)) return 'darkViolet';
+  if (/粉/.test(s)) return 'pink';
+  if (/橘|橙/.test(s)) return 'orange';
+  if (/黃/.test(s)) return 'gold';
+  if (/紅/.test(s)) return 'red';
+  if (/白/.test(s)) return 'white';
+  if (/青|綠/.test(s)) return 'green';
+  return '';
+}
+
+function peelToneOf(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
+  const key = parsed.name || raw;
+  if (GOURD_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw]) {
+    const cropGuess = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
+    if (cropGuess && !isGourdCrop(cropGuess)) return '';
+    return GOURD_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw];
+  }
+  const lot = (typeof resolveLotItem === 'function') ? resolveLotItem(key) : null;
+  let crop = lot && lot.crop;
+  let variety = lot && lot.variety;
+  if (!crop && typeof findCrop === 'function') crop = findCrop(key);
+  if (!crop && typeof resolvePlanName === 'function') {
+    const resolved = resolvePlanName(key);
+    crop = resolved && resolved.crop;
+    variety = variety || (resolved && resolved.variety);
+  }
+  if (!isGourdCrop(crop)) return '';
+  if (variety && usefulVariant(variety, crop)) {
+    const vn = variety.n;
+    const vl = variety.l;
+    if (GOURD_PEEL_VARIANT[vn]) return GOURD_PEEL_VARIANT[vn];
+    if (GOURD_PEEL_VARIANT[vl]) return GOURD_PEEL_VARIANT[vl];
+    const hinted = peelHintFromLabel(vl);
+    if (hinted) return hinted;
+  }
+  return GOURD_PEEL_CROP[crop.n] || GOURD_PEEL_CROP[crop.l] || '';
+}
+
+function peelClass(name) {
+  const tone = peelToneOf(name);
+  return tone ? ` peel peel-${tone}` : '';
 }
 
 function resolveLotItem(item) {
@@ -1053,7 +1238,7 @@ function renderPlanScreen() {
   const suggest = planSuggestList(planDraft);
   const pickChips = picks.chips.map((c) => {
     const on = planHasText(c.text) ? ' on' : '';
-    return `<button type="button" class="plan-pick${on}" data-act="plan-pick" data-v="${escapeHtml(c.text)}">${escapeHtml(c.text)}${c.count > 1 ? `<span>${c.count}</span>` : ''}</button>`;
+    return `<button type="button" class="plan-pick${on}${peelClass(c.text)}" data-act="plan-pick" data-v="${escapeHtml(c.text)}">${escapeHtml(c.text)}${c.count > 1 ? `<span>${c.count}</span>` : ''}</button>`;
   }).join('');
   const pickBar = picks.chips.length
     ? `<div class="plan-picks${planPickOpen ? ' open' : ''}">
@@ -1062,7 +1247,7 @@ function renderPlanScreen() {
       </div>`
     : `<div class="plan-picks muted"><div class="plan-picks-toggle dim">還沒有買過的紀錄（標到後會出現快選）</div></div>`;
   const suggestBox = suggest.length
-    ? `<div class="plan-suggest">${suggest.map((s) => `<button type="button" class="plan-suggest-item" data-act="plan-suggest" data-v="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
+    ? `<div class="plan-suggest">${suggest.map((s) => `<button type="button" class="plan-suggest-item${peelClass(s)}" data-act="plan-suggest" data-v="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
     : '';
   return `<div class="plan-screen" id="plan-screen">
     <header class="plan-bar">
@@ -3007,7 +3192,7 @@ function renderLive() {
               const d = cur != null && l.status === 'pending' && !l.secondMarket ? l.number - cur : null;
               const near = d != null && d >= 0 && d <= gapN;
               const prio = lotPriority(l);
-              let cls = `lot-cell prio-${prio}`;
+              let cls = `lot-cell prio-${prio}${peelClass(l.item)}`;
               if (typeof lotHasRemoteFlash === 'function' && lotHasRemoteFlash(l.id)) cls += ' remote-flash';
               if (l.status === 'won') cls += ' won';
               else if (l.status === 'lost') cls += ' lost';
