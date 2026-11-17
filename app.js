@@ -2002,18 +2002,7 @@ function renderPlanScreen() {
       ${list.length ? list.map((p) => row(p, kind)).join('') : '<div class="plan-empty">還沒有項目</div>'}
     </section>`;
   };
-  const picks = planQuickPicks();
   const suggest = planSuggestList(planDraft);
-  const pickBtns = picks.chips.map((c) => {
-    const badge = planCountBadge(c.text);
-    return `<button type="button" class="item-btn${badge.cls}${peelClass(c.text)}" data-act="plan-tap-item" data-name="${escapeHtml(c.text)}">${escapeHtml(c.text)}${badge.html}</button>`;
-  }).join('');
-  const pickBar = picks.chips.length
-    ? `<div class="plan-yest">
-        <div class="plan-yest-label">${escapeHtml(picks.label)}</div>
-        <div class="item-pick plan-yest-list">${pickBtns}</div>
-      </div>`
-    : '';
   const suggestBox = suggest.length
     ? `<div class="plan-suggest">${suggest.map((s) => `<button type="button" class="plan-suggest-item${peelClass(s)}" data-act="plan-suggest" data-v="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
     : '';
@@ -2041,7 +2030,6 @@ function renderPlanScreen() {
     </div>
     <div class="plan-add">
       ${targetRow}
-      ${pickBar}
       ${gridBox}
       <div class="plan-input-wrap">
         <input id="plan-input" maxlength="40" placeholder="搜尋品項，或輸入「高麗菜 5」直接設件數" value="${escapeHtml(planDraft)}" data-act="plan-draft" inputmode="search" autocomplete="off" />
