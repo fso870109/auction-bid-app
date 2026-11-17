@@ -1429,6 +1429,11 @@ input:focus, textarea:focus {
 .peel-blueGreen { --peel-bg: #9ed4c8; --peel-fg: #14302c; --peel-band: #3a8a80; }
 .peel-greenWhite { --peel-bg: #c8e6d0; --peel-fg: #1c2e20; --peel-band: #2f8a44; }
 .peel-olive { --peel-bg: #c8c49a; --peel-fg: #2a2c10; --peel-band: #7a7a38; }
+.peel-goldenBrown { --peel-bg: #d4a04a; --peel-fg: #2a1c00; --peel-band: #8a6018; }
+.peel-beige { --peel-bg: #d8c9a8; --peel-fg: #2a2418; --peel-band: #a09068; }
+.peel-darkBrown { --peel-bg: #5a3a28; --peel-fg: #f6ead8; --peel-band: #c49a68; }
+.peel-purpleBlack { --peel-bg: #4a3050; --peel-fg: #f3e8f0; --peel-band: #c084e0; }
+.peel-paleYellowGreen { --peel-bg: #d2e0a8; --peel-fg: #2a3010; --peel-band: #8aaa4e; }
 .item-btn.custom { border-style: dashed; }
 
 .item-search {

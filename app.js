@@ -689,7 +689,7 @@ const FRUIT_PEEL_CROP = {
   '椪柑': 'orange',
   '甜瓜': 'paleYellow',
   '葡萄': 'purple',
-  '椰子': 'sage',
+  '椰子': 'green',
   '黃金果': 'gold',
   '桶柑': 'orange',
   '茂谷柑': 'orange',
@@ -719,7 +719,7 @@ const FRUIT_PEEL_CROP = {
   '蓮霧': 'red',
   '虎頭柑': 'orange',
   '楊梅': 'crimson',
-  '甘蔗': 'sage',
+  '甘蔗': 'green',
   '奇異果': 'brown',
   '山竹': 'darkViolet',
   '桑椹': 'darkViolet',
@@ -849,7 +849,7 @@ const FRUIT_PEEL_VARIANT = {
   '桃子-甜桃': 'pink',
   '桃子-水蜜桃': 'pink',
   '桃子-早桃': 'pink',
-  '甘蔗-帶皮': 'sage',
+  '甘蔗-帶皮': 'green',
   '甘蔗-削皮': 'cream',
   '楊桃-紅龍': 'gold',
   '楊桃-軟枝、蜜絲': 'paleYellow',
@@ -869,40 +869,40 @@ const FRUIT_PEEL_VARIANT = {
 
 const LEAFY_PEEL_CROP = {
   '萵苣菜': 'paleGreen',
-  '青蔥': 'greenWhite',
-  '蔥': 'greenWhite',
+  '青蔥': 'midGreen',
+  '蔥': 'midGreen',
   '小白菜': 'midGreen',
   '甘藷葉': 'green',
   '地瓜葉': 'green',
-  '芥菜': 'sage',
+  '芥菜': 'paleGreen',
   '菠菜': 'darkGreen',
-  '蕹菜': 'blueGreen',
-  '空心菜': 'blueGreen',
-  '芹菜': 'cream',
+  '蕹菜': 'midGreen',
+  '空心菜': 'midGreen',
+  '芹菜': 'paleGreen',
   '青江白菜': 'paleGreen',
   '青江菜': 'paleGreen',
-  '芥藍菜': 'green',
-  '茼蒿': 'sage',
-  '油菜': 'yellowGreen',
+  '芥藍菜': 'darkGreen',
+  '茼蒿': 'midGreen',
+  '油菜': 'midGreen',
   '韭菜': 'darkGreen',
   '莧菜': 'paleGreen',
   '九層塔': 'midGreen',
-  '芫荽': 'green',
-  '皇宮菜': 'sage',
+  '芫荽': 'midGreen',
+  '皇宮菜': 'green',
   '紅鳳菜': 'purple',
   '蕨菜': 'darkGreen',
-  '海菜': 'blueGreen',
-  '茴香': 'olive',
+  '海菜': 'paleGreen',
+  '茴香': 'midGreen',
   '巴西利': 'darkGreen',
   '菾菜': 'green',
   '塌棵菜': 'darkGreen',
   '羅勒': 'midGreen',
   '黑甜仔菜': 'darkViolet',
-  '人參葉': 'sage',
+  '人參葉': 'midGreen',
   '珍珠菜': 'paleGreen',
   '薺菜': 'midGreen',
   '藤三七': 'green',
-  '西洋菜': 'blueGreen',
+  '西洋菜': 'midGreen',
   '豬母菜': 'green',
   '香椿': 'copper'
 };
@@ -925,25 +925,25 @@ const LEAFY_PEEL_VARIANT = {
   '萵苣菜-廣東萵': 'paleGreen',
   '萵苣菜-進口廣東萵': 'paleGreen',
   '萵苣菜-進口油麥菜': 'paleGreen',
-  '青蔥-粉蔥': 'greenWhite',
-  '青蔥-北蔥': 'greenWhite',
-  '青蔥-大蔥': 'greenWhite',
-  '青蔥-日蔥': 'greenWhite',
-  '青蔥-進口蔥': 'greenWhite',
+  '青蔥-粉蔥': 'midGreen',
+  '青蔥-北蔥': 'midGreen',
+  '青蔥-大蔥': 'midGreen',
+  '青蔥-日蔥': 'midGreen',
+  '青蔥-進口蔥': 'midGreen',
   '青蔥-紅蔥頭': 'crimson',
   '青蔥-珠蔥': 'white',
   '小白菜-蚵仔白': 'midGreen',
   '小白菜-土白菜': 'midGreen',
-  '小白菜-奶油白': 'cream',
+  '小白菜-奶油白': 'paleGreen',
   '小白菜-水耕': 'paleGreen',
-  '芥菜-大芥菜': 'sage',
+  '芥菜-大芥菜': 'paleGreen',
   '芥菜-翡翠娃娃菜': 'paleGreen',
   '芥菜-芥菜仁': 'cream',
   '芥菜-小芥菜': 'midGreen',
   '芥菜-水耕': 'paleGreen',
-  '芹菜-白梗': 'cream',
+  '芹菜-白梗': 'paleGreen',
   '芹菜-西洋芹菜': 'midGreen',
-  '芹菜-芹菜管': 'cream',
+  '芹菜-芹菜管': 'paleGreen',
   '芹菜-青梗': 'green',
   '芹菜-山芹菜': 'darkGreen',
   '芹菜-水耕': 'paleGreen',
@@ -959,16 +959,119 @@ const LEAFY_PEEL_VARIANT = {
   '紅鳳菜-白鳳菜': 'paleGreen',
   '蕨菜-過貓': 'green',
   '蕨菜-山蘇': 'darkGreen',
-  '海菜-水蓮': 'blueGreen',
+  '海菜-水蓮': 'paleGreen',
   '海菜-海帶': 'brown',
-  '海菜-龍鬚菜': 'sage'
+  '海菜-龍鬚菜': 'green'
+};
+
+
+const BULK_PEEL_CROP = {
+  '甘藍': 'paleGreen',
+  '高麗菜': 'paleGreen',
+  '包心白菜': 'cream',
+  '大白菜': 'cream',
+  '蘿蔔': 'white',
+  '白蘿蔔': 'white',
+  '胡蘿蔔': 'orange',
+  '洋蔥': 'goldenBrown',
+  '大心菜': 'midGreen',
+  '香茅': 'paleYellow',
+  '晚香玉筍': 'cream',
+  '百合': 'white',
+  '金針筍': 'paleYellow',
+  '半天筍': 'paleYellow',
+  '半天花': 'paleYellow',
+  '慈菇': 'tan',
+  '甘蔗筍': 'paleYellowGreen',
+  '芽菜類': 'cream',
+  '草石蠶': 'beige',
+  '荸薺': 'brown',
+  '菱角': 'purpleBlack',
+  '蕎頭': 'white',
+  '金絲菇': 'white',
+  '金針菇': 'white',
+  '杏鮑菇': 'beige',
+  '其他菇類': 'brown',
+  '鴻喜菇': 'tan',
+  '濕木耳': 'darkBrown',
+  '木耳': 'darkBrown',
+  '濕香菇': 'brown',
+  '香菇': 'brown',
+  '洋菇': 'cream',
+  '秀珍菇': 'beige',
+  '草菇': 'brown',
+  '珊瑚菇': 'white',
+  '蠔菇': 'beige',
+  '巴西蘑菇': 'brown',
+  '松茸': 'brown',
+  '柳松菇': 'amber',
+  '猴頭菇': 'cream'
+};
+
+const BULK_PEEL_VARIANT = {
+  '甘藍-初秋': 'paleGreen',
+  '甘藍-改良尖': 'paleGreen',
+  '甘藍-改良種': 'paleGreen',
+  '甘藍-進口初秋': 'paleGreen',
+  '甘藍-進口改良種': 'paleGreen',
+  '甘藍-進口改良尖': 'paleGreen',
+  '甘藍-紫色': 'purple',
+  '甘藍-進口紫色': 'purple',
+  '甘藍-甘藍芽': 'paleYellowGreen',
+  '甘藍-進口甘藍芽': 'paleYellowGreen',
+  '甘藍-甘藍心': 'cream',
+  '甘藍-進口甘藍心': 'cream',
+  '甘藍-甜甘藍': 'paleGreen',
+  '包心白菜-包白': 'cream',
+  '包心白菜-進口包白': 'cream',
+  '包心白菜-包頭蓮': 'paleYellowGreen',
+  '包心白菜-進口包頭蓮': 'paleYellowGreen',
+  '包心白菜-冬白芽': 'cream',
+  '包心白菜-天津白': 'cream',
+  '包心白菜-進口天津白': 'cream',
+  '包心白菜-大土': 'cream',
+  '包心白菜-成功白': 'cream',
+  '蘿蔔-矸仔': 'white',
+  '蘿蔔-白玉': 'white',
+  '蘿蔔-甜菜根': 'crimson',
+  '蘿蔔-櫻桃': 'red',
+  '蘿蔔-青色': 'green',
+  '胡蘿蔔-清洗': 'orange',
+  '胡蘿蔔-未洗': 'orange',
+  '洋蔥-本產': 'goldenBrown',
+  '洋蔥-進口': 'goldenBrown',
+  '洋蔥-紫洋蔥': 'purple',
+  '紫洋蔥': 'purple',
+  '大心菜-帶葉': 'midGreen',
+  '芽菜類-綠豆芽': 'cream',
+  '芽菜類-黃豆芽': 'paleYellow',
+  '芽菜類-苜蓿芽': 'paleGreen',
+  '芽菜類-蘿蔔嬰': 'paleGreen',
+  '芽菜類-豌豆芽': 'midGreen',
+  '草石蠶-冬蟲夏草': 'brown',
+  '菱角-生菱角': 'purpleBlack',
+  '菱角-去殼': 'cream',
+  '菱角-熟菱角': 'brown',
+  '金絲菇-金針菇': 'white',
+  '金絲菇-盒裝': 'white',
+  '杏鮑菇-盒裝': 'beige',
+  '鴻喜菇-盒裝': 'tan',
+  '濕木耳-盒裝': 'darkBrown',
+  '洋菇-盒裝': 'cream',
+  '蠔菇-鮑魚菇': 'beige',
+  '秀珍菇-盒裝': 'beige',
+  '珊瑚菇-盒裝': 'white',
+  '巴西蘑菇-盒裝': 'brown',
+  '松茸-盒裝': 'brown',
+  '柳松菇-盒裝': 'amber',
+  '猴頭菇-盒裝': 'cream'
 };
 
 function isPeelCrop(crop) {
   if (!crop) return false;
   if (crop.h === 'a' && crop.g === '瓜果') return true;
   if (crop.h === 'f' && (crop.g === '水果' || !crop.g)) return true;
-  if (crop.g === '水菜') return true;
+  if (crop.g === '水菜' || crop.g === '大宗') return true;
   return false;
 }
 
@@ -985,12 +1088,23 @@ function peelHintFromLabel(label) {
   return '';
 }
 
+function peelVariantTone(key) {
+  if (!key) return '';
+  return GOURD_PEEL_VARIANT[key] || FRUIT_PEEL_VARIANT[key] || LEAFY_PEEL_VARIANT[key] || BULK_PEEL_VARIANT[key] || '';
+}
+
+function peelCropTone(crop) {
+  if (!crop) return '';
+  return GOURD_PEEL_CROP[crop.n] || FRUIT_PEEL_CROP[crop.n] || LEAFY_PEEL_CROP[crop.n] || BULK_PEEL_CROP[crop.n]
+    || GOURD_PEEL_CROP[crop.l] || FRUIT_PEEL_CROP[crop.l] || LEAFY_PEEL_CROP[crop.l] || BULK_PEEL_CROP[crop.l] || '';
+}
+
 function peelToneOf(name) {
   const raw = String(name || '').trim();
   if (!raw) return '';
   const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
   const key = parsed.name || raw;
-  const mapped = GOURD_PEEL_VARIANT[key] || FRUIT_PEEL_VARIANT[key] || LEAFY_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw] || FRUIT_PEEL_VARIANT[raw] || LEAFY_PEEL_VARIANT[raw];
+  const mapped = peelVariantTone(key) || peelVariantTone(raw);
   if (mapped) {
     const cropGuess = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
     if (cropGuess && !isPeelCrop(cropGuess)) return '';
@@ -1009,12 +1123,12 @@ function peelToneOf(name) {
   if (variety && usefulVariant(variety, crop)) {
     const vn = variety.n;
     const vl = variety.l;
-    if (GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn] || LEAFY_PEEL_VARIANT[vn]) return GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn] || LEAFY_PEEL_VARIANT[vn];
-    if (GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl] || LEAFY_PEEL_VARIANT[vl]) return GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl] || LEAFY_PEEL_VARIANT[vl];
+    const fromVar = peelVariantTone(vn) || peelVariantTone(vl);
+    if (fromVar) return fromVar;
     const hinted = peelHintFromLabel(vl);
     if (hinted) return hinted;
   }
-  return GOURD_PEEL_CROP[crop.n] || FRUIT_PEEL_CROP[crop.n] || LEAFY_PEEL_CROP[crop.n] || GOURD_PEEL_CROP[crop.l] || FRUIT_PEEL_CROP[crop.l] || LEAFY_PEEL_CROP[crop.l] || '';
+  return peelCropTone(crop);
 }
 
 function peelClass(name) {
