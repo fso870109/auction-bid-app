@@ -3353,7 +3353,7 @@ function fitItemBtnLabels() {
     btn.style.whiteSpace = '';
     const cs = getComputedStyle(btn);
     let size = parseFloat(cs.fontSize) || 18;
-    const oneLineMin = 16;
+    const oneLineMin = 14;
     btn.style.whiteSpace = 'nowrap';
     while (size > oneLineMin && btn.scrollWidth > btn.clientWidth + 0.5) {
       size -= 0.5;

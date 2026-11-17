@@ -1346,7 +1346,7 @@ input:focus, textarea:focus {
   background: var(--bg-card);
   border: 1px solid var(--line);
   font-weight: 800;
-  font-size: clamp(18px, 5vw, 20px);
+  font-size: clamp(16px, 4.4vw, 17px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2131,7 +2131,7 @@ button.lot-cell {
 .item-btn.item-add {
   border-style: dashed;
   color: var(--blue);
-  font-size: clamp(15px, 4.2vw, 17px);
+  font-size: clamp(14px, 4vw, 16px);
 }
 
 .toast span {
@@ -2447,7 +2447,7 @@ button.lot-cell {
   text-align: left;
   padding: 10px 12px;
   font-weight: 800;
-  font-size: clamp(16px, 4.6vw, 18px);
+  font-size: clamp(16px, 4.4vw, 17px);
   border-bottom: 1px solid var(--line);
   min-height: 44px;
 }
@@ -2508,7 +2508,7 @@ button.lot-cell {
   border: 1px solid #3a3a3a;
   background: #1a1a1a;
   font-weight: 800;
-  font-size: clamp(16px, 4.4vw, 18px);
+  font-size: clamp(16px, 4.4vw, 17px);
   display: inline-flex;
   align-items: center;
   gap: 5px;
