@@ -386,7 +386,7 @@ let planHistoryPushed = false;
 let planDraft = '';
 let planQty = 1;
 let planPickOpen = false;
-let planAddTarget = 'tomorrow';
+let planAddTarget = 'today';
 let planGridTab = 'bulk';
 let planGridOpen = true;
 let planVariantPick = null;
@@ -455,6 +455,32 @@ function addDaysIso(iso, n) {
 
 function tomorrowStr(from) {
   return addDaysIso(from || todayStr(), 1);
+}
+
+function planMorningHours() {
+  return new Date().getHours() < 12;
+}
+
+function defaultPlanAddTarget() {
+  return planMorningHours() ? 'today' : 'tomorrow';
+}
+
+/* Same-morning 備註 often lands on 明日 because the add-target defaulted
+   to tomorrow. During morning market hours, treat those as today's list
+   so 標到 can deduct them. After noon, leave a real 明日 list alone. */
+function promoteMisfiledTomorrowPlans() {
+  if (!state || !Array.isArray(state.planItems) || !planMorningHours()) return false;
+  const today = todayStr();
+  const tomo = tomorrowStr(today);
+  let changed = false;
+  for (const p of state.planItems) {
+    if (!p || p.done) continue;
+    if (p.forDay !== tomo) continue;
+    if (p.createdOn && p.createdOn !== today) continue;
+    p.forDay = today;
+    changed = true;
+  }
+  return changed;
 }
 
 function normalizePlanItems(list) {
@@ -1229,7 +1255,10 @@ function planLotMatchScore(plan, lot) {
 function todayWonLots() {
   const today = todayStr();
   const day = (state && state.day) || today;
-  return (state.lots || []).filter((l) => isWon(l) && l.item && (l.day === today || l.day === day));
+  const yest = addDaysIso(today, -1);
+  return (state.lots || []).filter((l) => (
+    isWon(l) && l.item && (l.day === today || l.day === day || l.day === yest)
+  ));
 }
 
 function autoManagedPlans() {
@@ -1327,9 +1356,11 @@ function withPlanToast(base) {
 function applyPlanProgressFromLots(opts) {
   opts = opts || {};
   if (!state || !Array.isArray(state.planItems)) return lastPlanEvents;
+  const promoted = promoteMisfiledTomorrowPlans();
   const today = todayStr();
   const assigned = assignWonToPlans();
   const events = [];
+  let changed = promoted;
   for (const p of autoManagedPlans()) {
     const won = planWonPieces(p, assigned);
     const qty = planQtyOf(p);
@@ -1346,6 +1377,7 @@ function applyPlanProgressFromLots(opts) {
         p.doneOn = today;
         p.doneBy = 'auto';
         p.lockCount = 0;
+        changed = true;
         events.push({ kind: 'done', text: p.text, won, qty });
       } else if (won > prev && !complete) {
         events.push({ kind: 'progress', text: p.text, remain: Math.max(0, qty - won), won, qty });
@@ -1357,11 +1389,13 @@ function applyPlanProgressFromLots(opts) {
       p.done = true;
       p.doneOn = today;
       p.doneBy = 'auto';
+      changed = true;
       events.push({ kind: 'done', text: p.text, won, qty });
     } else if (!complete && p.done && p.doneBy === 'auto') {
       p.done = false;
       p.doneOn = '';
       p.doneBy = '';
+      changed = true;
     } else if (!complete && !p.done && won > prev) {
       events.push({ kind: 'progress', text: p.text, remain: Math.max(0, qty - won), won, qty });
     }
@@ -1372,6 +1406,7 @@ function applyPlanProgressFromLots(opts) {
     const msg = formatPlanEvent(events[0]);
     if (msg) toast(msg);
   }
+  events.changed = changed;
   return events;
 }
 
@@ -1553,7 +1588,7 @@ function findPlanOnTarget(text, which) {
   const value = String(text || '').trim();
   if (!value) return null;
   const today = todayStr();
-  const target = which || planAddTarget || 'tomorrow';
+  const target = which || planAddTarget || defaultPlanAddTarget();
   return (state.planItems || []).find((p) => (
     !p.done && p.text === value && (target === 'today' ? p.forDay <= today : p.forDay > today)
   )) || null;
@@ -1580,7 +1615,7 @@ function addOrBumpPlanItem(text, which, opts) {
   const value = String(parsed.text || '').trim();
   if (!value) return false;
   const today = todayStr();
-  const target = which || planAddTarget || 'tomorrow';
+  const target = which || planAddTarget || defaultPlanAddTarget();
   const forDay = planTargetDay(target);
   if (!Array.isArray(state.planItems)) state.planItems = [];
   const existing = findPlanOnTarget(value, target);
@@ -1851,9 +1886,10 @@ function openPlan() {
   if (planOpen) return;
   planOpen = true;
   planPickOpen = false;
-  planAddTarget = 'tomorrow';
+  planAddTarget = defaultPlanAddTarget();
   planVariantPick = null;
   planGridOpen = true;
+  applyPlanProgressFromLots();
   try {
     history.pushState({ auctionPlan: true }, '');
     planHistoryPushed = true;
@@ -4046,6 +4082,17 @@ function fitLotCellNames() {
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
+  if (!planProgressLock && state && !isSetupNeeded()) {
+    planProgressLock = true;
+    let dirty = false;
+    try {
+      const ev = applyPlanProgressFromLots();
+      dirty = !!(ev && ev.changed);
+    } finally {
+      planProgressLock = false;
+    }
+    if (dirty) saveState();
+  }
   const active = document.activeElement;
   const focusId = active && active.id;
   const start = active && active.selectionStart;
@@ -5425,6 +5472,12 @@ function onFullscreenChange() {
 
 function onVisibility() {
   syncWakeLock();
+  if (document.visibilityState === 'visible') {
+    if (typeof checkNewDay === 'function' && state && !isSetupNeeded()) {
+      checkNewDay();
+      if (typeof render === 'function') render();
+    }
+  }
   if (document.visibilityState === 'visible' && paddleOpen) {
     if (orientationLocked) lockLandscape();
     requestAnimationFrame(() => {
@@ -5927,7 +5980,7 @@ function bind() {
     if (act === 'plan-draft' || id === 'plan-input') {
       e.preventDefault();
       planDraft = e.target.value;
-      addPlanItem(planAddTarget || 'tomorrow');
+      addPlanItem(planAddTarget || defaultPlanAddTarget());
       return;
     }
     if (act === 'plan-qty-type' || id === 'plan-qty-input') {
