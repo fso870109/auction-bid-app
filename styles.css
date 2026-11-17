@@ -3135,3 +3135,147 @@ button.lot-cell {
   .plan-target-seg, .plan-target-seg button, .plan-grid-toggle { min-height: 42px; }
   .plan-add input { min-height: 40px; }
 }
+
+
+/* v42: compact, calmer 備註 item picker (does not change 抄號) */
+.plan-add { padding: 6px 12px 4px; }
+.plan-target-row { gap: 6px; margin-bottom: 6px; }
+.plan-target-seg {
+  min-height: 36px;
+  border-radius: 10px;
+}
+.plan-target-lbl {
+  padding: 0 8px;
+  font-size: 13px;
+}
+.plan-target-seg button {
+  min-height: 36px;
+  font-size: 15px;
+}
+.plan-grid-toggle {
+  min-width: 52px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.plan-grid-tabs {
+  gap: 3px;
+  margin: 0 0 4px;
+}
+.plan-grid-tab {
+  min-height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 0 2px;
+}
+.plan-yest { margin: 0 0 4px; }
+.plan-yest-label {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.plan-add .item-pick.plan-grid-list,
+.plan-grid-list,
+.plan-add .item-pick.plan-yest-list,
+.plan-yest-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+@media (min-width: 390px) {
+  .plan-add .item-pick.plan-grid-list,
+  .plan-grid-list,
+  .plan-add .item-pick.plan-yest-list,
+  .plan-yest-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.plan-add .item-pick.plan-grid-list,
+.plan-grid-list {
+  max-height: min(36vh, 248px);
+  min-height: 86px;
+}
+.plan-add .item-pick.plan-yest-list,
+.plan-yest-list {
+  max-height: 90px;
+  min-height: 0;
+}
+.plan-item-cell,
+.plan-item-cell .item-btn {
+  min-height: 42px;
+}
+.plan-grid-list .item-btn,
+.plan-yest-list .item-btn {
+  min-height: 42px;
+  padding: 2px 4px;
+  border-radius: 7px;
+  font-size: clamp(16px, 4.4vw, 17px);
+  font-weight: 800;
+  line-height: 1.15;
+  gap: 1px;
+  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
+}
+.plan-grid-list .item-btn.peel,
+.plan-yest-list .item-btn.peel {
+  box-shadow: none;
+  padding-left: 3px;
+  filter: none;
+  background: color-mix(in srgb, var(--peel-bg) 58%, #1c1c1c);
+  border: 1px solid color-mix(in srgb, var(--peel-band) 38%, #333);
+  color: var(--peel-fg);
+}
+.plan-grid-list .item-btn.peel:active,
+.plan-yest-list .item-btn.peel:active {
+  box-shadow: none;
+  filter: brightness(1.06);
+  background: color-mix(in srgb, var(--peel-bg) 58%, #1c1c1c);
+}
+.plan-grid-list .item-btn.peel.on,
+.plan-yest-list .item-btn.peel.on {
+  box-shadow: inset 0 0 0 2px var(--yellow);
+  border-color: var(--yellow);
+  background: color-mix(in srgb, var(--peel-bg) 58%, #1c1c1c);
+}
+.plan-grid-list .item-btn.has-plan-qty,
+.plan-yest-list .item-btn.has-plan-qty {
+  padding-top: 8px;
+}
+.plan-grid-list .item-btn .plan-grid-badge,
+.plan-yest-list .item-btn .plan-grid-badge {
+  min-width: 16px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 13px;
+  top: 1px;
+  right: 1px;
+}
+.plan-var-nudge {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  border-radius: 6px 0 6px 0;
+  background: rgba(0, 0, 0, 0.32);
+}
+.plan-add input { min-height: 40px; font-size: 16px; }
+
+@media (max-width: 389px) {
+  .plan-grid-tab { font-size: 12px; min-height: 30px; }
+  .plan-target-seg button { font-size: 14px; }
+}
+
+@media (max-height: 700px) {
+  .plan-add .item-pick.plan-grid-list,
+  .plan-grid-list { max-height: min(28vh, 172px); min-height: 80px; }
+  .plan-grid-list .item-btn,
+  .plan-yest-list .item-btn,
+  .plan-item-cell,
+  .plan-item-cell .item-btn { min-height: 40px; }
+  .plan-yest-list, .plan-add .item-pick.plan-yest-list { max-height: 44px; }
+  .plan-target-seg, .plan-target-seg button, .plan-grid-toggle { min-height: 34px; }
+  .plan-add input { min-height: 38px; }
+}

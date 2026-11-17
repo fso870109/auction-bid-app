@@ -4025,6 +4025,11 @@ function fitItemBtnLabels() {
     btn.style.fontSize = '';
     btn.style.whiteSpace = '';
     const cs = getComputedStyle(btn);
+    const inPlan = !!(btn.closest && btn.closest('.plan-grid-list, .plan-yest-list'));
+    if (inPlan) {
+      btn.style.whiteSpace = 'normal';
+      return;
+    }
     let size = parseFloat(cs.fontSize) || 18;
     const oneLineMin = 14;
     btn.style.whiteSpace = 'nowrap';
