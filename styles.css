@@ -1407,6 +1407,10 @@ input:focus, textarea:focus {
 .peel-brown { --peel-bg: #6e4a2c; --peel-fg: #f6ead8; --peel-band: #c49a68; }
 .peel-lilac { --peel-bg: #6e5e82; --peel-fg: #f3edfb; --peel-band: #b8a4d8; }
 .peel-chili { --peel-bg: #c43a18; --peel-fg: #fff0e8; --peel-band: #ff7a4a; }
+.peel-magenta { --peel-bg: #d46aa0; --peel-fg: #3a1024; --peel-band: #a03870; }
+.peel-yellowGreen { --peel-bg: #b8c63a; --peel-fg: #2a3008; --peel-band: #7a8a18; }
+.peel-lemon { --peel-bg: #c8d14a; --peel-fg: #2a2c08; --peel-band: #8a9418; }
+.peel-amber { --peel-bg: #e0a428; --peel-fg: #2a1c00; --peel-band: #b07a10; }
 .item-btn.custom { border-style: dashed; }
 
 .item-search {

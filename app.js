@@ -669,12 +669,213 @@ const GOURD_PEEL_VARIANT = {
 };
 
 
-function isGourdCrop(crop) {
-  return !!(crop && crop.h === 'a' && crop.g === '瓜果');
+
+const FRUIT_PEEL_CROP = {
+  '雜柑': 'lemon',
+  '木瓜': 'amber',
+  '番石榴': 'paleGreen',
+  '紅龍果': 'magenta',
+  '西瓜': 'darkGreen',
+  '香蕉': 'yellow',
+  '小番茄': 'red',
+  '鳳梨': 'gold',
+  '柚子': 'paleYellow',
+  '洋香瓜': 'tan',
+  '酪梨': 'darkGreen',
+  '百香果': 'darkViolet',
+  '梨': 'tan',
+  '栗子': 'brown',
+  '芒果': 'copper',
+  '椪柑': 'orange',
+  '甜瓜': 'paleYellow',
+  '葡萄': 'purple',
+  '椰子': 'sage',
+  '黃金果': 'gold',
+  '桶柑': 'orange',
+  '茂谷柑': 'orange',
+  '草莓': 'red',
+  '桃子': 'pink',
+  '波蘿蜜': 'paleGreen',
+  '釋迦': 'green',
+  '柿子': 'orange',
+  '李': 'red',
+  '佛利蒙柑': 'orange',
+  '甜橙': 'orange',
+  '棗子': 'green',
+  '梅': 'paleGreen',
+  '榴槤蜜': 'brown',
+  '葡萄柚': 'paleYellow',
+  '紅毛丹': 'red',
+  '蛋黃果': 'gold',
+  '珍珠柑': 'orange',
+  '龍眼': 'tan',
+  '蘋果': 'red',
+  '枇杷': 'orange',
+  '柑橘': 'orange',
+  '荔枝': 'red',
+  '紅柑': 'orange',
+  '橄欖': 'darkGreen',
+  '樹葡萄': 'darkViolet',
+  '蓮霧': 'red',
+  '虎頭柑': 'orange',
+  '楊梅': 'crimson',
+  '甘蔗': 'sage',
+  '奇異果': 'brown',
+  '山竹': 'darkViolet',
+  '桑椹': 'darkViolet',
+  '楊桃': 'paleYellow',
+  '榴槤': 'brown',
+  '櫻桃': 'red',
+  '海梨': 'tan',
+  '溫州柑': 'orange',
+  '石榴': 'crimson',
+  '艷陽柑': 'orange',
+  '藍莓': 'darkViolet',
+  '蜜棗': 'paleGreen',
+  '西施柚': 'paleYellow',
+  '香櫞': 'paleYellow',
+  '香瓜梨': 'cream'
+};
+
+const FRUIT_PEEL_VARIANT = {
+  '雜柑-無子檸檬': 'lemon',
+  '雜柑-桔子': 'orange',
+  '雜柑-檸檬': 'lemon',
+  '雜柑-黃金檸檬': 'gold',
+  '雜柑-金棗': 'gold',
+  '木瓜-青木瓜': 'paleGreen',
+  '木瓜-網室紅肉': 'amber',
+  '木瓜-一般紅肉': 'amber',
+  '木瓜-日昇種': 'amber',
+  '番石榴-珍珠芭': 'paleGreen',
+  '番石榴-帝王芭': 'paleGreen',
+  '番石榴-紅心芭': 'paleGreen',
+  '番石榴-水晶無子': 'paleGreen',
+  '番石榴-世紀芭': 'paleGreen',
+  '番石榴-水晶無仔': 'paleGreen',
+  '紅龍果-紅肉': 'magenta',
+  '紅龍果-白肉': 'magenta',
+  '紅龍果-雙色': 'magenta',
+  '西瓜-甜美人': 'darkGreen',
+  '西瓜-黃肉': 'darkGreen',
+  '西瓜-鳳光英妙': 'darkGreen',
+  '西瓜-大西瓜': 'darkGreen',
+  '西瓜-無子西瓜': 'darkGreen',
+  '西瓜-黑美人': 'darkGreen',
+  '西瓜-紅肉': 'darkGreen',
+  '西瓜-秀鈴': 'darkGreen',
+  '香蕉-旦蕉': 'yellow',
+  '香蕉-越旦': 'yellow',
+  '香蕉-芭蕉': 'yellowGreen',
+  '小番茄-聖女': 'red',
+  '小番茄-玉女': 'red',
+  '小番茄-一般': 'red',
+  '小番茄-嬌女': 'red',
+  '鳳梨-金鑽鳳梨': 'gold',
+  '鳳梨-牛奶鳳梨': 'cream',
+  '鳳梨-甜蜜蜜': 'gold',
+  '鳳梨-蘋果鳳梨': 'gold',
+  '鳳梨-西瓜鳳梨': 'gold',
+  '柚子-文旦': 'paleYellow',
+  '柚子-西施柚': 'paleYellow',
+  '柚子-白柚': 'cream',
+  '柚子-紅柚': 'pink',
+  '洋香瓜-新疆': 'gold',
+  '洋香瓜-新彊': 'gold',
+  '洋香瓜-網狀綠肉': 'tan',
+  '洋香瓜-阿露斯': 'tan',
+  '洋香瓜-網狀紅肉': 'tan',
+  '洋香瓜-網狀白肉': 'tan',
+  '洋香瓜-光面綠肉': 'paleGreen',
+  '洋香瓜-光面白肉': 'cream',
+  '洋香瓜-光面紅肉': 'gold',
+  '芒果-愛文': 'red',
+  '芒果-芒果青': 'green',
+  '芒果-金煌': 'yellowGreen',
+  '芒果-夏雪': 'paleYellow',
+  '芒果-玉文': 'red',
+  '芒果-西施': 'yellowGreen',
+  '芒果-凱特': 'green',
+  '芒果-本島': 'green',
+  '芒果-聖心': 'red',
+  '芒果-黑香金興': 'brown',
+  '芒果-黑香、金興': 'brown',
+  '梨-寶島甘露梨': 'tan',
+  '梨-雪梨': 'cream',
+  '梨-豐水梨': 'tan',
+  '梨-4029梨': 'tan',
+  '梨-新興梨': 'tan',
+  '梨-橫山梨': 'tan',
+  '梨-蜜梨': 'cream',
+  '梨-世紀梨': 'tan',
+  '梨-幸水梨': 'tan',
+  '梨-秋水梨': 'tan',
+  '梨-鳥梨': 'tan',
+  '蘋果-金冠': 'gold',
+  '蘋果-五爪': 'red',
+  '蘋果-惠': 'red',
+  '蘋果-秋香': 'yellowGreen',
+  '蘋果-富士進口': 'red',
+  '蘋果-紅玉(進口)': 'red',
+  '蘋果-金冠(進口)': 'gold',
+  '蘋果-陸奧(進口)': 'yellowGreen',
+  '李-紅肉李': 'red',
+  '李-黃肉李': 'gold',
+  '李-加州李': 'darkViolet',
+  '李-桃接李': 'red',
+  '甜橙-柳橙': 'orange',
+  '甜橙-紅肉柳橙': 'brick',
+  '甜橙-晚崙西亞': 'orange',
+  '葡萄柚-白肉': 'paleYellow',
+  '葡萄柚-紅寶石': 'pink',
+  '葡萄柚-紅肉': 'pink',
+  '蓮霧-紅蓮霧': 'red',
+  '蓮霧-翠玉': 'green',
+  '蓮霧-黑糖芭比': 'blackRed',
+  '蓮霧-子彈型': 'red',
+  '蓮霧-巴掌蓮霧': 'red',
+  '荔枝-玉荷包': 'pink',
+  '荔枝-黑葉': 'blackRed',
+  '荔枝-竹葉黑': 'blackRed',
+  '荔枝-桂味': 'red',
+  '荔枝-糯米': 'red',
+  '釋迦-鳳梨釋迦': 'green',
+  '柿子-甜柿': 'orange',
+  '柿子-柿餅': 'orange',
+  '柿子-水柿': 'orange',
+  '柿子-秋柿': 'orange',
+  '柿子-筆柿': 'orange',
+  '柿子-紅柿': 'orange',
+  '桃子-甜桃': 'pink',
+  '桃子-水蜜桃': 'pink',
+  '桃子-早桃': 'pink',
+  '甘蔗-帶皮': 'sage',
+  '甘蔗-削皮': 'cream',
+  '楊桃-紅龍': 'gold',
+  '楊桃-軟枝、蜜絲': 'paleYellow',
+  '楊桃-馬來亞種': 'paleYellow',
+  '葡萄-巨峰': 'purple',
+  '葡萄-無子': 'green',
+  '葡萄-意大利': 'green',
+  '葡萄-蜜紅': 'red',
+  '紅柑-美女柑': 'orange',
+  '香櫞-佛手': 'paleYellow',
+  '香瓜梨-人蔘果': 'cream',
+  '龍眼-粉殼': 'tan',
+  '龍眼-龍眼肉': 'cream',
+  '蛋黃果-仙桃': 'gold'
+};
+
+function isPeelCrop(crop) {
+  if (!crop) return false;
+  if (crop.h === 'a' && crop.g === '瓜果') return true;
+  if (crop.h === 'f' && (crop.g === '水果' || !crop.g)) return true;
+  return false;
 }
 
 function peelHintFromLabel(label) {
   const s = String(label || '');
+  if (!s || /^其他/.test(s)) return '';
   if (/黑|紫/.test(s)) return 'darkViolet';
   if (/粉/.test(s)) return 'pink';
   if (/橘|橙/.test(s)) return 'orange';
@@ -690,10 +891,11 @@ function peelToneOf(name) {
   if (!raw) return '';
   const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
   const key = parsed.name || raw;
-  if (GOURD_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw]) {
+  const mapped = GOURD_PEEL_VARIANT[key] || FRUIT_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw] || FRUIT_PEEL_VARIANT[raw];
+  if (mapped) {
     const cropGuess = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
-    if (cropGuess && !isGourdCrop(cropGuess)) return '';
-    return GOURD_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw];
+    if (cropGuess && !isPeelCrop(cropGuess)) return '';
+    return mapped;
   }
   const lot = (typeof resolveLotItem === 'function') ? resolveLotItem(key) : null;
   let crop = lot && lot.crop;
@@ -704,16 +906,16 @@ function peelToneOf(name) {
     crop = resolved && resolved.crop;
     variety = variety || (resolved && resolved.variety);
   }
-  if (!isGourdCrop(crop)) return '';
+  if (!isPeelCrop(crop)) return '';
   if (variety && usefulVariant(variety, crop)) {
     const vn = variety.n;
     const vl = variety.l;
-    if (GOURD_PEEL_VARIANT[vn]) return GOURD_PEEL_VARIANT[vn];
-    if (GOURD_PEEL_VARIANT[vl]) return GOURD_PEEL_VARIANT[vl];
+    if (GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn]) return GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn];
+    if (GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl]) return GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl];
     const hinted = peelHintFromLabel(vl);
     if (hinted) return hinted;
   }
-  return GOURD_PEEL_CROP[crop.n] || GOURD_PEEL_CROP[crop.l] || '';
+  return GOURD_PEEL_CROP[crop.n] || FRUIT_PEEL_CROP[crop.n] || GOURD_PEEL_CROP[crop.l] || FRUIT_PEEL_CROP[crop.l] || '';
 }
 
 function peelClass(name) {
