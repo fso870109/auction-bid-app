@@ -866,10 +866,109 @@ const FRUIT_PEEL_VARIANT = {
   '蛋黃果-仙桃': 'gold'
 };
 
+
+const LEAFY_PEEL_CROP = {
+  '萵苣菜': 'paleGreen',
+  '青蔥': 'greenWhite',
+  '蔥': 'greenWhite',
+  '小白菜': 'midGreen',
+  '甘藷葉': 'green',
+  '地瓜葉': 'green',
+  '芥菜': 'sage',
+  '菠菜': 'darkGreen',
+  '蕹菜': 'blueGreen',
+  '空心菜': 'blueGreen',
+  '芹菜': 'cream',
+  '青江白菜': 'paleGreen',
+  '青江菜': 'paleGreen',
+  '芥藍菜': 'green',
+  '茼蒿': 'sage',
+  '油菜': 'yellowGreen',
+  '韭菜': 'darkGreen',
+  '莧菜': 'paleGreen',
+  '九層塔': 'midGreen',
+  '芫荽': 'green',
+  '皇宮菜': 'sage',
+  '紅鳳菜': 'purple',
+  '蕨菜': 'darkGreen',
+  '海菜': 'blueGreen',
+  '茴香': 'olive',
+  '巴西利': 'darkGreen',
+  '菾菜': 'green',
+  '塌棵菜': 'darkGreen',
+  '羅勒': 'midGreen',
+  '黑甜仔菜': 'darkViolet',
+  '人參葉': 'sage',
+  '珍珠菜': 'paleGreen',
+  '薺菜': 'midGreen',
+  '藤三七': 'green',
+  '西洋菜': 'blueGreen',
+  '豬母菜': 'green',
+  '香椿': 'copper'
+};
+
+const LEAFY_PEEL_VARIANT = {
+  '萵苣菜-油麥菜': 'paleGreen',
+  '萵苣菜-結球萵': 'white',
+  '萵苣菜-進口結球萵': 'white',
+  '萵苣菜-本島圓葉': 'midGreen',
+  '萵苣菜-本島尖葉': 'midGreen',
+  '萵苣菜-進口本島圓葉': 'midGreen',
+  '萵苣菜-進口本島尖葉': 'midGreen',
+  '萵苣菜-蘿美': 'midGreen',
+  '萵苣菜-進口蘿美': 'midGreen',
+  '萵苣菜-水耕': 'paleGreen',
+  '萵苣菜-紅捲': 'crimson',
+  '萵苣菜-綠捲': 'green',
+  '萵苣菜-紅捲、綠捲': 'pink',
+  '萵苣菜-廣東菜': 'paleGreen',
+  '萵苣菜-廣東萵': 'paleGreen',
+  '萵苣菜-進口廣東萵': 'paleGreen',
+  '萵苣菜-進口油麥菜': 'paleGreen',
+  '青蔥-粉蔥': 'greenWhite',
+  '青蔥-北蔥': 'greenWhite',
+  '青蔥-大蔥': 'greenWhite',
+  '青蔥-日蔥': 'greenWhite',
+  '青蔥-進口蔥': 'greenWhite',
+  '青蔥-紅蔥頭': 'crimson',
+  '青蔥-珠蔥': 'white',
+  '小白菜-蚵仔白': 'midGreen',
+  '小白菜-土白菜': 'midGreen',
+  '小白菜-奶油白': 'cream',
+  '小白菜-水耕': 'paleGreen',
+  '芥菜-大芥菜': 'sage',
+  '芥菜-翡翠娃娃菜': 'paleGreen',
+  '芥菜-芥菜仁': 'cream',
+  '芥菜-小芥菜': 'midGreen',
+  '芥菜-水耕': 'paleGreen',
+  '芹菜-白梗': 'cream',
+  '芹菜-西洋芹菜': 'midGreen',
+  '芹菜-芹菜管': 'cream',
+  '芹菜-青梗': 'green',
+  '芹菜-山芹菜': 'darkGreen',
+  '芹菜-水耕': 'paleGreen',
+  '油菜-小松菜': 'darkGreen',
+  '油菜-油菜花': 'yellow',
+  '韭菜-青頭': 'darkGreen',
+  '韭菜-韭菜花': 'paleYellow',
+  '韭菜-白頭': 'paleGreen',
+  '韭菜-韭菜黃': 'paleYellow',
+  '莧菜-白莧菜': 'paleGreen',
+  '莧菜-紅莧菜': 'crimson',
+  '莧菜-水耕': 'paleGreen',
+  '紅鳳菜-白鳳菜': 'paleGreen',
+  '蕨菜-過貓': 'green',
+  '蕨菜-山蘇': 'darkGreen',
+  '海菜-水蓮': 'blueGreen',
+  '海菜-海帶': 'brown',
+  '海菜-龍鬚菜': 'sage'
+};
+
 function isPeelCrop(crop) {
   if (!crop) return false;
   if (crop.h === 'a' && crop.g === '瓜果') return true;
   if (crop.h === 'f' && (crop.g === '水果' || !crop.g)) return true;
+  if (crop.g === '水菜') return true;
   return false;
 }
 
@@ -891,7 +990,7 @@ function peelToneOf(name) {
   if (!raw) return '';
   const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
   const key = parsed.name || raw;
-  const mapped = GOURD_PEEL_VARIANT[key] || FRUIT_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw] || FRUIT_PEEL_VARIANT[raw];
+  const mapped = GOURD_PEEL_VARIANT[key] || FRUIT_PEEL_VARIANT[key] || LEAFY_PEEL_VARIANT[key] || GOURD_PEEL_VARIANT[raw] || FRUIT_PEEL_VARIANT[raw] || LEAFY_PEEL_VARIANT[raw];
   if (mapped) {
     const cropGuess = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
     if (cropGuess && !isPeelCrop(cropGuess)) return '';
@@ -910,12 +1009,12 @@ function peelToneOf(name) {
   if (variety && usefulVariant(variety, crop)) {
     const vn = variety.n;
     const vl = variety.l;
-    if (GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn]) return GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn];
-    if (GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl]) return GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl];
+    if (GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn] || LEAFY_PEEL_VARIANT[vn]) return GOURD_PEEL_VARIANT[vn] || FRUIT_PEEL_VARIANT[vn] || LEAFY_PEEL_VARIANT[vn];
+    if (GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl] || LEAFY_PEEL_VARIANT[vl]) return GOURD_PEEL_VARIANT[vl] || FRUIT_PEEL_VARIANT[vl] || LEAFY_PEEL_VARIANT[vl];
     const hinted = peelHintFromLabel(vl);
     if (hinted) return hinted;
   }
-  return GOURD_PEEL_CROP[crop.n] || FRUIT_PEEL_CROP[crop.n] || GOURD_PEEL_CROP[crop.l] || FRUIT_PEEL_CROP[crop.l] || '';
+  return GOURD_PEEL_CROP[crop.n] || FRUIT_PEEL_CROP[crop.n] || LEAFY_PEEL_CROP[crop.n] || GOURD_PEEL_CROP[crop.l] || FRUIT_PEEL_CROP[crop.l] || LEAFY_PEEL_CROP[crop.l] || '';
 }
 
 function peelClass(name) {

@@ -1425,6 +1425,10 @@ input:focus, textarea:focus {
 .peel-yellowGreen { --peel-bg: #b8c63a; --peel-fg: #2a3008; --peel-band: #7a8a18; }
 .peel-lemon { --peel-bg: #c8d14a; --peel-fg: #2a2c08; --peel-band: #8a9418; }
 .peel-amber { --peel-bg: #e0a428; --peel-fg: #2a1c00; --peel-band: #b07a10; }
+.peel-midGreen { --peel-bg: #8fbc5a; --peel-fg: #1a2c0c; --peel-band: #4a7a28; }
+.peel-blueGreen { --peel-bg: #9ed4c8; --peel-fg: #14302c; --peel-band: #3a8a80; }
+.peel-greenWhite { --peel-bg: #c8e6d0; --peel-fg: #1c2e20; --peel-band: #2f8a44; }
+.peel-olive { --peel-bg: #c8c49a; --peel-fg: #2a2c10; --peel-band: #7a7a38; }
 .item-btn.custom { border-style: dashed; }
 
 .item-search {
