@@ -248,6 +248,15 @@ function applyRemoteOps(ops, flashes, from) {
   } finally {
     syncApplying = false;
   }
+  if (typeof applyPlanProgressFromLots === 'function') {
+    const ev = applyPlanProgressFromLots();
+    if (ev && ev.length) {
+      persistSyncState();
+      if (typeof onLocalStateSaved === 'function') onLocalStateSaved();
+      const msg = ev.map(formatPlanEvent).filter(Boolean)[0];
+      if (msg && typeof toast === 'function') toast(msg);
+    }
+  }
   if (typeof render === 'function') render();
 }
 
@@ -273,6 +282,13 @@ function mergeSnapshotOnHello(incoming) {
     }
   } finally {
     syncApplying = false;
+  }
+  if (typeof applyPlanProgressFromLots === 'function') {
+    const ev = applyPlanProgressFromLots();
+    if (ev && ev.length) {
+      persistSyncState();
+      if (typeof onLocalStateSaved === 'function') onLocalStateSaved();
+    }
   }
   if (typeof render === 'function') render();
 }

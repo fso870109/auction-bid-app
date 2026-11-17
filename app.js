@@ -192,16 +192,55 @@ function catalogSummary(half) {
   const hideHint = hidden
     ? `，另有 ${hidden} 項冷門品項已從按鈕拿掉，可搜尋`
     : '';
-  return `按鈕顯示 ${parts.join('、')}，共 ${shown.length} 項${hideHint}。依桃農近一年交易量排序（不到 ${VOLUME_GRID_MIN} 公斤的不出現在選單）。`;
+  return `按鈕顯示 ${parts.join('、')}，共 ${shown.length} 項${hideHint}。依桃農近一年交易量排序（不到 ${VOLUME_GRID_MIN} 公斤的不出現在選單）。品種只列出交易量大的分支，其餘可搜尋。`;
 }
 
 function variantCount(crop) {
   return (crop.s || []).length;
 }
 
-function shouldOpenVariants(crop) {
-  const useful = (crop.s || []).filter((v) => !v.imp && v.l !== '其他' && v.n !== crop.n);
-  return useful.length > 1;
+function usefulVariant(v, crop) {
+  return !!(v && !v.imp && v.l !== '其他' && v.n !== crop.n && v.l !== crop.l);
+}
+
+/* Keep only high-volume branches (桃農 AMIS). Low-volume ones stay searchable. */
+function significantVariants(crop) {
+  const useful = (crop.s || []).filter((v) => usefulVariant(v, crop));
+  const maxV = useful.reduce((m, v) => Math.max(m, Number(v.v) || 0), 0);
+  const cropV = Number(crop.v) || 0;
+  return useful.filter((v) => {
+    const vv = Number(v.v) || 0;
+    if (vv < VOLUME_GRID_MIN) return false;
+    if (vv >= 20000) return true;
+    if (maxV > 0 && vv >= maxV * 0.1 && vv >= 5000) return true;
+    if (cropV > 0 && vv >= cropV * 0.1) return true;
+    return false;
+  });
+}
+
+function variantMatchesQuery(v, q) {
+  q = String(q || '').trim();
+  if (!q) return false;
+  const fields = [v.n, v.l, ...(v.a || [])];
+  if (q.length >= 2) return fields.some((f) => f && String(f).includes(q));
+  return fields.some((f) => f === q || (f && String(f).startsWith(q)));
+}
+
+function pickerVariants(crop, q) {
+  const sig = significantVariants(crop);
+  q = String(q || '').trim();
+  if (!q) return sig;
+  const extra = (crop.s || []).filter((v) => usefulVariant(v, crop) && variantMatchesQuery(v, q));
+  const seen = new Set(sig.map((v) => v.n));
+  const out = sig.slice();
+  for (const v of extra) {
+    if (!seen.has(v.n)) out.push(v);
+  }
+  return out;
+}
+
+function shouldOpenVariants(crop, q) {
+  return pickerVariants(crop, q).length > 1;
 }
 
 function renderItemPicker(half, opts) {
@@ -245,11 +284,21 @@ function renderItemPicker(half, opts) {
       parts.push(`<div class="item-group-h">${escapeHtml(crop.g)}</div>`);
     }
     const on = itemIsActive(crop, active) ? ' on' : '';
-    const badge = shouldOpenVariants(crop) ? '<span class="var-n">▾</span>' : '';
+    const badge = shouldOpenVariants(crop, q) ? '<span class="var-n">▾</span>' : '';
     const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
     parts.push(
       `<button type="button" class="item-btn${on}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}</button>`
     );
+    if (q) {
+      for (const v of (crop.s || [])) {
+        if (!usefulVariant(v, crop) || !variantMatchesQuery(v, q)) continue;
+        const von = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
+        const vlabel = (v.imp ? '進口 ' : '') + (v.l || v.n);
+        parts.push(
+          `<button type="button" class="item-btn${von}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(vlabel)}</button>`
+        );
+      }
+    }
   }
   if (!crops.length && !customs.length) {
     parts.push('<div class="item-group-h">沒有符合的品項</div>');
@@ -261,7 +310,7 @@ function renderItemPicker(half, opts) {
   if (variantPick) {
     const crop = catalogCrops(h).find((c) => c.n === variantPick) || findCrop(variantPick, h);
     if (crop) {
-      const vars = (crop.s || []).slice();
+      const vars = pickerVariants(crop, q);
       const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
       const vBtns = [
         `<button type="button" class="item-btn${active === crop.l || active === crop.n ? ' on' : ''}" data-act="pick-item" data-name="${escapeHtml(crop.l)}"${lotAttr}>不指定品種</button>`
@@ -331,8 +380,12 @@ let draftMachineId = '';
 let planOpen = false;
 let planHistoryPushed = false;
 let planDraft = '';
+let planQty = 1;
 let planPickOpen = false;
 let planAddTarget = 'tomorrow';
+let lastPlanWon = {};
+let lastPlanEvents = [];
+let planProgressLock = false;
 let showMachinePicker = false;
 let paddleOpen = false;
 let wakeLock = null;
@@ -397,13 +450,17 @@ function normalizePlanItems(list) {
     if (!raw || typeof raw !== 'object') continue;
     const text = String(raw.text || '').trim();
     if (!text) continue;
+    const qtyNum = parseInt(raw.qty, 10);
     const item = {
       id: raw.id || uid(),
       text,
       forDay: raw.forDay || today,
       done: !!raw.done,
       doneOn: raw.doneOn || '',
-      createdOn: raw.createdOn || raw.forDay || today
+      createdOn: raw.createdOn || raw.forDay || today,
+      qty: Number.isFinite(qtyNum) && qtyNum > 0 ? Math.min(99, qtyNum) : 1,
+      doneBy: raw.doneBy === 'manual' || raw.doneBy === 'auto' ? raw.doneBy : '',
+      lockCount: Number(raw.lockCount) || 0
     };
     if (item.done && item.doneOn && item.doneOn < cut) continue;
     out.push(item);
@@ -416,6 +473,235 @@ function lotPlanText(lot) {
   const name = itemDisplayName(lot.item);
   const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
   return String(name + size).trim();
+}
+
+function planQtyOf(p) {
+  const n = parseInt(p && p.qty, 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(99, n) : 1;
+}
+
+function parsePlanItemText(text) {
+  let raw = String(text || '').trim().replace(/\s+/g, ' ');
+  let size = '';
+  let name = raw;
+  const paren = raw.match(/^(.*?)[（(]\s*([大中小])\s*[）)]\s*$/);
+  if (paren && String(paren[1] || '').trim()) {
+    name = paren[1].trim();
+    size = paren[2];
+  } else {
+    const spaced = raw.match(/^(.*)\s([大中小])\s*$/);
+    if (spaced && String(spaced[1] || '').trim()) {
+      name = spaced[1].trim();
+      size = spaced[2];
+    }
+  }
+  return { name, size, raw };
+}
+
+function findVariety(crop, name) {
+  if (!crop || !name) return null;
+  const n = String(name).trim();
+  return (crop.s || []).find((x) => (
+    x.n === n || x.l === n || (x.a || []).includes(n)
+  )) || null;
+}
+
+function resolvePlanName(name) {
+  const n = String(name || '').trim();
+  if (!n) return { level: 'exact', exact: '', crop: null, variety: null };
+  const cropExact = findCrop(n);
+  if (cropExact && (cropExact.n === n || cropExact.l === n || (cropExact.a || []).includes(n))) {
+    return { level: 'crop', crop: cropExact, variety: null };
+  }
+  const crop = findCrop(n);
+  if (crop) {
+    const variety = findVariety(crop, n);
+    if (variety && usefulVariant(variety, crop)) {
+      return { level: 'variety', crop, variety };
+    }
+    if (crop.n === n || crop.l === n || (crop.a || []).includes(n) || (n.startsWith(crop.n + '-') && !variety)) {
+      return { level: 'crop', crop, variety: null };
+    }
+    if (variety) return { level: 'crop', crop, variety: null };
+  }
+  const parts = n.split(/\s+/);
+  if (parts.length >= 2) {
+    const head = findCrop(parts[0]);
+    const rest = parts.slice(1).join(' ');
+    if (head) {
+      const variety = findVariety(head, rest) || findVariety(head, head.n + '-' + rest) || findVariety(head, n);
+      if (variety && usefulVariant(variety, head)) return { level: 'variety', crop: head, variety };
+    }
+  }
+  return { level: 'exact', exact: n, crop: null, variety: null };
+}
+
+function resolveLotItem(item) {
+  const name = String(item || '').trim();
+  if (!name) return { crop: null, variety: null };
+  const crop = findCrop(name);
+  if (crop) {
+    let variety = findVariety(crop, name);
+    if (!variety && name.startsWith(crop.n + '-')) {
+      variety = findVariety(crop, name.slice(crop.n.length + 1));
+    }
+    if (!variety && name.startsWith(crop.l + '-')) {
+      variety = findVariety(crop, name.slice(crop.l.length + 1)) || findVariety(crop, crop.n + '-' + name.slice(crop.l.length + 1));
+    }
+    for (const a of crop.a || []) {
+      if (!variety && name.startsWith(a + '-')) {
+        variety = findVariety(crop, name.slice(a.length + 1)) || findVariety(crop, crop.n + '-' + name.slice(a.length + 1));
+      }
+    }
+    return { crop, variety };
+  }
+  const dash = name.indexOf('-');
+  if (dash > 0) {
+    const head = name.slice(0, dash);
+    const rest = name.slice(dash + 1);
+    const c = findCrop(head);
+    if (c && (c.n === head || c.l === head || (c.a || []).includes(head))) {
+      const variety = findVariety(c, rest) || findVariety(c, c.n + '-' + rest);
+      return { crop: c, variety };
+    }
+  }
+  return { crop: null, variety: null };
+}
+
+function planLotMatchScore(plan, lot) {
+  if (!plan || !lot || !lot.item) return 0;
+  const parsed = parsePlanItemText(plan.text);
+  const resolved = resolvePlanName(parsed.name);
+  const lotRes = resolveLotItem(lot.item);
+  const crop = lotRes.crop;
+  const variety = lotRes.variety;
+  const lotSize = itemNeedsSize(lot.item) || (crop && itemNeedsSize(crop.n)) || (crop && itemNeedsSize(crop.l)) ? sizeLabel(lot.size) : '';
+  if (parsed.size) {
+    if (lotSize !== parsed.size) return 0;
+  }
+  if (resolved.level === 'variety' && resolved.crop && resolved.variety) {
+    if (!crop || crop.n !== resolved.crop.n) return 0;
+    if (!variety || variety.n !== resolved.variety.n) return 0;
+    return parsed.size ? 40 : 30;
+  }
+  if (resolved.level === 'crop' && resolved.crop) {
+    if (!crop || crop.n !== resolved.crop.n) return 0;
+    return parsed.size ? 20 : 10;
+  }
+  const exacts = [itemDisplayName(lot.item), lot.item, itemCellName(lot.item), lotPlanText(lot)]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+  if (exacts.some((s) => s === parsed.name || s === parsed.raw)) return parsed.size ? 25 : 15;
+  return 0;
+}
+
+function todayWonLots() {
+  const today = todayStr();
+  const day = (state && state.day) || today;
+  return (state.lots || []).filter((l) => l.status === 'won' && l.item && (l.day === today || l.day === day));
+}
+
+function autoManagedPlans() {
+  const today = todayStr();
+  return (state.planItems || []).filter((p) => {
+    if (!p || p.forDay > today) return false;
+    if (p.done && p.doneOn && p.doneOn < today && p.forDay < today) return false;
+    return true;
+  });
+}
+
+function assignWonToPlans() {
+  const plans = autoManagedPlans();
+  const lots = todayWonLots();
+  const map = new Map();
+  for (const p of plans) map.set(p.id, []);
+  for (const lot of lots) {
+    let best = null;
+    let bestScore = 0;
+    for (const p of plans) {
+      const s = planLotMatchScore(p, lot);
+      if (s > bestScore) {
+        bestScore = s;
+        best = p;
+      } else if (s === bestScore && s > 0 && best) {
+        const needB = Math.max(0, planQtyOf(best) - map.get(best.id).length);
+        const needP = Math.max(0, planQtyOf(p) - map.get(p.id).length);
+        if (needP > 0 && needB === 0) best = p;
+      }
+    }
+    if (best && bestScore > 0) map.get(best.id).push(lot.id);
+  }
+  return map;
+}
+
+function formatPlanEvent(ev) {
+  if (!ev) return '';
+  if (ev.kind === 'done') return '備註：' + ev.text + ' 已完成 ✓';
+  if (ev.kind === 'progress') return '備註：' + ev.text + ' 還差 ' + ev.remain + ' 件';
+  return '';
+}
+
+function latestPlanToast() {
+  const msg = lastPlanEvents.map(formatPlanEvent).filter(Boolean)[0] || '';
+  lastPlanEvents = [];
+  return msg;
+}
+
+function withPlanToast(base) {
+  const note = latestPlanToast();
+  if (!base) return note;
+  return note ? base + '\n' + note : base;
+}
+
+function applyPlanProgressFromLots(opts) {
+  opts = opts || {};
+  if (!state || !Array.isArray(state.planItems)) return lastPlanEvents;
+  const today = todayStr();
+  const assigned = assignWonToPlans();
+  const events = [];
+  for (const p of autoManagedPlans()) {
+    const won = (assigned.get(p.id) || []).length;
+    const qty = planQtyOf(p);
+    const complete = won >= qty;
+    const prev = lastPlanWon[p.id] || 0;
+    if (p.doneBy === 'manual' && p.done) {
+      lastPlanWon[p.id] = won;
+      continue;
+    }
+    if (p.doneBy === 'manual' && !p.done) {
+      const lock = Number(p.lockCount) || 0;
+      if (complete && won > lock) {
+        p.done = true;
+        p.doneOn = today;
+        p.doneBy = 'auto';
+        p.lockCount = 0;
+        events.push({ kind: 'done', text: p.text, won, qty });
+      } else if (won > prev && !complete) {
+        events.push({ kind: 'progress', text: p.text, remain: Math.max(0, qty - won), won, qty });
+      }
+      lastPlanWon[p.id] = won;
+      continue;
+    }
+    if (complete && !p.done) {
+      p.done = true;
+      p.doneOn = today;
+      p.doneBy = 'auto';
+      events.push({ kind: 'done', text: p.text, won, qty });
+    } else if (!complete && p.done && p.doneBy === 'auto') {
+      p.done = false;
+      p.doneOn = '';
+      p.doneBy = '';
+    } else if (!complete && !p.done && won > prev) {
+      events.push({ kind: 'progress', text: p.text, remain: Math.max(0, qty - won), won, qty });
+    }
+    lastPlanWon[p.id] = won;
+  }
+  if (events.length) lastPlanEvents = events;
+  if (opts.toast && events.length && typeof toast === 'function') {
+    const msg = formatPlanEvent(events[0]);
+    if (msg) toast(msg);
+  }
+  return events;
 }
 
 function normalizeBoughtHistory(list) {
@@ -563,8 +849,12 @@ function addPlanText(text, which) {
     forDay,
     done: false,
     doneOn: '',
-    createdOn: today
+    createdOn: today,
+    qty: planQtyOf({ qty: planQty }),
+    doneBy: '',
+    lockCount: 0
   });
+  planQty = 1;
   saveState();
   return true;
 }
@@ -649,9 +939,13 @@ function addPlanItem(which) {
     forDay,
     done: false,
     doneOn: '',
-    createdOn: today
+    createdOn: today,
+    qty: planQtyOf({ qty: planQty }),
+    doneBy: '',
+    lockCount: 0
   });
   planDraft = '';
+  planQty = 1;
   saveState();
   toast(which === 'today' ? '已加入今日預計' : '已加入明日預計，明天還在');
   render();
@@ -662,7 +956,28 @@ function setPlanDone(id, done) {
   if (!item) return;
   item.done = !!done;
   item.doneOn = item.done ? todayStr() : '';
+  item.doneBy = 'manual';
+  item.lockCount = item.done ? 0 : planWonCount(item);
   saveState();
+  render();
+}
+
+function planWonCount(plan) {
+  if (!plan) return 0;
+  const map = assignWonToPlans();
+  return (map.get(plan.id) || []).length;
+}
+
+function bumpPlanQty(id, delta) {
+  const item = (state.planItems || []).find((p) => p.id === id);
+  if (!item) return;
+  item.qty = Math.max(1, Math.min(99, planQtyOf(item) + delta));
+  saveState();
+  render();
+}
+
+function bumpDraftQty(delta) {
+  planQty = Math.max(1, Math.min(99, (parseInt(planQty, 10) || 1) + delta));
   render();
 }
 
@@ -698,11 +1013,32 @@ function renderPlanScreen() {
   const todayItems = items.filter((p) => !p.done && p.forDay <= today);
   const tomorrowItems = items.filter((p) => !p.done && p.forDay > today);
   const doneItems = items.filter((p) => p.done).slice().reverse().slice(0, 20);
-  const row = (p, kind) => `<div class="plan-row${kind === 'done' ? ' done' : ''}">
+  const wonMap = assignWonToPlans();
+  const row = (p, kind) => {
+    const qty = planQtyOf(p);
+    const won = kind === 'tomorrow' ? 0 : (wonMap.get(p.id) || []).length;
+    const remain = Math.max(0, qty - won);
+    let remainHtml = '';
+    if (kind !== 'tomorrow' && qty > 1) {
+      remainHtml = p.done && remain === 0
+        ? `<span class="plan-remain ok">已完成<span class="plan-frac">${qty} 件</span></span>`
+        : `<span class="plan-remain">還差 ${remain} 件<span class="plan-frac">${Math.min(won, qty)}/${qty}</span></span>`;
+    }
+    const qtyCtrl = `<span class="plan-qty-mini">
+        <button type="button" class="plan-qty-btn" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少件數">−</button>
+        <span class="plan-qty-val">${qty}</span>
+        <button type="button" class="plan-qty-btn" data-act="plan-item-qty-inc" data-id="${escapeHtml(p.id)}" aria-label="增加件數">＋</button>
+      </span>`;
+    return `<div class="plan-row${kind === 'done' ? ' done' : ''}">
       <button type="button" class="plan-check${p.done ? ' on' : ''}" data-act="${p.done ? 'plan-undone' : 'plan-done'}" data-id="${escapeHtml(p.id)}" aria-label="${p.done ? '取消完成' : '完成'}">${p.done ? '✓' : ''}</button>
-      <div class="plan-text">${escapeHtml(p.text)}</div>
+      <div class="plan-main">
+        <div class="plan-text">${escapeHtml(p.text)}</div>
+        ${remainHtml}
+      </div>
+      ${qtyCtrl}
       <button type="button" class="plan-del" data-act="plan-del" data-id="${escapeHtml(p.id)}" aria-label="刪除">刪</button>
     </div>`;
+  };
   const section = (title, hint, list, kind) => {
     const target = kind === 'today' || kind === 'tomorrow';
     const on = target && planAddTarget === kind ? ' on' : '';
@@ -746,6 +1082,12 @@ function renderPlanScreen() {
         ${suggestBox}
       </div>
       <div class="plan-add-btns">
+        <div class="plan-qty" aria-label="件數">
+          <button type="button" class="plan-qty-btn" data-act="plan-qty-dec" aria-label="減少件數">−</button>
+          <span class="plan-qty-val">${planQtyOf({ qty: planQty })}</span>
+          <span class="plan-qty-unit">件</span>
+          <button type="button" class="plan-qty-btn" data-act="plan-qty-inc" aria-label="增加件數">＋</button>
+        </div>
         <button type="button" class="btn${planAddTarget === 'today' ? ' primary' : ''}" data-act="plan-add" data-v="today">加入今日</button>
         <button type="button" class="btn${planAddTarget === 'tomorrow' ? ' primary' : ''}" data-act="plan-add" data-v="tomorrow">加入明日</button>
       </div>
@@ -909,6 +1251,10 @@ function loadState() {
 }
 
 function saveState() {
+  if (!planProgressLock) {
+    planProgressLock = true;
+    try { applyPlanProgressFromLots(); } finally { planProgressLock = false; }
+  }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (err) {
@@ -1274,7 +1620,7 @@ function cycleLotStatus(id) {
   rememberBoughtLots(state.lots);
   saveState();
   checkAlerts();
-  offerUndo(snap, `${label} ${lotLabel(lot)}`);
+  offerUndo(snap, withPlanToast(`${label} ${lotLabel(lot)}`));
   buzz(12);
   render();
 }
@@ -1288,7 +1634,7 @@ function markFlow(id) {
   jumpToLot(lot, { force: false });
   saveState();
   checkAlerts();
-  offerUndo(snap, `流標・二市 ${lotLabel(lot)}`);
+  offerUndo(snap, withPlanToast(`流標・二市 ${lotLabel(lot)}`));
   buzz(16);
   render();
 }
@@ -1584,7 +1930,7 @@ function applyItemToLot(lot, name) {
   if (!itemNeedsSize(name)) lot.size = '';
   bumpItemUse(name, lot.half || state.currentHalf);
   saveState();
-  toast(`${lot.number}　${name}`);
+  toast(withPlanToast(`${lot.number}　${name}`));
   buzz(12);
 }
 
@@ -1594,6 +1940,8 @@ function setLotSize(id, size) {
   const next = sizeLabel(size);
   lot.size = lot.size === next ? '' : next;
   saveState();
+  const noteMsg = latestPlanToast();
+  if (noteMsg) toast(noteMsg);
   render();
 }
 
@@ -1603,6 +1951,8 @@ function cycleLotSize(id) {
   const i = ITEM_SIZES.indexOf(lot.size);
   lot.size = ITEM_SIZES[(i + 1) % ITEM_SIZES.length];
   saveState();
+  const noteMsg = latestPlanToast();
+  if (noteMsg) toast(noteMsg);
   render();
 }
 
@@ -1775,7 +2125,7 @@ function paintToast(el) {
     return;
   }
   if (toastAction) {
-    el.innerHTML = `<span>${escapeHtml(toastMsg)}</span><button type="button" data-act="undo">${escapeHtml(toastAction.label || '復原')}</button>`;
+    el.innerHTML = `<span>${escapeHtml(toastMsg).replace(/\n/g, '<br>')}</span><button type="button" data-act="undo">${escapeHtml(toastAction.label || '復原')}</button>`;
   } else {
     el.textContent = toastMsg;
   }
@@ -1912,8 +2262,9 @@ function deleteLot(id, { undoable } = {}) {
   const snap = lot ? { ...snapshotLot(lot), kind: 'delete' } : null;
   state.lots = state.lots.filter((l) => l.id !== id);
   saveState();
-  if (undoable && snap) offerUndo(snap, lot ? `已刪 ${lot.number}` : '已刪除');
-  else toast(lot ? `已刪 ${lot.number}` : '已刪除');
+  const base = lot ? `已刪 ${lot.number}` : '已刪除';
+  if (undoable && snap) offerUndo(snap, withPlanToast(base));
+  else toast(withPlanToast(base) || base);
   render();
 }
 
@@ -1930,6 +2281,8 @@ function setLotStatus(id, status) {
   rememberBoughtLots(state.lots);
   saveState();
   checkAlerts();
+  const noteMsg = latestPlanToast();
+  if (noteMsg) toast(noteMsg);
   render();
 }
 
@@ -3122,7 +3475,7 @@ function onClick(e) {
       }
       const crop = findCrop(btn.dataset.crop, state.currentHalf) || findCrop(btn.dataset.crop);
       if (!crop) break;
-      if (!shouldOpenVariants(crop)) {
+      if (!shouldOpenVariants(crop, itemQuery)) {
         variantPick = null;
         const only = (crop.s || []).find((v) => !v.imp && v.l !== '其他' && v.n !== crop.n);
         const name = crop.l;
@@ -3216,6 +3569,18 @@ function onClick(e) {
       break;
     case 'plan-del':
       deletePlanItem(btn.dataset.id);
+      break;
+    case 'plan-qty-inc':
+      bumpDraftQty(1);
+      break;
+    case 'plan-qty-dec':
+      bumpDraftQty(-1);
+      break;
+    case 'plan-item-qty-inc':
+      bumpPlanQty(btn.dataset.id, 1);
+      break;
+    case 'plan-item-qty-dec':
+      bumpPlanQty(btn.dataset.id, -1);
       break;
     case 'set-draft-size':
       setDraftSize(v);
@@ -4031,6 +4396,8 @@ function registerSW() {
 
 function init() {
   state = loadState();
+  applyPlanProgressFromLots();
+  lastPlanEvents = [];
   draftPriority = state.lastPriority || 'watch';
   checkNewDay();
   bind();

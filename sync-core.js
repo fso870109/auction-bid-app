@@ -6,7 +6,7 @@
   'use strict';
 
   const LOT_FIELDS = ['number', 'day', 'half', 'machineId', 'item', 'size', 'note', 'status', 'priority', 'secondMarket', 'createdAt'];
-  const PLAN_FIELDS = ['text', 'forDay', 'done', 'doneOn', 'createdOn'];
+  const PLAN_FIELDS = ['text', 'forDay', 'done', 'doneOn', 'createdOn', 'qty', 'doneBy', 'lockCount'];
 
   function emptySnapshot() {
     return {

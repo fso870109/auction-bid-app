@@ -1726,7 +1726,7 @@ html.is-dragging .live-col-list {
 .live-cur {
   flex: 0 0 auto;
   font-weight: 900;
-  font-size: 13px;
+  font-size: clamp(13px, 3.6vw, 16px);
   font-variant-numeric: tabular-nums;
   color: var(--yellow);
   min-height: 22px;
@@ -1870,8 +1870,8 @@ button.lot-cell {
 }
 .cell-num {
   flex: 0 0 auto;
-  font-weight: 800;
-  font-size: 16px;
+  font-weight: 900;
+  font-size: clamp(17px, 4.8vw, 20px);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
   line-height: 1;
@@ -2038,10 +2038,14 @@ button.lot-cell {
   gap: 10px;
   max-width: calc(100vw - 24px);
 }
-.toast.has-action { padding: 8px 8px 8px 16px; }
+.toast.has-action { padding: 8px 8px 8px 16px; border-radius: 18px; align-items: center; }
 .toast.has-action span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  text-align: left;
+  line-height: 1.35;
 }
 .toast button {
   flex: 0 0 auto;
@@ -2195,6 +2199,14 @@ button.lot-cell {
   background: #038736;
   border-color: #038736;
 }
+.plan-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .plan-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -2210,6 +2222,61 @@ button.lot-cell {
   font-size: 13px;
   min-height: 32px;
   padding: 0 8px;
+}
+.plan-remain {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  color: #f0c35a;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.plan-remain.ok { color: #7dcca0; }
+.plan-remain .plan-frac {
+  margin-left: 4px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.plan-qty, .plan-qty-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  background: #171717;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 2px;
+}
+.plan-qty { min-height: 44px; padding: 2px 4px; }
+.plan-qty-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text);
+}
+.plan-qty-mini .plan-qty-btn { width: 28px; height: 28px; font-size: 16px; }
+.plan-qty-btn:active { background: var(--bg-press); }
+.plan-qty-val {
+  min-width: 1.4em;
+  text-align: center;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+.plan-qty-unit {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  padding-right: 4px;
+}
+.plan-add-btns { grid-template-columns: auto 1fr 1fr; align-items: stretch; }
+@media (max-width: 360px) {
+  .plan-remain { font-size: 11px; }
+  .plan-row { gap: 6px; }
 }
 .plan-add {
   flex: 0 0 auto;
@@ -2241,7 +2308,7 @@ button.lot-cell {
   bottom: calc(12px + 56px + 12px + var(--safe-b) + 8px);
 }
 .plan-add input { min-height: 44px; font-size: 16px; }
-.plan-add-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.plan-add-btns { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; margin-top: 8px; align-items: stretch; }
 .plan-add-btns .btn { min-height: 44px; font-weight: 800; }
 
 .plan-sec h2.plan-target { cursor: pointer; min-height: 32px; }
