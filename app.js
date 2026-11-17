@@ -151,13 +151,13 @@ function visibleCrops(half, q) {
     const ga = ranks[a.g] ?? 9;
     const gb = ranks[b.g] ?? 9;
     if (ga !== gb) return ga - gb;
+    const sa = itemSessionScore(a.l, h) || itemSessionScore(a.n, h);
+    const sb = itemSessionScore(b.l, h) || itemSessionScore(b.n, h);
+    if (sb !== sa) return sb - sa;
     const za = a.v > 0 ? 0 : 1;
     const zb = b.v > 0 ? 0 : 1;
     if (za !== zb) return za - zb;
     if (b.v !== a.v) return b.v - a.v;
-    const ca = counts[a.l] || counts[a.n] || 0;
-    const cb = counts[b.l] || counts[b.n] || 0;
-    if (cb !== ca) return cb - ca;
     return String(a.l).localeCompare(String(b.l), 'zh-Hant');
   });
   return list;
@@ -262,7 +262,7 @@ function renderItemPicker(half, opts) {
       if (q.length >= 2) return n.includes(q);
       return n === q || n.startsWith(q);
     });
-  customs.sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b, 'zh-Hant'));
+  customs.sort((a, b) => (itemSessionScore(b, h) - itemSessionScore(a, h)) || a.localeCompare(b, 'zh-Hant'));
 
   const crops = visibleCrops(h, q);
   const parts = [];
@@ -271,8 +271,9 @@ function renderItemPicker(half, opts) {
     for (const name of customs) {
       const on = active === name ? ' on' : '';
       const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
+      const need = needBadgeHtml([name]);
       parts.push(
-        `<button type="button" class="item-btn custom${on}" data-act="pick-item" data-name="${escapeHtml(name)}"${lotAttr}>${escapeHtml(name)}</button>`
+        `<button type="button" class="item-btn custom${on}${need.cls}" data-act="pick-item" data-name="${escapeHtml(name)}"${lotAttr}>${escapeHtml(name)}${need.html}</button>`
       );
     }
   }
@@ -286,16 +287,18 @@ function renderItemPicker(half, opts) {
     const on = itemIsActive(crop, active) ? ' on' : '';
     const badge = shouldOpenVariants(crop, q) ? '<span class="var-n">▾</span>' : '';
     const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
+    const need = needBadgeHtml([crop.l, crop.n]);
     parts.push(
-      `<button type="button" class="item-btn${on}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}</button>`
+      `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}${need.html}</button>`
     );
     if (q) {
       for (const v of (crop.s || [])) {
         if (!usefulVariant(v, crop) || !variantMatchesQuery(v, q)) continue;
         const von = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
         const vlabel = (v.imp ? '進口 ' : '') + (v.l || v.n);
+        const vneed = needBadgeHtml([v.n, v.l, vlabel]);
         parts.push(
-          `<button type="button" class="item-btn${von}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(vlabel)}</button>`
+          `<button type="button" class="item-btn${von}${vneed.cls}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(vlabel)}${vneed.html}</button>`
         );
       }
     }
@@ -323,8 +326,9 @@ function renderItemPicker(half, opts) {
           const rest = String(label).replace(/^進口\s*/, '');
           label = rest ? '進口 ' + rest : '進口';
         }
+        const vneed = needBadgeHtml([v.n, v.l, label, crop.l, crop.n]);
         vBtns.push(
-          `<button type="button" class="item-btn${on}${imp}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(label)}</button>`
+          `<button type="button" class="item-btn${on}${imp}${vneed.cls}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(label)}${vneed.html}</button>`
         );
       }
       sheet = `<div class="var-sheet">
@@ -401,6 +405,9 @@ let itemTargetId = null;
 let itemTargetAuto = false;
 let orientationLocked = false;
 let ignoreItemClick = false;
+let ignoreRecentClick = false;
+let ignoreHoldClick = false;
+let showDaySummary = false;
 let longPressTimer = null;
 let showSettings = false;
 let secondOpen = true;
@@ -478,6 +485,21 @@ function lotPlanText(lot) {
 function planQtyOf(p) {
   const n = parseInt(p && p.qty, 10);
   return Number.isFinite(n) && n > 0 ? Math.min(99, n) : 1;
+}
+
+function lotQty(lot) {
+  const n = parseInt(lot && lot.qty, 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(99, n) : 1;
+}
+
+function planWonPieces(p, wonMap) {
+  const ids = (wonMap && p && wonMap.get(p.id)) || [];
+  let n = 0;
+  for (const id of ids) {
+    const lot = (state.lots || []).find((l) => l.id === id);
+    n += lotQty(lot);
+  }
+  return n;
 }
 
 function parsePlanItemText(text) {
@@ -1224,14 +1246,54 @@ function assignWonToPlans() {
         bestScore = s;
         best = p;
       } else if (s === bestScore && s > 0 && best) {
-        const needB = Math.max(0, planQtyOf(best) - map.get(best.id).length);
-        const needP = Math.max(0, planQtyOf(p) - map.get(p.id).length);
+        const needB = Math.max(0, planQtyOf(best) - map.get(best.id).reduce((s, id) => s + lotQty((state.lots || []).find((l) => l.id === id)), 0));
+        const needP = Math.max(0, planQtyOf(p) - map.get(p.id).reduce((s, id) => s + lotQty((state.lots || []).find((l) => l.id === id)), 0));
         if (needP > 0 && needB === 0) best = p;
       }
     }
     if (best && bestScore > 0) map.get(best.id).push(lot.id);
   }
   return map;
+}
+
+
+function planRemainBadgeMap() {
+  const map = {};
+  const wonMap = assignWonToPlans();
+  const today = todayStr();
+  for (const p of state.planItems || []) {
+    if (!p || p.done || p.forDay > today) continue;
+    const remain = Math.max(0, planQtyOf(p) - planWonPieces(p, wonMap));
+    if (remain <= 0) continue;
+    const parsed = parsePlanItemText(p.text);
+    const resolved = resolvePlanName(parsed.name);
+    const keys = new Set([p.text, parsed.name, parsed.raw]);
+    if (resolved.crop) {
+      keys.add(resolved.crop.l);
+      keys.add(resolved.crop.n);
+    }
+    if (resolved.variety) {
+      keys.add(resolved.variety.l);
+      keys.add(resolved.variety.n);
+    }
+    for (const key of keys) {
+      const k = String(key || '').trim();
+      if (!k) continue;
+      map[k] = (map[k] || 0) + remain;
+    }
+  }
+  return map;
+}
+
+function needBadgeHtml(keys) {
+  const map = planRemainBadgeMap();
+  let remain = 0;
+  for (const k of keys || []) {
+    const n = map[String(k || '').trim()] || 0;
+    if (n > remain) remain = n;
+  }
+  if (remain <= 0) return { cls: '', html: '' };
+  return { cls: ' has-need', html: `<span class="need-badge">差${remain}</span>` };
 }
 
 function formatPlanEvent(ev) {
@@ -1260,7 +1322,7 @@ function applyPlanProgressFromLots(opts) {
   const assigned = assignWonToPlans();
   const events = [];
   for (const p of autoManagedPlans()) {
-    const won = (assigned.get(p.id) || []).length;
+    const won = planWonPieces(p, assigned);
     const qty = planQtyOf(p);
     const complete = won >= qty;
     const prev = lastPlanWon[p.id] || 0;
@@ -1616,7 +1678,7 @@ function renderPlanScreen() {
   const wonMap = assignWonToPlans();
   const row = (p, kind) => {
     const qty = planQtyOf(p);
-    const won = kind === 'tomorrow' ? 0 : (wonMap.get(p.id) || []).length;
+    const won = kind === 'tomorrow' ? 0 : planWonPieces(p, wonMap);
     const remain = Math.max(0, qty - won);
     let remainHtml = '';
     if (kind !== 'tomorrow' && qty > 1) {
@@ -1668,7 +1730,7 @@ function renderPlanScreen() {
     <header class="plan-bar">
       <button type="button" class="plan-back" data-act="close-plan">返回</button>
       <h1>備註</h1>
-      <span class="plan-bar-spacer"></span>
+      <button type="button" class="plan-bar-link" data-act="open-summary">今日總結</button>
     </header>
     <div class="plan-body">
       ${section('今日預計', '昨天先記下、今天要批的會留在這裡。開始新的一天也不會清掉。點標題可改成加到今日。', todayItems, 'today')}
@@ -1729,6 +1791,7 @@ function defaultState() {
     sellerCode: '',
     paddleTheme: 'yellow',
     vibrate: true,
+    keepAwake: true,
     alertGap: 3,
     autoSave4: true,
     currentHalf: 'fruit',
@@ -1742,6 +1805,8 @@ function defaultState() {
     itemCounts: {},
     customItemsByHalf: { fruit: [], morning: [], afternoon: [] },
     itemCountsByHalf: { fruit: {}, morning: {}, afternoon: {} },
+    itemUseLogByHalf: { fruit: {}, morning: {}, afternoon: {} },
+    itemUseLogMigrated: true,
     progressV2: true,
     itemsMigratedV2: true,
     lastPriority: 'watch',
@@ -2148,6 +2213,7 @@ function snapshotLot(lot) {
     current: currentOf(lot.machineId, lot.half),
     half: lot.half,
     machineId: lot.machineId,
+    qty: lotQty(lot),
     lot: { ...lot }
   };
 }
@@ -2175,6 +2241,7 @@ function undoLast() {
     restoreCurrent(snap);
     saveState();
     toast('已復原');
+    buzz(24);
     render();
     return;
   }
@@ -2188,9 +2255,11 @@ function undoLast() {
   lot.item = snap.item;
   if (snap.priority) lot.priority = snap.priority;
   if (snap.machineId) lot.machineId = snap.machineId;
+  if (snap.qty != null) lot.qty = lotQty({ qty: snap.qty });
   restoreCurrent(snap);
   saveState();
   toast('已復原');
+  buzz(24);
   render();
 }
 
@@ -2221,7 +2290,7 @@ function cycleLotStatus(id) {
   saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`${label} ${lotLabel(lot)}`));
-  buzz(12);
+  buzz(24);
   render();
 }
 
@@ -2235,7 +2304,7 @@ function markFlow(id) {
   saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`流標・二市 ${lotLabel(lot)}`));
-  buzz(16);
+  buzz(28);
   render();
 }
 
@@ -2247,6 +2316,33 @@ function cancelFlow(id) {
   lot.secondMarket = false;
   saveState();
   offerUndo(snap, `已取消流標 ${lotLabel(lot)}`);
+  render();
+}
+
+function setLotQty(id, delta) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  const next = Math.max(1, Math.min(99, lotQty(lot) + (Number(delta) || 0)));
+  if (next === lotQty(lot) && lot.qty === next) return;
+  const snap = snapshotLot(lot);
+  lot.qty = next;
+  saveState();
+  offerUndo(snap, `${lot.number}　${next} 件`);
+  buzz(20);
+  render();
+}
+
+function undoLotMark(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || lot.status === 'pending') return;
+  const snap = snapshotLot(lot);
+  const label = lot.status === 'won' ? '已取消標到' : lot.status === 'flow' ? '已取消流標' : '已改回未拍';
+  lot.status = 'pending';
+  lot.secondMarket = false;
+  saveState();
+  checkAlerts();
+  offerUndo(snap, withPlanToast(`${label} ${lotLabel(lot)}`));
+  buzz(24);
   render();
 }
 
@@ -2467,6 +2563,83 @@ function customItemsOf(half) {
   return state.customItemsByHalf[h];
 }
 
+
+let sessionItemRanks = { fruit: {}, morning: {}, afternoon: {} };
+let sessionItemRanksDay = '';
+
+function ensureItemUseLog(st) {
+  if (!st) return;
+  if (!st.itemUseLogByHalf || typeof st.itemUseLogByHalf !== 'object') {
+    st.itemUseLogByHalf = { fruit: {}, morning: {}, afternoon: {} };
+  }
+  for (const half of HALVES) {
+    if (!st.itemUseLogByHalf[half] || typeof st.itemUseLogByHalf[half] !== 'object') {
+      st.itemUseLogByHalf[half] = {};
+    }
+  }
+  if (!st.itemUseLogMigrated) {
+    for (const half of HALVES) {
+      const counts = (st.itemCountsByHalf && st.itemCountsByHalf[half]) || {};
+      const log = st.itemUseLogByHalf[half];
+      for (const [name, n] of Object.entries(counts)) {
+        const num = Number(n) || 0;
+        if (!name || num < 1) continue;
+        if (!Array.isArray(log[name]) || !log[name].length) {
+          log[name] = [{ day: todayStr(), n: num }];
+        }
+      }
+    }
+    st.itemUseLogMigrated = true;
+  }
+}
+
+function pruneItemUseLog(st) {
+  if (!st || !st.itemUseLogByHalf) return;
+  const cut = addDaysIso(todayStr(), -14);
+  for (const half of HALVES) {
+    const log = st.itemUseLogByHalf[half] || {};
+    for (const name of Object.keys(log)) {
+      const kept = (log[name] || []).filter((e) => e && e.day && e.day >= cut && (Number(e.n) || 0) > 0);
+      if (kept.length) log[name] = kept;
+      else delete log[name];
+    }
+  }
+}
+
+function decayedItemScore(name, half) {
+  const entries = ((state.itemUseLogByHalf || {})[half] || {})[name] || [];
+  const today = todayStr();
+  let s = 0;
+  for (const e of entries) {
+    const age = Math.round((Date.parse(today) - Date.parse(e.day)) / 86400000);
+    if (!Number.isFinite(age) || age < 0 || age > 14) continue;
+    s += (Number(e.n) || 0) * (1 - age / 14);
+  }
+  return s;
+}
+
+function freezeItemRanks() {
+  ensureItemUseLog(state);
+  pruneItemUseLog(state);
+  sessionItemRanks = { fruit: {}, morning: {}, afternoon: {} };
+  sessionItemRanksDay = todayStr();
+  for (const half of HALVES) {
+    const names = new Set(Object.keys((state.itemUseLogByHalf && state.itemUseLogByHalf[half]) || {}));
+    const counts = (state.itemCountsByHalf && state.itemCountsByHalf[half]) || {};
+    Object.keys(counts).forEach((n) => names.add(n));
+    for (const name of names) {
+      sessionItemRanks[half][name] = decayedItemScore(name, half);
+    }
+  }
+}
+
+function itemSessionScore(name, half) {
+  const h = half || (state && state.currentHalf) || 'morning';
+  if (!sessionItemRanksDay || sessionItemRanksDay !== todayStr()) freezeItemRanks();
+  const ranks = sessionItemRanks[h] || {};
+  return ranks[name] || 0;
+}
+
 function itemCountsOf(half) {
   const h = half || state.currentHalf;
   if (!state.itemCountsByHalf) state.itemCountsByHalf = { fruit: {}, morning: {}, afternoon: {} };
@@ -2520,8 +2693,17 @@ function isCustomItem(name, half) {
 
 function bumpItemUse(name, half) {
   if (!name) return;
-  const counts = itemCountsOf(half || state.currentHalf);
+  const h = half || state.currentHalf;
+  const counts = itemCountsOf(h);
   counts[name] = (counts[name] || 0) + 1;
+  ensureItemUseLog(state);
+  const log = state.itemUseLogByHalf[h];
+  const today = todayStr();
+  const arr = Array.isArray(log[name]) ? log[name] : [];
+  const last = arr[arr.length - 1];
+  if (last && last.day === today) last.n = (Number(last.n) || 0) + 1;
+  else arr.push({ day: today, n: 1 });
+  log[name] = arr;
 }
 
 function applyItemToLot(lot, name) {
@@ -2833,6 +3015,7 @@ function commitLot(num, machineId, half) {
     size: itemNeedsSize(draftItem) ? sizeLabel(draftSize) : '',
     status: 'pending',
     priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
+    qty: 1,
     createdAt: Date.now()
   };
   if (lot.item) bumpItemUse(lot.item);
@@ -2849,7 +3032,7 @@ function commitLot(num, machineId, half) {
   itemTargetAuto = true;
   saveState();
   toast(lot.item ? `已存 ${lot.number}　${lot.item}` : `已存 ${num}　${machineNameOf(lot)}`);
-  buzz(20);
+  buzz(26);
   render();
 }
 
@@ -3036,7 +3219,7 @@ async function exitPaddle() {
   } catch {
     /* ignore */
   }
-  releaseWakeLock();
+  syncWakeLock();
   render();
 }
 
@@ -3076,6 +3259,14 @@ function applyCssLandscapeIfNeeded() {
   else el.classList.remove('css-landscape');
 }
 
+
+function syncWakeLock() {
+  if (document.visibilityState !== 'visible' || (state && state.keepAwake === false)) {
+    if (!paddleOpen) releaseWakeLock();
+    return;
+  }
+  requestWakeLock();
+}
 async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) {
@@ -3185,6 +3376,7 @@ function startNewDay(confirmed) {
   itemTargetId = null;
   itemTargetAuto = false;
   saveState();
+  freezeItemRanks();
   toast('已開始新的一天，預計備註還在，先從水果場開始');
   render();
 }
@@ -3211,7 +3403,144 @@ function checkNewDay() {
     state.alerted = {};
     state.currentHalf = 'fruit';
     saveState();
+    freezeItemRanks();
   }
+}
+
+
+function cropGroupOfName(name) {
+  const crop = findCrop(name);
+  return (crop && crop.g) || '其他';
+}
+
+function groupRankForSummary(g) {
+  const order = ['大宗', '水菜', '瓜果', '醃製', '水果', '其他'];
+  const i = order.indexOf(g);
+  return i < 0 ? 9 : i;
+}
+
+function daySummaryData() {
+  const today = (state && state.day) || todayStr();
+  const won = (state.lots || []).filter((l) => l.day === today && l.status === 'won');
+  const groups = new Map();
+  let pieces = 0;
+  for (const lot of won) {
+    const name = itemDisplayName(lot.item) || lot.item || '未填品項';
+    const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? lot.size : '';
+    const key = name + (size ? ' ' + size : '');
+    const g = lot.item ? cropGroupOfName(lot.item) : '其他';
+    if (!groups.has(g)) groups.set(g, new Map());
+    const row = groups.get(g);
+    const cur = row.get(key) || { name, size, pieces: 0, lots: 0 };
+    cur.pieces += lotQty(lot);
+    cur.lots += 1;
+    row.set(key, cur);
+    pieces += lotQty(lot);
+  }
+  const grouped = [...groups.entries()]
+    .sort((a, b) => groupRankForSummary(a[0]) - groupRankForSummary(b[0]))
+    .map(([g, rows]) => ({
+      group: g,
+      items: [...rows.values()].sort((a, b) => b.pieces - a.pieces || a.name.localeCompare(b.name, 'zh-Hant'))
+    }));
+  const wonMap = assignWonToPlans();
+  const day = todayStr();
+  const remainPlans = (state.planItems || []).filter((p) => {
+    if (!p || p.done || p.forDay > day) return false;
+    return planQtyOf(p) - planWonPieces(p, wonMap) > 0;
+  }).map((p) => ({
+    text: p.text,
+    remain: planQtyOf(p) - planWonPieces(p, wonMap),
+    qty: planQtyOf(p),
+    won: planWonPieces(p, wonMap)
+  }));
+  return { date: today, wonLots: won.length, pieces, grouped, remainPlans };
+}
+
+function daySummaryText() {
+  const d = daySummaryData();
+  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`];
+  for (const g of d.grouped) {
+    lines.push('', g.group);
+    for (const it of g.items) {
+      const label = it.size ? `${it.name} ${it.size}` : it.name;
+      lines.push(`  ${label}　${it.pieces} 件`);
+    }
+  }
+  if (!d.grouped.length) lines.push('', '今天還沒有標到的貨。');
+  if (d.remainPlans.length) {
+    lines.push('', '備註還差');
+    for (const p of d.remainPlans) lines.push(`  ${p.text}　還差 ${p.remain} 件`);
+  } else {
+    lines.push('', '備註：今日預計都已買齊，或還沒有備註。');
+  }
+  return lines.join('\n');
+}
+
+function renderDaySummary() {
+  if (!showDaySummary) return '';
+  const d = daySummaryData();
+  const groups = d.grouped.length
+    ? d.grouped.map((g) => {
+        const rows = g.items.map((it) => {
+          const label = it.size ? `${escapeHtml(it.name)} <span class="sum-size">${escapeHtml(it.size)}</span>` : escapeHtml(it.name);
+          return `<div class="sum-row"><span class="sum-name">${label}</span><span class="sum-qty">${it.pieces} 件</span></div>`;
+        }).join('');
+        return `<section class="sum-sec"><h2>${escapeHtml(g.group)}</h2>${rows}</section>`;
+      }).join('')
+    : '<div class="sum-empty">今天還沒有標到的貨</div>';
+  const remain = d.remainPlans.length
+    ? d.remainPlans.map((p) => `<div class="sum-row remain"><span class="sum-name">${escapeHtml(p.text)}</span><span class="sum-qty">還差 ${p.remain} 件</span></div>`).join('')
+    : '<div class="sum-empty">今日預計都已買齊，或還沒有備註</div>';
+  return `<div class="plan-screen sum-screen" id="sum-screen">
+    <header class="plan-bar">
+      <button type="button" class="plan-back" data-act="close-summary">返回</button>
+      <h1>今日總結</h1>
+      <span class="plan-bar-spacer"></span>
+    </header>
+    <div class="plan-body sum-body">
+      <div class="sum-date">${escapeHtml(formatDateLabel(d.date))}</div>
+      <div class="sum-totals">
+        <div class="tot"><b>${d.pieces}</b><span>標到件數</span></div>
+        <div class="tot"><b>${d.wonLots}</b><span>標到筆數</span></div>
+        <div class="tot"><b>${d.remainPlans.length}</b><span>備註還差</span></div>
+      </div>
+      ${groups}
+      <section class="sum-sec">
+        <h2>備註還差</h2>
+        ${remain}
+      </section>
+      <div class="share-row sum-share">
+        <button type="button" class="btn" data-act="copy-summary">複製文字</button>
+        <button type="button" class="btn primary" data-act="share-summary">分享</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function openDaySummary() {
+  showDaySummary = true;
+  toastMsg = '';
+  toastAction = null;
+  render();
+}
+
+function closeDaySummary() {
+  showDaySummary = false;
+  render();
+}
+
+async function shareDaySummary() {
+  const text = daySummaryText();
+  if (navigator.share) {
+    try {
+      await navigator.share({ text, title: '今日總結' });
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+    }
+  }
+  await copyResults(text);
 }
 
 /* ---------- 分享 ---------- */
@@ -3402,6 +3731,7 @@ function render() {
     (paddleOpen ? renderPaddle() : '') +
     (modal ? renderModal() : '') +
     renderPlanScreen() +
+    renderDaySummary() +
     `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
 
   paintToast(document.getElementById('toast'));
@@ -3544,7 +3874,7 @@ function renderNote() {
   const keypad = keys
     .map((k) => {
       if (k === '⌫') return `<button type="button" class="key muted" data-act="back">⌫</button>`;
-      if (k === 'C') return `<button type="button" class="key muted" data-act="clear">清除</button>`;
+      if (k === 'C') return `<button type="button" class="key muted hold-btn" data-act="clear" data-hold="clear">清除</button>`;
       return `<button type="button" class="key" data-act="digit" data-v="${k}">${k}</button>`;
     })
     .join('');
@@ -3783,8 +4113,12 @@ function renderSettings() {
         <button type="button" class="toggle${state.autoSave4 ? ' on' : ''}" data-act="toggle-autosave"><i></i></button>
       </div>
       <div class="switch-row">
-        <div><div class="lbl">振動提醒</div><div class="sub">追蹤時還差 ${state.alertGap} 號會振動</div></div>
+        <div><div class="lbl">振動回饋</div><div class="sub">存號、標到、流標、復原，以及追蹤接近時會振動</div></div>
         <button type="button" class="toggle${state.vibrate ? ' on' : ''}" data-act="toggle-vibrate"><i></i></button>
+      </div>
+      <div class="switch-row">
+        <div><div class="lbl">保持螢幕亮著</div><div class="sub">開著 App 時不讓螢幕休眠（裝置不支援會自動略過）</div></div>
+        <button type="button" class="toggle${state.keepAwake ? ' on' : ''}" data-act="toggle-awake"><i></i></button>
       </div>
     </div>
     ${halfBlocks}
@@ -3816,6 +4150,7 @@ function renderSettings() {
       ${install || '<p class="empty-hint" style="text-align:left;padding:0">已用主畫面開啟。</p>'}
     </div>
     <div class="setting-block">
+      <button type="button" class="btn primary" style="width:100%;margin-bottom:10px" data-act="open-summary">今日總結</button>
       <button type="button" class="btn danger" style="width:100%" data-act="new-day">開始新的一天（清空抄號）</button>
     </div>
   `;
@@ -3917,9 +4252,16 @@ function renderModal() {
   if (modal.type === 'lot-actions') {
     const lot = state.lots.find((l) => l.id === modal.id);
     if (!lot) return '';
+    const undoMark = lot.status === 'won'
+      ? `<button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">取消標到</button>`
+      : lot.status === 'flow'
+        ? `<button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">取消流標</button>`
+        : lot.status === 'lost'
+          ? `<button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">改回未拍</button>`
+          : '';
     const flowBtn = lot.status === 'flow'
-      ? `<button type="button" class="action-btn" data-act="cancel-flow" data-id="${escapeHtml(lot.id)}">取消流標</button>`
-      : `<button type="button" class="action-btn flow" data-act="mark-flow" data-id="${escapeHtml(lot.id)}">流標・二市</button>`;
+      ? ''
+      : `<button type="button" class="action-btn flow hold-btn" data-act="mark-flow" data-hold="flow" data-id="${escapeHtml(lot.id)}">按住流標・二市</button>`;
     const secondBtn = lot.status === 'flow'
       ? ''
       : lot.secondMarket
@@ -3927,10 +4269,18 @@ function renderModal() {
         : lot.status === 'won'
           ? ''
           : `<button type="button" class="action-btn" data-act="to-second" data-id="${escapeHtml(lot.id)}">轉二市</button>`;
+    const qty = lotQty(lot);
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet action-sheet" data-stop="1">
         <h3>${escapeHtml(lotLabel(lot))}</h3>
-        <p>${escapeHtml(machineNameOf(lot))}</p>
+        <p>${escapeHtml(machineNameOf(lot))}${lot.item ? '　' + escapeHtml(itemDisplayName(lot.item)) : ''}</p>
+        <div class="lot-qty-row" aria-label="件數">
+          <span class="lot-qty-label">件數</span>
+          <button type="button" class="plan-qty-btn" data-act="lot-qty-dec" data-id="${escapeHtml(lot.id)}" aria-label="減少件數">−</button>
+          <span class="lot-qty-val">${qty}</span>
+          <span class="lot-qty-unit">件</span>
+          <button type="button" class="plan-qty-btn" data-act="lot-qty-inc" data-id="${escapeHtml(lot.id)}" aria-label="增加件數">＋</button>
+        </div>
         <div class="prio-toggle sheet-prio" role="group" aria-label="標貨優先">
           ${['must', 'watch', 'skip'].map((p) => {
             const on = lotPriority(lot) === p ? ' on' : '';
@@ -3938,16 +4288,17 @@ function renderModal() {
           }).join('')}
         </div>
         ${itemNeedsSize(lot.item) ? renderSizeChips(lot.size || '', { lotId: lot.id, sheet: true }) : ''}
+        <button type="button" class="action-btn" data-act="pick-lot-item" data-id="${escapeHtml(lot.id)}">改品項</button>
+        ${undoMark}
+        ${flowBtn}
         <div class="move-lot-row">
           <div class="move-lot-label">移到別台</div>
           ${state.machines[lot.half || state.currentHalf].filter((m) => m.id !== lot.machineId).map((m) =>
             `<button type="button" class="action-btn" data-act="move-lot" data-id="${escapeHtml(lot.id)}" data-v="${escapeHtml(m.id)}">移到${escapeHtml(columnTitle(m, lot.half || state.currentHalf))}</button>`
           ).join('')}
         </div>
-        ${flowBtn}
         <button type="button" class="action-btn" data-act="go-here" data-id="${escapeHtml(lot.id)}">打到這裡</button>
         ${secondBtn}
-        <button type="button" class="action-btn" data-act="pick-lot-item" data-id="${escapeHtml(lot.id)}">改品項</button>
         <button type="button" class="action-btn danger" data-act="del-lot-live" data-id="${escapeHtml(lot.id)}">刪除</button>
         <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="modal-cancel">取消</button>
       </div>
@@ -4071,7 +4422,8 @@ function onClick(e) {
       backspace();
       break;
     case 'clear':
-      clearDraft();
+      if (ignoreHoldClick) { ignoreHoldClick = false; break; }
+      toast('按住不放才會清除');
       break;
     case 'save':
       saveLot();
@@ -4084,6 +4436,7 @@ function onClick(e) {
       deleteLot(btn.dataset.id);
       break;
     case 'select-lot':
+      if (ignoreRecentClick) { ignoreRecentClick = false; break; }
       selectRecentForItem(btn.dataset.id);
       break;
     case 'pick-item':
@@ -4170,6 +4523,29 @@ function onClick(e) {
       render();
       break;
     case 'toggle-note':
+    case 'open-summary':
+      showSettings = false;
+      modal = null;
+      openDaySummary();
+      break;
+    case 'close-summary':
+      closeDaySummary();
+      break;
+    case 'share-summary':
+      shareDaySummary();
+      break;
+    case 'copy-summary':
+      copyResults(daySummaryText());
+      break;
+    case 'lot-qty-inc':
+      setLotQty(btn.dataset.id, 1);
+      break;
+    case 'lot-qty-dec':
+      setLotQty(btn.dataset.id, -1);
+      break;
+    case 'undo-mark':
+      undoLotMark(btn.dataset.id);
+      break;
     case 'open-plan':
       openPlan();
       break;
@@ -4292,8 +4668,8 @@ function onClick(e) {
       render();
       break;
     case 'mark-flow':
-      modal = null;
-      markFlow(btn.dataset.id);
+      if (ignoreHoldClick) { ignoreHoldClick = false; break; }
+      toast('按住不放才會流標');
       break;
     case 'cancel-flow':
       modal = null;
@@ -4427,6 +4803,12 @@ function onClick(e) {
     case 'theme':
       state.paddleTheme = v;
       saveState();
+      render();
+      break;
+    case 'toggle-awake':
+      state.keepAwake = !state.keepAwake;
+      saveState();
+      syncWakeLock();
       render();
       break;
     case 'toggle-vibrate':
@@ -4564,7 +4946,7 @@ function onFullscreenChange() {
   if (paddleOpen && !document.fullscreenElement && !document.webkitFullscreenElement) {
     paddleOpen = false;
     unlockOrientation();
-    releaseWakeLock();
+    syncWakeLock();
     render();
   } else if (paddleOpen) {
     requestAnimationFrame(() => {
@@ -4575,8 +4957,8 @@ function onFullscreenChange() {
 }
 
 function onVisibility() {
+  syncWakeLock();
   if (document.visibilityState === 'visible' && paddleOpen) {
-    requestWakeLock();
     if (orientationLocked) lockLandscape();
     requestAnimationFrame(() => {
       applyCssLandscapeIfNeeded();
@@ -4611,6 +4993,8 @@ function clearPressTimers() {
 
 function cancelPress() {
   if (pressOrigin?.cell) pressOrigin.cell.classList.remove('armed');
+  if (pressOrigin?.recent) pressOrigin.recent.classList.remove('armed');
+  if (pressOrigin?.holdBtn) pressOrigin.holdBtn.classList.remove('holding');
   clearPressTimers();
   pressOrigin = null;
 }
@@ -4812,11 +5196,60 @@ function endColDrag(pt) {
   render();
 }
 
+function armHoldFill(btn) {
+  if (!btn) return;
+  btn.classList.remove('holding');
+  void btn.offsetWidth;
+  btn.classList.add('holding');
+}
+
+function performHoldAction(act, btn) {
+  if (act === 'clear') {
+    clearDraft();
+    return;
+  }
+  if (act === 'flow') {
+    const id = btn && btn.dataset.id;
+    modal = null;
+    if (id) markFlow(id);
+  }
+}
+
 function onPressStart(e, pt) {
   clearPressTimers();
   if (dragState) cleanupDrag();
   const target = e.target && e.target.nodeType === 1 ? e.target : document.elementFromPoint(pt.x, pt.y);
   pressOrigin = { x: pt.x, y: pt.y, pointerCap: e.pointerId };
+  const holdBtn = target && target.closest && target.closest('[data-hold]');
+  if (holdBtn && !target.closest('.del')) {
+    pressOrigin.holdBtn = holdBtn;
+    pressOrigin.holdAct = holdBtn.dataset.hold || holdBtn.dataset.act;
+    armHoldFill(holdBtn);
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      if (!pressOrigin || pressOrigin.holdBtn !== holdBtn) return;
+      pressOrigin.holdDone = true;
+      holdBtn.classList.remove('holding');
+      ignoreHoldClick = true;
+      performHoldAction(pressOrigin.holdAct, holdBtn);
+    }, 500);
+    return;
+  }
+  const recent = target && target.closest && target.closest('.recent-chip');
+  if (recent && !(target.closest && target.closest('.del'))) {
+    const id = recent.dataset.id;
+    pressOrigin.recent = recent;
+    pressOrigin.recentId = id;
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      if (!pressOrigin || pressOrigin.recentId !== id) return;
+      ignoreRecentClick = true;
+      recent.classList.remove('armed');
+      openLotActions(id);
+    }, 500);
+    recent.classList.add('armed');
+    return;
+  }
   const itemBtn = target && target.closest && target.closest('[data-act="pick-item"]');
   const cell = target && target.closest && target.closest('[data-act="cycle-lot"]');
   const colHead = target && target.closest && target.closest('.live-col-head');
@@ -4896,6 +5329,22 @@ function onPressEnd(e, pt) {
     pressOrigin = null;
     return;
   }
+  if (pressOrigin && pressOrigin.holdBtn) {
+    const done = !!pressOrigin.holdDone;
+    const act = pressOrigin.holdAct;
+    pressOrigin.holdBtn.classList.remove('holding');
+    if (!done) {
+      ignoreHoldClick = true;
+      toast(act === 'clear' ? '按住不放才會清除' : '按住不放才會流標');
+    }
+    cancelPress();
+    return;
+  }
+  if (pressOrigin && pressOrigin.recent) {
+    pressOrigin.recent.classList.remove('armed');
+    cancelPress();
+    return;
+  }
   cancelPress();
 }
 
@@ -4950,7 +5399,7 @@ function bind() {
     window.visualViewport.addEventListener('resize', syncViewportHeight);
     window.visualViewport.addEventListener('scroll', syncViewportHeight);
   }
-  document.addEventListener('click', onClick);
+  document.addEventListener('click', (e) => { syncWakeLock(); onClick(e); });
   document.addEventListener('input', onInput);
   window.addEventListener('popstate', onPlanPopState);
   document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -5032,14 +5481,19 @@ function registerSW() {
 
 function init() {
   state = loadState();
+  if (state.keepAwake == null) state.keepAwake = true;
+  ensureItemUseLog(state);
+  freezeItemRanks();
   applyPlanProgressFromLots();
   lastPlanEvents = [];
   draftPriority = state.lastPriority || 'watch';
   checkNewDay();
+  if (sessionItemRanksDay !== todayStr()) freezeItemRanks();
   bind();
   registerSW();
   if (typeof initSync === 'function') initSync();
   render();
+  syncWakeLock();
 }
 
 init();
