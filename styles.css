@@ -2060,6 +2060,24 @@ button.lot-cell {
 }
 .lot-cell.won .cell-num { color: var(--green); }
 .lot-cell.won .cell-item { color: #9ad6a8; }
+.lot-cell.moved {
+  background: #c48a00;
+  border-color: #ffd24a;
+}
+.lot-cell.moved .cell-num { color: #1a1200; }
+.lot-cell.moved .cell-item { color: #2a1c00; }
+.moved-mark {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 900;
+  color: #ffe500;
+  background: #1a1200;
+  border-radius: 4px;
+  padding: 1px 4px;
+  line-height: 1.2;
+}
+.unmoved-count b { color: #ffd24a; }
+.unmoved-count { color: #e8c056; }
 .lot-cell.lost {
   background: #2a1414;
   border-color: #4a2222;
@@ -2814,7 +2832,7 @@ button.lot-cell {
 }
 .sum-totals {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: 18px;
 }

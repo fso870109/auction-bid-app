@@ -1229,7 +1229,7 @@ function planLotMatchScore(plan, lot) {
 function todayWonLots() {
   const today = todayStr();
   const day = (state && state.day) || today;
-  return (state.lots || []).filter((l) => l.status === 'won' && l.item && (l.day === today || l.day === day));
+  return (state.lots || []).filter((l) => isWon(l) && l.item && (l.day === today || l.day === day));
 }
 
 function autoManagedPlans() {
@@ -1400,7 +1400,7 @@ function rememberBoughtLots(lots) {
   const daysInLots = new Set();
   const groups = {};
   for (const l of lots || []) {
-    if (l.status !== 'won' || !l.item) continue;
+    if (!isWon(l) || !l.item) continue;
     const text = lotPlanText(l);
     if (!text) continue;
     const day = l.day || state.day;
@@ -1427,7 +1427,7 @@ function boughtCountsByDay() {
   for (const day of daysWithLots) {
     const inner = new Map();
     for (const l of state.lots || []) {
-      if (l.day !== day || l.status !== 'won' || !l.item) continue;
+      if (l.day !== day || !isWon(l) || !l.item) continue;
       const text = lotPlanText(l);
       if (!text) continue;
       inner.set(text, (inner.get(text) || 0) + 1);
@@ -2422,6 +2422,18 @@ function isFlow(lot) {
   return !!(lot && lot.status === 'flow');
 }
 
+function isWon(lot) {
+  return !!(lot && (lot.status === 'won' || lot.status === 'moved'));
+}
+
+function unmovedQty(lots) {
+  let n = 0;
+  for (const l of lots || []) {
+    if (l && l.status === 'won') n += lotQty(l);
+  }
+  return n;
+}
+
 function columnTitle(m, half) {
   const h = half || state.currentHalf;
   const names = (state.machines[h] || []).map((x) => String(x.name || ''));
@@ -2574,8 +2586,11 @@ function cycleLotStatus(id) {
     lot.secondMarket = false;
     label = '已標到';
   } else if (lot.status === 'won') {
-    next = 'lost';
-    label = '沒標到';
+    next = 'moved';
+    label = '已搬貨';
+  } else if (lot.status === 'moved') {
+    next = 'won';
+    label = '改回標到';
   } else {
     next = 'pending';
     label = '改回未拍';
@@ -2632,12 +2647,38 @@ function undoLotMark(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || lot.status === 'pending') return;
   const snap = snapshotLot(lot);
-  const label = lot.status === 'won' ? '已取消標到' : lot.status === 'flow' ? '已取消流標' : '已改回未拍';
+  const label = lot.status === 'won' || lot.status === 'moved' ? '已取消標到' : lot.status === 'flow' ? '已取消流標' : '已改回未拍';
   lot.status = 'pending';
   lot.secondMarket = false;
   saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`${label} ${lotLabel(lot)}`));
+  buzz(24);
+  render();
+}
+
+function markLost(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || lot.status === 'lost') return;
+  const snap = snapshotLot(lot);
+  lot.status = 'lost';
+  jumpToLot(lot, { force: false });
+  rememberBoughtLots(state.lots);
+  saveState();
+  checkAlerts();
+  offerUndo(snap, withPlanToast(`沒標到 ${lotLabel(lot)}`));
+  buzz(24);
+  render();
+}
+
+function unmoveLot(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot || lot.status !== 'moved') return;
+  const snap = snapshotLot(lot);
+  lot.status = 'won';
+  rememberBoughtLots(state.lots);
+  saveState();
+  offerUndo(snap, `改回標到 ${lotLabel(lot)}`);
   buzz(24);
   render();
 }
@@ -3368,7 +3409,7 @@ function setLotStatus(id, status) {
     lot.status = 'pending';
   } else {
     lot.status = status;
-    if (status === 'won') lot.secondMarket = false;
+    if (status === 'won' || status === 'moved') lot.secondMarket = false;
     if (status === 'won' || status === 'lost') jumpToLot(lot, { force: false });
   }
   rememberBoughtLots(state.lots);
@@ -3717,7 +3758,8 @@ function groupRankForSummary(g) {
 
 function daySummaryData() {
   const today = (state && state.day) || todayStr();
-  const won = (state.lots || []).filter((l) => l.day === today && l.status === 'won');
+  const won = (state.lots || []).filter((l) => l.day === today && isWon(l));
+  const unmovedPieces = unmovedQty(won);
   const groups = new Map();
   let pieces = 0;
   for (const lot of won) {
@@ -3750,12 +3792,12 @@ function daySummaryData() {
     qty: planQtyOf(p),
     won: planWonPieces(p, wonMap)
   }));
-  return { date: today, wonLots: won.length, pieces, grouped, remainPlans };
+  return { date: today, wonLots: won.length, pieces, unmovedPieces, grouped, remainPlans };
 }
 
 function daySummaryText() {
   const d = daySummaryData();
-  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`];
+  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`, `未搬 ${d.unmovedPieces} 件`];
   for (const g of d.grouped) {
     lines.push('', g.group);
     for (const it of g.items) {
@@ -3799,6 +3841,7 @@ function renderDaySummary() {
       <div class="sum-totals">
         <div class="tot"><b>${d.pieces}</b><span>標到件數</span></div>
         <div class="tot"><b>${d.wonLots}</b><span>標到筆數</span></div>
+        <div class="tot"><b>${d.unmovedPieces}</b><span>未搬件數</span></div>
         <div class="tot"><b>${d.remainPlans.length}</b><span>備註還差</span></div>
       </div>
       ${groups}
@@ -3859,7 +3902,8 @@ function resultText() {
       const flowG = dayLots.filter((l) => l.machineId === m.id && l.status === 'flow');
       if (!group.length && !flowG.length) continue;
       const cur = currentOf(m.id, half);
-      const w = group.filter((l) => l.status === 'won');
+      const w = group.filter((l) => isWon(l));
+      const unmoved = group.filter((l) => l.status === 'won');
       const x = group.filter((l) => l.status === 'lost');
       const over = group.filter((l) => isPassed(l, cur));
       const p = group.filter((l) => l.status === 'pending' && !isPassed(l, cur));
@@ -3870,6 +3914,7 @@ function resultText() {
       flowN += flowG.length;
       lines.push(m.name);
       if (w.length) lines.push(`  標到：${w.map(lotLabel).join('、')}（${w.length}）`);
+      if (unmoved.length) lines.push(`  未搬：${unmoved.map(lotLabel).join('、')}（${unmoved.length}）`);
       if (x.length) lines.push(`  沒標到：${x.map(lotLabel).join('、')}（${x.length}）`);
       if (flowG.length) lines.push(`  流標・二市：${flowG.map(lotLabel).join('、')}（${flowG.length}）`);
       if (over.length) lines.push(`  過號：${over.map(lotLabel).join('、')}（${over.length}）`);
@@ -4247,10 +4292,11 @@ function renderLive() {
   let lost = 0;
   let mustLeft = 0;
   for (const l of allToday) {
-    if (l.status === 'won') won += 1;
+    if (isWon(l)) won += 1;
     else if (l.status === 'lost') lost += 1;
     if (isUnauctionedMust(l)) mustLeft += 1;
   }
+  const unmovedPieces = unmovedQty(allToday);
 
   const cols = state.machines[half]
     .map((m) => {
@@ -4280,7 +4326,8 @@ function renderLive() {
               const prio = lotPriority(l);
               let cls = `lot-cell prio-${prio}${peelClass(l.item)}`;
               if (typeof lotHasRemoteFlash === 'function' && lotHasRemoteFlash(l.id)) cls += ' remote-flash';
-              if (l.status === 'won') cls += ' won';
+              if (l.status === 'moved') cls += ' moved';
+              else if (l.status === 'won') cls += ' won';
               else if (l.status === 'lost') cls += ' lost';
               else if (l.status === 'flow') cls += ' flow';
               else if (over) cls += ' passed';
@@ -4289,6 +4336,7 @@ function renderLive() {
               let badge = '';
               if (near && d === 0) badge = '<span class="cell-badge now">到</span>';
               else if (near && d > 0) badge = `<span class="cell-badge">差${d}</span>`;
+              const movedMark = l.status === 'moved' ? '<span class="moved-mark">✓搬</span>' : '';
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
               const size = itemNeedsSize(l.item) && l.item
                 ? `<span class="size-badge${sizeLabel(l.size) ? ' on s-' + l.size : ' empty'}" data-act="cycle-size" data-id="${escapeHtml(l.id)}">${sizeLabel(l.size) || '規'}</span>`
@@ -4304,7 +4352,7 @@ function renderLive() {
                 <span class="cell-main">
                   <span class="cell-top">
                     <span class="cell-num">${l.number}</span>
-                    <span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span>
+                    <span class="cell-end">${size}<span class="cell-flags">${movedMark}${badge}${er}</span></span>
                   </span>
                   ${item}
                 </span>
@@ -4333,6 +4381,7 @@ function renderLive() {
         <div class="live-counts">
           <span class="must-count${mustLeft ? ' on' : ''}"><b>${mustLeft}</b>必標</span>
           <span><b>${won}</b>標到</span>
+          ${unmovedPieces ? `<span class="unmoved-count"><b>${unmovedPieces}</b>未搬</span>` : ''}
           <span><b>${lost}</b>沒標到</span>
           <span><b>${second.length}</b>二市</span>
         </div>
@@ -4589,13 +4638,19 @@ function renderModal() {
   if (modal.type === 'lot-actions') {
     const lot = state.lots.find((l) => l.id === modal.id);
     if (!lot) return '';
-    const undoMark = lot.status === 'won'
+    const undoMark = lot.status === 'moved'
+      ? `<button type="button" class="action-btn" data-act="unmove-lot" data-id="${escapeHtml(lot.id)}">取消已搬貨</button>
+         <button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">取消標到</button>`
+      : lot.status === 'won'
       ? `<button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">取消標到</button>`
       : lot.status === 'flow'
         ? `<button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">取消流標</button>`
         : lot.status === 'lost'
           ? `<button type="button" class="action-btn" data-act="undo-mark" data-id="${escapeHtml(lot.id)}">改回未拍</button>`
           : '';
+    const lostBtn = lot.status === 'won' || lot.status === 'moved'
+      ? `<button type="button" class="action-btn" data-act="mark-lost" data-id="${escapeHtml(lot.id)}">沒標到</button>`
+      : '';
     const flowBtn = lot.status === 'flow'
       ? ''
       : `<button type="button" class="action-btn flow hold-btn" data-act="mark-flow" data-hold="flow" data-id="${escapeHtml(lot.id)}">按住流標・二市</button>`;
@@ -4603,7 +4658,7 @@ function renderModal() {
       ? ''
       : lot.secondMarket
         ? `<button type="button" class="action-btn" data-act="from-second" data-id="${escapeHtml(lot.id)}">移回（取消轉二市）</button>`
-        : lot.status === 'won'
+        : isWon(lot)
           ? ''
           : `<button type="button" class="action-btn" data-act="to-second" data-id="${escapeHtml(lot.id)}">轉二市</button>`;
     const qty = lotQty(lot);
@@ -4627,6 +4682,7 @@ function renderModal() {
         ${itemNeedsSize(lot.item) ? renderSizeChips(lot.size || '', { lotId: lot.id, sheet: true }) : ''}
         <button type="button" class="action-btn" data-act="pick-lot-item" data-id="${escapeHtml(lot.id)}">改品項</button>
         ${undoMark}
+        ${lostBtn}
         ${flowBtn}
         <div class="move-lot-row">
           <div class="move-lot-label">移到別台</div>
@@ -4671,7 +4727,7 @@ function renderModal() {
   if (modal.type === 'second-sheet') {
     const second = secondLots();
     const allToday = state.lots.filter((l) => l.day === state.day);
-    const won = allToday.filter((l) => l.status === 'won').length;
+    const won = allToday.filter((l) => isWon(l)).length;
     const lost = allToday.filter((l) => l.status === 'lost').length;
     const list = second.length
       ? second.map((l) => {
@@ -4881,7 +4937,16 @@ function onClick(e) {
       setLotQty(btn.dataset.id, -1);
       break;
     case 'undo-mark':
+      modal = null;
       undoLotMark(btn.dataset.id);
+      break;
+    case 'mark-lost':
+      modal = null;
+      markLost(btn.dataset.id);
+      break;
+    case 'unmove-lot':
+      modal = null;
+      unmoveLot(btn.dataset.id);
       break;
     case 'open-plan':
       openPlan();
