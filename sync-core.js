@@ -277,7 +277,10 @@
     const customs = val('customItemsByHalf');
     if (customs && typeof customs === 'object') state.customItemsByHalf = customs;
     const hist = val('boughtHistory');
-    if (Array.isArray(hist)) state.boughtHistory = hist;
+    if (Array.isArray(hist)) {
+      if (typeof mergeBoughtHistory === 'function') state.boughtHistory = mergeBoughtHistory(state.boughtHistory, hist);
+      else state.boughtHistory = hist;
+    }
     const nums = val('currentNumbers');
     if (nums && typeof nums === 'object') state.currentNumbers = nums;
   }

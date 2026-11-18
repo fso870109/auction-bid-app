@@ -1,7 +1,8 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v47';
+const APP_VERSION = 'v48';
+const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const HALVES = ['fruit', 'morning', 'afternoon'];
@@ -1589,21 +1590,43 @@ function applyPlanProgressFromLots(opts) {
 
 function normalizeBoughtHistory(list) {
   if (!Array.isArray(list)) return [];
-  const cut = addDaysIso(todayStr(), -14);
+  const cut = addDaysIso(todayStr(), -PURCHASE_WINDOW_DAYS);
   const byDay = new Map();
   for (const raw of list) {
     if (!raw || !raw.day || raw.day < cut) continue;
     const items = [];
     for (const it of raw.items || []) {
-      const text = String(it.text || it.name || '').trim();
+      const rawText = String(it.text || it.name || '').trim();
+      const text = (typeof canonicalItemKey === 'function' ? canonicalItemKey(rawText) : rawText) || rawText;
       const count = Number(it.count) || 0;
       if (!text || count < 1) continue;
-      items.push({ text, count });
+      const half = it.half || (typeof halfOfItemName === 'function' ? halfOfItemName(text) : '') || '';
+      items.push(half ? { text, count, half } : { text, count });
     }
     if (!items.length) continue;
-    byDay.set(raw.day, { day: raw.day, items });
+    const merged = new Map();
+    for (const it of items) {
+      const k = (it.half || '') + '\t' + it.text;
+      const prev = merged.get(k);
+      if (prev) prev.count += it.count;
+      else merged.set(k, { text: it.text, count: it.count, ...(it.half ? { half: it.half } : {}) });
+    }
+    const prevDay = byDay.get(raw.day);
+    if (prevDay && Array.isArray(prevDay.items)) {
+      for (const it of prevDay.items) {
+        const k = (it.half || '') + '\t' + it.text;
+        const prev = merged.get(k);
+        if (prev) prev.count = Math.max(prev.count, it.count);
+        else merged.set(k, { text: it.text, count: it.count, ...(it.half ? { half: it.half } : {}) });
+      }
+    }
+    byDay.set(raw.day, { day: raw.day, items: [...merged.values()] });
   }
   return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+function mergeBoughtHistory(a, b) {
+  return normalizeBoughtHistory([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]);
 }
 
 function rememberBoughtLots(lots) {
@@ -1613,16 +1636,20 @@ function rememberBoughtLots(lots) {
   const groups = {};
   for (const l of lots || []) {
     if (!isWon(l) || !l.item) continue;
-    const text = lotPlanText(l);
+    const text = canonicalItemKey(l.item) || lotPlanText(l);
     if (!text) continue;
     const day = l.day || state.day;
+    const half = l.half || halfOfItemName(l.item) || '';
     daysInLots.add(day);
     if (!groups[day]) groups[day] = {};
-    groups[day][text] = (groups[day][text] || 0) + 1;
+    const id = (half || '') + '\t' + text;
+    const prev = groups[day][id] || { text, count: 0, ...(half ? { half } : {}) };
+    prev.count += 1;
+    groups[day][id] = prev;
   }
   const byDay = new Map((state.boughtHistory || []).map((h) => [h.day, h]));
   for (const day of daysInLots) {
-    const items = Object.entries(groups[day]).map(([text, count]) => ({ text, count }));
+    const items = Object.values(groups[day]);
     byDay.set(day, { day, items });
   }
   state.boughtHistory = normalizeBoughtHistory([...byDay.values()]);
@@ -3295,7 +3322,7 @@ function ensureItemUseLog(st) {
 
 function pruneItemUseLog(st) {
   if (!st || !st.itemUseLogByHalf) return;
-  const cut = addDaysIso(todayStr(), -14);
+  const cut = addDaysIso(todayStr(), -PURCHASE_WINDOW_DAYS);
   for (const half of HALVES) {
     const log = st.itemUseLogByHalf[half] || {};
     for (const name of Object.keys(log)) {
@@ -3306,14 +3333,76 @@ function pruneItemUseLog(st) {
   }
 }
 
-function decayedItemScore(name, half) {
-  const entries = ((state.itemUseLogByHalf || {})[half] || {})[name] || [];
+function halfOfItemName(name, fallback) {
+  const crop = typeof findCrop === 'function' ? findCrop(name) : null;
+  if (crop) return halfFromCatalogKey(crop.h);
+  return fallback || '';
+}
+
+function canonicalItemKey(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
+  let key = String(parsed.name || raw).trim();
+  if (typeof DISPLAY_RENAME_V46 !== 'undefined' && DISPLAY_RENAME_V46[key]) key = DISPLAY_RENAME_V46[key];
+  const everyday = (typeof everydayItemLabel === 'function')
+    ? (everydayItemLabel(key) || everydayItemLabel(raw))
+    : '';
+  if (everyday) return everyday;
+  const crop = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
+  if (crop) {
+    const variety = typeof findVariety === 'function'
+      ? (findVariety(crop, key) || findVariety(crop, raw))
+      : null;
+    if (variety && typeof GRID_PROMOTIONS !== 'undefined') {
+      const promo = GRID_PROMOTIONS.find((p) => (
+        p.varN === variety.n || p.l === variety.l || p.l === key
+        || (variety.a || []).includes(p.l)
+      ));
+      if (promo) return promo.l;
+    }
+    return crop.l;
+  }
+  return key;
+}
+
+function collectPurchaseCounts() {
+  const map = { fruit: {}, morning: {}, afternoon: {} };
+  const add = (half, key, day, n) => {
+    const count = Number(n) || 0;
+    if (!key || !day || count < 1) return;
+    if (day < addDaysIso(todayStr(), -PURCHASE_WINDOW_DAYS)) return;
+    const h = half || halfOfItemName(key) || 'morning';
+    if (!isHalf(h)) return;
+    if (!map[h][key]) map[h][key] = {};
+    map[h][key][day] = (map[h][key][day] || 0) + count;
+  };
+  const daysFromLots = new Set();
+  for (const lot of (state && state.lots) || []) {
+    if (!lot || !lot.day) continue;
+    daysFromLots.add(lot.day);
+    if (!isWon(lot) || !lot.item) continue;
+    const key = canonicalItemKey(lot.item);
+    add(lot.half || halfOfItemName(lot.item), key, lot.day, 1);
+  }
+  for (const hist of (state && state.boughtHistory) || []) {
+    if (!hist || !hist.day || daysFromLots.has(hist.day)) continue;
+    for (const it of hist.items || []) {
+      const raw = String(it.text || it.name || '').trim();
+      const key = canonicalItemKey(raw);
+      add(it.half || halfOfItemName(raw) || halfOfItemName(key), key, hist.day, it.count);
+    }
+  }
+  return map;
+}
+
+function decayedPurchaseScore(dayCounts) {
   const today = todayStr();
   let s = 0;
-  for (const e of entries) {
-    const age = Math.round((Date.parse(today) - Date.parse(e.day)) / 86400000);
-    if (!Number.isFinite(age) || age < 0 || age > 14) continue;
-    s += (Number(e.n) || 0) * (1 - age / 14);
+  for (const [day, n] of Object.entries(dayCounts || {})) {
+    const age = Math.round((Date.parse(today) - Date.parse(day)) / 86400000);
+    if (!Number.isFinite(age) || age < 0 || age >= PURCHASE_WINDOW_DAYS) continue;
+    s += (Number(n) || 0) * (1 - age / PURCHASE_WINDOW_DAYS);
   }
   return s;
 }
@@ -3323,12 +3412,11 @@ function freezeItemRanks() {
   pruneItemUseLog(state);
   sessionItemRanks = { fruit: {}, morning: {}, afternoon: {} };
   sessionItemRanksDay = todayStr();
+  const counts = collectPurchaseCounts();
   for (const half of HALVES) {
-    const names = new Set(Object.keys((state.itemUseLogByHalf && state.itemUseLogByHalf[half]) || {}));
-    const counts = (state.itemCountsByHalf && state.itemCountsByHalf[half]) || {};
-    Object.keys(counts).forEach((n) => names.add(n));
-    for (const name of names) {
-      sessionItemRanks[half][name] = decayedItemScore(name, half);
+    const byName = counts[half] || {};
+    for (const name of Object.keys(byName)) {
+      sessionItemRanks[half][name] = decayedPurchaseScore(byName[name]);
     }
   }
 }
@@ -3337,7 +3425,8 @@ function itemSessionScore(name, half) {
   const h = half || (state && state.currentHalf) || 'morning';
   if (!sessionItemRanksDay || sessionItemRanksDay !== todayStr()) freezeItemRanks();
   const ranks = sessionItemRanks[h] || {};
-  return ranks[name] || 0;
+  const key = canonicalItemKey(name) || name;
+  return ranks[key] || ranks[name] || 0;
 }
 
 function itemCountsOf(half) {
