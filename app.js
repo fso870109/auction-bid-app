@@ -75,17 +75,28 @@ function itemDisplayName(name) {
   if (!name) return '';
   const crop = findCrop(name);
   if (!crop) return name;
-  const v = (crop.s || []).find((x) => x.n === name || x.l === name || (x.a || []).includes(name));
-  if (!v || v.n === crop.n || v.l === crop.l || v.l === '其他') return crop.l;
-  return crop.l + ' ' + v.l;
+  if (name === crop.n || name === crop.l) return crop.l;
+  const exactVar = (crop.s || []).find((x) => x.n === name || x.l === name);
+  if (exactVar && exactVar.l && exactVar.l !== '其他' && exactVar.n !== crop.n && exactVar.l !== crop.l) {
+    return crop.l + ' ' + exactVar.l;
+  }
+  const aliased = (crop.s || []).find((x) => (x.a || []).includes(name));
+  if (aliased && (aliased.n === crop.n || aliased.l === crop.l || aliased.l === '其他')) {
+    if (name === '圓絲瓜') return name;
+    return crop.l;
+  }
+  if (aliased && aliased.l && aliased.l !== '其他') return crop.l + ' ' + aliased.l;
+  return crop.l;
 }
 
 function itemCellName(name) {
   if (!name) return '';
   const crop = findCrop(name);
   if (!crop) return name;
-  const v = (crop.s || []).find((x) => x.n === name || x.l === name || (x.a || []).includes(name));
-  if (v && v.l && v.l !== '其他' && v.n !== crop.n && v.l !== crop.l) return v.l;
+  if (name === crop.n || name === crop.l) return crop.l;
+  const exactVar = (crop.s || []).find((x) => x.n === name || x.l === name);
+  if (exactVar && exactVar.l && exactVar.l !== '其他' && exactVar.n !== crop.n && exactVar.l !== crop.l) return exactVar.l;
+  if (name === '圓絲瓜') return name;
   return crop.l;
 }
 
@@ -226,21 +237,59 @@ function variantMatchesQuery(v, q) {
   return fields.some((f) => f === q || (f && String(f).startsWith(q)));
 }
 
+function pinnedPickerVariants(crop) {
+  const out = [];
+  if (!crop) return out;
+  if (crop.n === '絲瓜') {
+    const main = (crop.s || []).find((v) => v.n === '絲瓜' && !v.imp);
+    if (main) {
+      out.push(Object.assign({}, main, {
+        n: '圓絲瓜',
+        l: '圓絲瓜',
+        a: [...new Set([...(main.a || []), '圓絲瓜', '絲瓜'])]
+      }));
+    }
+    const long = (crop.s || []).find((v) => v.n === '絲瓜-長絲瓜' || v.l === '長絲瓜');
+    if (long) out.push(long);
+  }
+  if (crop.n === '蕨菜' || crop.l === '過貓') {
+    const shan = (crop.s || []).find((v) => v.n === '蕨菜-山蘇' || v.l === '山蘇');
+    if (shan) out.push(shan);
+  }
+  return out;
+}
+
 function pickerVariants(crop, q) {
+  const pinned = pinnedPickerVariants(crop);
   const sig = significantVariants(crop);
+  const seen = new Set(pinned.map((v) => v.n));
+  const out = pinned.slice();
+  for (const v of sig) {
+    if (!seen.has(v.n)) {
+      out.push(v);
+      seen.add(v.n);
+    }
+  }
   q = String(q || '').trim();
-  if (!q) return sig;
-  const extra = (crop.s || []).filter((v) => usefulVariant(v, crop) && variantMatchesQuery(v, q));
-  const seen = new Set(sig.map((v) => v.n));
-  const out = sig.slice();
-  for (const v of extra) {
-    if (!seen.has(v.n)) out.push(v);
+  if (q) {
+    const extra = (crop.s || []).filter((v) => (
+      (usefulVariant(v, crop) || pinned.some((p) => p.n === v.n)) && variantMatchesQuery(v, q)
+    ));
+    for (const v of extra) {
+      if (!seen.has(v.n)) {
+        out.push(v);
+        seen.add(v.n);
+      }
+    }
   }
   return out;
 }
 
 function shouldOpenVariants(crop, q) {
-  return pickerVariants(crop, q).length > 1;
+  const vars = pickerVariants(crop, q);
+  if (vars.length > 1) return true;
+  if (pinnedPickerVariants(crop).length && vars.length >= 1) return true;
+  return false;
 }
 
 function renderItemPicker(half, opts) {
@@ -604,12 +653,15 @@ const GOURD_PEEL_CROP = {
   '馬鈴薯': 'tan',
   '青花苔': 'darkGreen',
   '球莖甘藍': 'paleGreen',
+  '結頭菜': 'paleGreen',
   '大蒜': 'white',
   '芋': 'tan',
   '竹筍': 'paleYellow',
   '薑': 'tan',
   '萵苣莖': 'paleGreen',
+  'A菜心': 'paleGreen',
   '薯蕷': 'tan',
+  '山藥': 'tan',
   '豆薯': 'tan',
   '蓮藕': 'tan',
   '蘆筍': 'green',
@@ -624,10 +676,13 @@ const GOURD_PEEL_CROP = {
   '茄子': 'purple',
   '甜椒': 'green',
   '扁蒲': 'paleGreen',
+  '蒲仔': 'paleGreen',
   '胡瓜': 'green',
+  '大黃瓜': 'green',
   '冬瓜': 'darkGreen',
   '敏豆': 'green',
   '隼人瓜': 'paleGreen',
+  '佛手瓜': 'paleGreen',
   '菜豆': 'green',
   '美人腿': 'cream',
   '辣椒': 'chili',
@@ -635,7 +690,9 @@ const GOURD_PEEL_CROP = {
   '秋葵': 'green',
   '毛豆': 'green',
   '萊豆': 'green',
+  '皇帝豆': 'green',
   '落花生': 'tan',
+  '花生': 'tan',
   '虎豆': 'brown',
   '金針花': 'orange',
   '越瓜': 'paleGreen',
@@ -929,6 +986,7 @@ const FRUIT_PEEL_VARIANT = {
 
 const LEAFY_PEEL_CROP = {
   '萵苣菜': 'paleGreen',
+  '大陸妹': 'paleGreen',
   '青蔥': 'midGreen',
   '蔥': 'midGreen',
   '小白菜': 'midGreen',
@@ -942,16 +1000,20 @@ const LEAFY_PEEL_CROP = {
   '青江白菜': 'paleGreen',
   '青江菜': 'paleGreen',
   '芥藍菜': 'darkGreen',
+  '芥藍': 'darkGreen',
   '茼蒿': 'midGreen',
   '油菜': 'midGreen',
   '韭菜': 'darkGreen',
   '莧菜': 'paleGreen',
   '九層塔': 'midGreen',
   '芫荽': 'midGreen',
+  '香菜': 'midGreen',
   '皇宮菜': 'green',
   '紅鳳菜': 'purple',
   '蕨菜': 'darkGreen',
+  '過貓': 'darkGreen',
   '海菜': 'paleGreen',
+  '水蓮': 'paleGreen',
   '茴香': 'midGreen',
   '巴西利': 'darkGreen',
   '菾菜': 'green',
@@ -2165,6 +2227,7 @@ function defaultState() {
     machinesMigratedV9: true,
     itemsMigratedV17: true,
     itemsMigratedV21: true,
+    itemsMigratedV46: true,
     planItems: [],
     boughtHistory: [],
     syncRoom: '',
@@ -2226,6 +2289,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV21) {
       migrateItemsV21(merged);
+    }
+    if (!saved.itemsMigratedV46) {
+      migrateItemsV46(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -2937,6 +3003,132 @@ function migrateItemsV17(merged) {
 function migrateItemsV21(merged) {
   moveCustomsAndCounts(merged, 'morning', 'afternoon', officialNameSet(GOURD_FROM_BULK_V21_CROPS));
   merged.itemsMigratedV21 = true;
+}
+
+const DISPLAY_RENAME_V46 = {
+  '萵苣菜': '大陸妹',
+  '芥藍菜': '芥藍',
+  '芫荽': '香菜',
+  '蕨菜': '過貓',
+  '海菜': '水蓮',
+  '扁蒲': '蒲仔',
+  '胡瓜': '大黃瓜',
+  '萵苣莖': 'A菜心',
+  '球莖甘藍': '結頭菜',
+  '隼人瓜': '佛手瓜',
+  '薯蕷': '山藥',
+  '萊豆': '皇帝豆',
+  '落花生': '花生'
+};
+
+function renameDisplayText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return raw;
+  if (DISPLAY_RENAME_V46[raw]) return DISPLAY_RENAME_V46[raw];
+  const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw, size: '', raw };
+  if (parsed && parsed.name && DISPLAY_RENAME_V46[parsed.name]) {
+    const next = DISPLAY_RENAME_V46[parsed.name];
+    if (parsed.size) return next + ' ' + parsed.size;
+    if (parsed.raw && parsed.raw !== parsed.name) return parsed.raw.replace(parsed.name, next);
+    return next;
+  }
+  return raw;
+}
+
+function mergeCountKey(map, from, to) {
+  if (!map || from === to || map[from] == null) return;
+  const n = Number(map[from]) || 0;
+  if (n) map[to] = (Number(map[to]) || 0) + n;
+  delete map[from];
+}
+
+function mergeUseLogKey(log, from, to) {
+  if (!log || from === to || !log[from]) return;
+  const src = Array.isArray(log[from]) ? log[from] : [];
+  const dest = Array.isArray(log[to]) ? log[to].slice() : [];
+  const byDay = new Map();
+  for (const ev of dest) {
+    if (ev && ev.day) byDay.set(ev.day, { day: ev.day, n: Number(ev.n) || 0 });
+  }
+  for (const ev of src) {
+    if (!ev || !ev.day) continue;
+    const cur = byDay.get(ev.day) || { day: ev.day, n: 0 };
+    cur.n += Number(ev.n) || 0;
+    byDay.set(ev.day, cur);
+  }
+  log[to] = [...byDay.values()];
+  delete log[from];
+}
+
+function migrateItemsV46(merged) {
+  for (const p of merged.planItems || []) {
+    if (!p) continue;
+    p.text = renameDisplayText(p.text);
+  }
+  const seen = new Map();
+  const kept = [];
+  for (const p of merged.planItems || []) {
+    if (!p) continue;
+    const key = (p.done ? 'd' : 'o') + '	' + (p.forDay || '') + '	' + String(p.text || '');
+    const prev = seen.get(key);
+    if (prev && !p.done) {
+      const qa = parseInt(prev.qty, 10);
+      const qb = parseInt(p.qty, 10);
+      const a = Number.isFinite(qa) && qa > 0 ? qa : 1;
+      const b = Number.isFinite(qb) && qb > 0 ? qb : 1;
+      prev.qty = Math.min(99, a + b);
+      continue;
+    }
+    seen.set(key, p);
+    kept.push(p);
+  }
+  if (merged.planItems) merged.planItems = kept;
+  for (const lot of merged.lots || []) {
+    if (!lot || !lot.item) continue;
+    lot.item = renameDisplayText(lot.item);
+  }
+  for (const h of merged.boughtHistory || []) {
+    for (const it of (h && h.items) || []) {
+      if (!it) continue;
+      it.text = renameDisplayText(it.text);
+    }
+  }
+  if (merged.itemCounts && typeof merged.itemCounts === 'object') {
+    for (const [from, to] of Object.entries(DISPLAY_RENAME_V46)) mergeCountKey(merged.itemCounts, from, to);
+  }
+  if (merged.itemCountsByHalf && typeof merged.itemCountsByHalf === 'object') {
+    for (const half of Object.keys(merged.itemCountsByHalf)) {
+      const map = merged.itemCountsByHalf[half];
+      if (!map || typeof map !== 'object') continue;
+      for (const [from, to] of Object.entries(DISPLAY_RENAME_V46)) mergeCountKey(map, from, to);
+    }
+  }
+  if (merged.itemUseLogByHalf && typeof merged.itemUseLogByHalf === 'object') {
+    for (const half of Object.keys(merged.itemUseLogByHalf)) {
+      const log = merged.itemUseLogByHalf[half];
+      if (!log || typeof log !== 'object') continue;
+      for (const [from, to] of Object.entries(DISPLAY_RENAME_V46)) mergeUseLogKey(log, from, to);
+    }
+  }
+  const renameInList = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    const out = [];
+    const have = new Set();
+    for (const raw of arr) {
+      const n = renameDisplayText(raw);
+      if (!n || have.has(n)) continue;
+      have.add(n);
+      out.push(n);
+    }
+    return out;
+  };
+  if (Array.isArray(merged.customItems)) merged.customItems = renameInList(merged.customItems);
+  if (merged.customItemsByHalf && typeof merged.customItemsByHalf === 'object') {
+    for (const half of Object.keys(merged.customItemsByHalf)) {
+      merged.customItemsByHalf[half] = renameInList(merged.customItemsByHalf[half]);
+    }
+  }
+  merged.itemsMigratedV46 = true;
 }
 
 function defaultItems(half) {
