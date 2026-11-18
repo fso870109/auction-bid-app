@@ -576,6 +576,14 @@ input:focus, textarea:focus {
   font-size: 14px;
 }
 
+.app-version {
+  text-align: center;
+  padding: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 /* Results */
 .summary {
   background: var(--bg-card);

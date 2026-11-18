@@ -1,6 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
+const APP_VERSION = 'v47';
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const HALVES = ['fruit', 'morning', 'afternoon'];
@@ -71,13 +72,25 @@ function findCrop(name, half) {
   return null;
 }
 
+function everydayItemLabel(name) {
+  const n = String(name || '').trim();
+  if (!n) return '';
+  if (n === '圓絲瓜') return n;
+  const promo = GRID_PROMOTIONS.find((p) => p.l === n || p.varN === n);
+  return promo ? promo.l : '';
+}
+
 function itemDisplayName(name) {
   if (!name) return '';
+  const everyday = everydayItemLabel(name);
+  if (everyday) return everyday;
   const crop = findCrop(name);
   if (!crop) return name;
   if (name === crop.n || name === crop.l) return crop.l;
   const exactVar = (crop.s || []).find((x) => x.n === name || x.l === name);
   if (exactVar && exactVar.l && exactVar.l !== '其他' && exactVar.n !== crop.n && exactVar.l !== crop.l) {
+    const label = everydayItemLabel(exactVar.n) || everydayItemLabel(exactVar.l);
+    if (label) return label;
     return crop.l + ' ' + exactVar.l;
   }
   const aliased = (crop.s || []).find((x) => (x.a || []).includes(name));
@@ -85,17 +98,25 @@ function itemDisplayName(name) {
     if (name === '圓絲瓜') return name;
     return crop.l;
   }
-  if (aliased && aliased.l && aliased.l !== '其他') return crop.l + ' ' + aliased.l;
+  if (aliased && aliased.l && aliased.l !== '其他') {
+    const label = everydayItemLabel(aliased.n) || everydayItemLabel(aliased.l) || everydayItemLabel(name);
+    if (label) return label;
+    return crop.l + ' ' + aliased.l;
+  }
   return crop.l;
 }
 
 function itemCellName(name) {
   if (!name) return '';
+  const everyday = everydayItemLabel(name);
+  if (everyday) return everyday;
   const crop = findCrop(name);
   if (!crop) return name;
   if (name === crop.n || name === crop.l) return crop.l;
   const exactVar = (crop.s || []).find((x) => x.n === name || x.l === name);
-  if (exactVar && exactVar.l && exactVar.l !== '其他' && exactVar.n !== crop.n && exactVar.l !== crop.l) return exactVar.l;
+  if (exactVar && exactVar.l && exactVar.l !== '其他' && exactVar.n !== crop.n && exactVar.l !== crop.l) {
+    return everydayItemLabel(exactVar.n) || everydayItemLabel(exactVar.l) || exactVar.l;
+  }
   if (name === '圓絲瓜') return name;
   return crop.l;
 }
@@ -145,6 +166,41 @@ function sizeLabel(size) {
   return ITEM_SIZES.includes(size) ? size : '';
 }
 
+const GRID_PROMOTIONS = [
+  { l: '甜豆', cropN: '豌豆', varN: '豌豆-甜豌豆' },
+  { l: '荷蘭豆', cropN: '豌豆', varN: '豌豆-白花' },
+  { l: '四季豆', cropN: '敏豆', varN: '敏豆-白豆' },
+  { l: '醜豆', cropN: '敏豆', varN: '敏豆-醜豆' }
+];
+
+function promotionCrops(half, q, counts) {
+  const h = half || (state && state.currentHalf) || 'morning';
+  const out = [];
+  for (const p of GRID_PROMOTIONS) {
+    const crop = findCrop(p.cropN);
+    if (!crop) continue;
+    if (halfFromCatalogKey(crop.h) !== h) continue;
+    const v = (crop.s || []).find((x) => x.n === p.varN);
+    if (!v) continue;
+    const promo = {
+      n: p.l,
+      l: p.l,
+      g: crop.g,
+      h: crop.h,
+      v: Number(v.v) || 0,
+      s: [],
+      a: [...new Set([v.l, v.n, ...(v.a || []), p.l])],
+      promo: true,
+      promoCrop: crop.n,
+      promoVar: v.n
+    };
+    if (String(q || '').trim() && !cropMatchesQuery(promo, q)) continue;
+    if (!String(q || '').trim() && !cropShownOnGrid(promo, counts)) continue;
+    out.push(promo);
+  }
+  return out;
+}
+
 function visibleCrops(half, q) {
   const h = half || (state && state.currentHalf) || 'morning';
   const counts = itemCountsOf(h);
@@ -158,6 +214,7 @@ function visibleCrops(half, q) {
   if (!String(q || '').trim()) {
     list = list.filter((c) => cropShownOnGrid(c, counts));
   }
+  list = list.concat(promotionCrops(h, q, counts));
   list.sort((a, b) => {
     const ga = ranks[a.g] ?? 9;
     const gb = ranks[b.g] ?? 9;
@@ -256,13 +313,53 @@ function pinnedPickerVariants(crop) {
     const shan = (crop.s || []).find((v) => v.n === '蕨菜-山蘇' || v.l === '山蘇');
     if (shan) out.push(shan);
   }
+  if (crop.n === '豌豆') {
+    const sweet = (crop.s || []).find((v) => v.n === '豌豆-甜豌豆' || v.l === '甜豌豆');
+    if (sweet) {
+      out.push(Object.assign({}, sweet, {
+        n: '甜豆',
+        l: '甜豆',
+        srcN: sweet.n,
+        a: [...new Set([...(sweet.a || []), '甜豆', '甜豌豆'])]
+      }));
+    }
+    const dutch = (crop.s || []).find((v) => v.n === '豌豆-白花' || v.l === '白花');
+    if (dutch) {
+      out.push(Object.assign({}, dutch, {
+        n: '荷蘭豆',
+        l: '荷蘭豆',
+        srcN: dutch.n,
+        a: [...new Set([...(dutch.a || []), '荷蘭豆', '白花'])]
+      }));
+    }
+  }
+  if (crop.n === '敏豆') {
+    const season = (crop.s || []).find((v) => v.n === '敏豆-白豆' || v.l === '白豆');
+    if (season) {
+      out.push(Object.assign({}, season, {
+        n: '四季豆',
+        l: '四季豆',
+        srcN: season.n,
+        a: [...new Set([...(season.a || []), '四季豆', '白豆'])]
+      }));
+    }
+    const ugly = (crop.s || []).find((v) => v.n === '敏豆-醜豆' || v.l === '醜豆');
+    if (ugly) {
+      out.push(Object.assign({}, ugly, {
+        n: '醜豆',
+        l: '醜豆',
+        srcN: ugly.n,
+        a: [...new Set([...(ugly.a || []), '醜豆'])]
+      }));
+    }
+  }
   return out;
 }
 
 function pickerVariants(crop, q) {
   const pinned = pinnedPickerVariants(crop);
   const sig = significantVariants(crop);
-  const seen = new Set(pinned.map((v) => v.n));
+  const seen = new Set(pinned.flatMap((v) => [v.n, v.srcN].filter(Boolean)));
   const out = pinned.slice();
   for (const v of sig) {
     if (!seen.has(v.n)) {
@@ -332,6 +429,15 @@ function renderItemPicker(half, opts) {
     if (crop.g !== lastGroup) {
       lastGroup = crop.g;
       parts.push(`<div class="item-group-h">${escapeHtml(crop.g)}</div>`);
+    }
+    if (crop.promo) {
+      const on = active === crop.l || active === crop.n ? ' on' : '';
+      const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
+      const need = needBadgeHtml([crop.l, crop.n, crop.promoVar]);
+      parts.push(
+        `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.l)}" data-act="pick-item" data-name="${escapeHtml(crop.l)}"${lotAttr}>${escapeHtml(crop.l)}${need.html}</button>`
+      );
+      continue;
     }
     const on = itemIsActive(crop, active) ? ' on' : '';
     const badge = shouldOpenVariants(crop, q) ? '<span class="var-n">▾</span>' : '';
@@ -687,6 +793,10 @@ const GOURD_PEEL_CROP = {
   '美人腿': 'cream',
   '辣椒': 'chili',
   '豌豆': 'green',
+  '甜豆': 'green',
+  '荷蘭豆': 'green',
+  '四季豆': 'green',
+  '醜豆': 'green',
   '秋葵': 'green',
   '毛豆': 'green',
   '萊豆': 'green',
@@ -1226,6 +1336,8 @@ function peelToneOf(name) {
   if (!raw) return '';
   const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
   const key = parsed.name || raw;
+  const everyday = (typeof everydayItemLabel === 'function') ? everydayItemLabel(key) || everydayItemLabel(raw) : '';
+  if (everyday && GOURD_PEEL_CROP[everyday]) return GOURD_PEEL_CROP[everyday];
   const mapped = peelVariantTone(key) || peelVariantTone(raw);
   if (mapped) {
     const cropGuess = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
@@ -4373,6 +4485,7 @@ function render() {
   if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
   if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
   requestAnimationFrame(fitItemBtnLabels);
+  maybeReloadForNewSW();
 }
 
 function restoreFocus(focusId, start, end) {
@@ -4786,6 +4899,7 @@ function renderSettings() {
       <button type="button" class="btn primary" style="width:100%;margin-bottom:10px" data-act="open-summary">今日總結</button>
       <button type="button" class="btn danger" style="width:100%" data-act="new-day">開始新的一天（清空抄號）</button>
     </div>
+    <p class="empty-hint app-version">版本 ${escapeHtml(APP_VERSION)}</p>
   `;
 }
 
@@ -5701,6 +5815,8 @@ function onFullscreenChange() {
 function onVisibility() {
   syncWakeLock();
   if (document.visibilityState === 'visible') {
+    pokeSWUpdate();
+    maybeReloadForNewSW();
     if (typeof checkNewDay === 'function' && state && !isSetupNeeded()) {
       checkNewDay();
       if (typeof render === 'function') render();
@@ -6228,9 +6344,62 @@ function bind() {
   });
 }
 
+let swRegistration = null;
+let pendingSWReload = false;
+
+function isMidAction() {
+  if (typeof modal !== 'undefined' && modal) return true;
+  if (typeof draftNum === 'string' && draftNum) return true;
+  if (typeof paddleOpen !== 'undefined' && paddleOpen) return true;
+  const el = document.activeElement;
+  if (el && /^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName)) return true;
+  return false;
+}
+
+function reloadForNewSW() {
+  if (sessionStorage.getItem('auction-bid-sw-reloading') === '1') return;
+  if (isMidAction()) {
+    pendingSWReload = true;
+    return;
+  }
+  pendingSWReload = false;
+  sessionStorage.setItem('auction-bid-sw-reloading', '1');
+  sessionStorage.setItem('auction-bid-updated-toast', '1');
+  location.reload();
+}
+
+function maybeReloadForNewSW() {
+  if (pendingSWReload && !isMidAction()) reloadForNewSW();
+}
+
+function pokeSWUpdate() {
+  if (swRegistration && typeof swRegistration.update === 'function') {
+    swRegistration.update().catch(() => {});
+  }
+}
+
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if (sessionStorage.getItem('auction-bid-updated-toast') === '1') {
+    sessionStorage.removeItem('auction-bid-updated-toast');
+    sessionStorage.removeItem('auction-bid-sw-reloading');
+    toast('已更新到新版', 2400);
+  } else {
+    sessionStorage.removeItem('auction-bid-sw-reloading');
+  }
+  const hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || refreshing) return;
+    refreshing = true;
+    reloadForNewSW();
+  });
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+    .then((reg) => {
+      swRegistration = reg;
+      pokeSWUpdate();
+    })
+    .catch(() => {});
 }
 
 function init() {
