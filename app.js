@@ -391,6 +391,9 @@ let planGridTab = 'bulk';
 let planGridOpen = true;
 let planVariantPick = null;
 let planGridScroll = 0;
+let planBodyScroll = 0;
+let sumBodyScroll = 0;
+let pageScrollY = 0;
 let planUndo = null;
 let lastPlanWon = {};
 let lastPlanEvents = [];
@@ -1809,6 +1812,32 @@ function restorePlanGridScroll() {
   if (el) el.scrollTop = planGridScroll;
 }
 
+function capturePlanListScroll() {
+  const plan = document.querySelector('#plan-screen .plan-body');
+  const sum = document.querySelector('#sum-screen .plan-body');
+  if (plan) planBodyScroll = plan.scrollTop;
+  if (sum) sumBodyScroll = sum.scrollTop;
+  const se = document.scrollingElement || document.documentElement;
+  pageScrollY = window.scrollY || (se && se.scrollTop) || 0;
+}
+
+function restorePlanListScroll() {
+  const plan = document.querySelector('#plan-screen .plan-body');
+  const sum = document.querySelector('#sum-screen .plan-body');
+  if (plan) plan.scrollTop = planBodyScroll;
+  if (sum) sum.scrollTop = sumBodyScroll;
+  if (pageScrollY) {
+    const se = document.scrollingElement || document.documentElement;
+    if (se) se.scrollTop = pageScrollY;
+    window.scrollTo(0, pageScrollY);
+  }
+}
+
+function resetPlanListScroll() {
+  planBodyScroll = 0;
+  pageScrollY = 0;
+}
+
 function openPlanQtyEdit(id) {
   const item = (state.planItems || []).find((p) => p.id === id);
   if (!item) return;
@@ -1889,6 +1918,8 @@ function openPlan() {
   planAddTarget = defaultPlanAddTarget();
   planVariantPick = null;
   planGridOpen = true;
+  resetPlanListScroll();
+  planGridScroll = 0;
   applyPlanProgressFromLots();
   try {
     history.pushState({ auctionPlan: true }, '');
@@ -1902,6 +1933,7 @@ function openPlan() {
 function closePlan(fromPop) {
   if (!planOpen) return;
   planOpen = false;
+  resetPlanListScroll();
   if (!fromPop && planHistoryPushed) {
     planHistoryPushed = false;
     try { history.back(); } catch { /* ignore */ }
@@ -3886,6 +3918,7 @@ function renderDaySummary() {
 
 function openDaySummary() {
   showDaySummary = true;
+  sumBodyScroll = 0;
   toastMsg = '';
   toastAction = null;
   render();
@@ -3893,6 +3926,7 @@ function openDaySummary() {
 
 function closeDaySummary() {
   showDaySummary = false;
+  sumBodyScroll = 0;
   render();
 }
 
@@ -4107,6 +4141,7 @@ function render() {
   captureLiveScroll();
   captureItemPickScroll();
   capturePlanGridScroll();
+  capturePlanListScroll();
   const liveCls = state.tab === 'live' && !showSettings ? ' live-mode' : '';
   const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
   app.innerHTML =
@@ -4125,10 +4160,11 @@ function render() {
   restoreLiveScroll();
   restoreItemPickScroll();
   restorePlanGridScroll();
+  restorePlanListScroll();
   if (modal?.type === 'type-item') {
     const input = document.getElementById('type-item-input');
     if (input && document.activeElement !== input) {
-      input.focus();
+      input.focus({ preventScroll: true });
       const len = input.value.length;
       try { input.setSelectionRange(len, len); } catch { /* ignore */ }
     }
@@ -4136,7 +4172,7 @@ function render() {
   if (modal?.type === 'plan-qty') {
     const input = document.getElementById('plan-qty-input');
     if (input && document.activeElement !== input) {
-      input.focus();
+      input.focus({ preventScroll: true });
       const len = String(input.value || '').length;
       try { input.setSelectionRange(len, len); } catch { /* ignore */ }
     }
@@ -4151,7 +4187,7 @@ function restoreFocus(focusId, start, end) {
   if (!focusId) return;
   const el = document.getElementById(focusId);
   if (!el || typeof el.focus !== 'function') return;
-  el.focus();
+  el.focus({ preventScroll: true });
   if (start != null && typeof el.setSelectionRange === 'function') {
     try {
       el.setSelectionRange(start, end);
