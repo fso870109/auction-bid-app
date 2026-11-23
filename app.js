@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v50';
+const APP_VERSION = 'v51';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -563,7 +563,7 @@ let planQty = 1;
 let planPickOpen = false;
 let planAddTarget = 'today';
 let planGridTab = 'bulk';
-let planGridOpen = true;
+let planGridOpen = false;
 let planVariantPick = null;
 let planGridScroll = 0;
 let planBodyScroll = 0;
@@ -2192,7 +2192,7 @@ function openPlan() {
   planPickOpen = false;
   planAddTarget = defaultPlanAddTarget();
   planVariantPick = null;
-  planGridOpen = true;
+  planGridOpen = false;
   resetPlanListScroll();
   planGridScroll = 0;
   applyPlanProgressFromLots();
@@ -2357,10 +2357,10 @@ function renderPlanScreen() {
         <button type="button" class="${todayOn}" data-act="plan-target" data-v="today">今日</button>
         <button type="button" class="${tomoOn}" data-act="plan-target" data-v="tomorrow">明日</button>
       </div>
-      <button type="button" class="plan-grid-toggle" data-act="toggle-plan-grid">${planGridOpen ? '收起' : '選品項'}</button>
     </div>`;
   const gridBox = planGridOpen ? renderPlanGrid() : '';
-  return `<div class="plan-screen" id="plan-screen">
+  const gridToggleLabel = planGridOpen ? '收起' : '選品項';
+  return `<div class="plan-screen${planGridOpen ? ' is-picking' : ''}" id="plan-screen">
     <header class="plan-bar">
       <button type="button" class="plan-back" data-act="close-plan">返回</button>
       <h1>備註</h1>
@@ -2371,15 +2371,16 @@ function renderPlanScreen() {
       ${(tomorrowItems.length || !planGridOpen) ? section('明日預計', planGridOpen ? '' : '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow') : ''}
       ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
     </div>
-    <div class="plan-add">
+    ${planGridOpen ? `<div class="plan-add">
       ${targetRow}
       ${gridBox}
       <div class="plan-input-wrap">
         <input id="plan-input" maxlength="40" placeholder="搜尋品項，或輸入「高麗菜 5」直接設件數" value="${escapeHtml(planDraft)}" data-act="plan-draft" inputmode="search" autocomplete="off" />
         ${suggestBox}
       </div>
-    </div>
-    <div class="plan-footer">
+    </div>` : ''}
+    <div class="plan-footer hand-${thumbHand()}">
+      <button type="button" class="plan-grid-toggle" data-act="toggle-plan-grid" aria-expanded="${planGridOpen ? 'true' : 'false'}">${gridToggleLabel}</button>
       <button type="button" class="plan-back-lg" data-act="close-plan">返回</button>
     </div>
   </div>`;
@@ -3648,10 +3649,9 @@ function assignItem(name) {
   name = String(name || '').trim();
   if (!name) return;
   if (!itemNeedsSize(name)) draftSize = '';
-  if (draftNum && (itemTargetAuto || !itemTargetId)) {
+  if (draftNum) {
     draftItem = name;
-    toast(`下一筆 ${draftNum} 會記成「${name}」`);
-    render();
+    saveLot();
     return;
   }
   if (itemTargetId) {
@@ -3661,12 +3661,6 @@ function assignItem(name) {
       render();
       return;
     }
-  }
-  if (draftNum) {
-    draftItem = name;
-    toast(`下一筆 ${draftNum} 會記成「${name}」`);
-    render();
-    return;
   }
   toast('請先輸入或點選貨號');
 }
@@ -4820,8 +4814,8 @@ function renderNote() {
   const selectedLot = itemTargetId ? state.lots.find((l) => l.id === itemTargetId) : null;
   const activeItem = draftNum ? draftItem : (selectedLot?.item || '');
   const itemHint = draftNum
-    ? (draftItem ? `下一筆 ${draftNum} → ${draftItem}` : '可先點品項，再存這號')
-    : (selectedLot ? `為 ${selectedLot.number} 選品項` : '存號後點品項，或先點上面的貨號');
+    ? (draftItem ? `點品項就會把 ${draftNum} 存成「${draftItem}」` : '點品項就會把這號存下')
+    : (selectedLot ? `為 ${selectedLot.number} 選品項` : '輸入號碼後點品項就會存下');
   const itemPick = renderItemPicker(state.currentHalf, { active: activeItem, hint: itemHint });
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
@@ -4867,9 +4861,6 @@ function renderNote() {
       <div class="note-body">
         <div class="keypad">${keypad}</div>
         ${itemPick}
-      </div>
-      <div class="save-row">
-        <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
       </div>
       ${sizeBlock}
       <div class="note-tools hand-${thumbHand()}">
@@ -5067,7 +5058,7 @@ function renderSettings() {
     <div class="setting-block">
       <h2>操作</h2>
       <div class="switch-row">
-        <div><div class="lbl">四碼自動存</div><div class="sub">貨號滿四碼就立刻存下，接著抄下一號</div></div>
+        <div><div class="lbl">四碼自動存</div><div class="sub">貨號滿四碼就立刻存下（還不必選品項），接著抄下一號。點品項也可以把已輸入的號碼一起存下。</div></div>
         <button type="button" class="toggle${state.autoSave4 ? ' on' : ''}" data-act="toggle-autosave"><i></i></button>
       </div>
       <div class="switch-row">

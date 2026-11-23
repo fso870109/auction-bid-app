@@ -1228,49 +1228,30 @@ input:focus, textarea:focus {
   display: grid;
   grid-template-columns: var(--note-cols);
   gap: var(--note-col-gap);
-  min-height: calc(52px * 4 + 5px * 3);
+  min-height: calc(56px * 4 + 6px * 3);
   align-items: stretch;
   overflow: hidden;
 }
 .note-screen .keypad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(4, minmax(52px, 1fr));
-  gap: 5px;
+  grid-template-rows: repeat(4, minmax(56px, 1fr));
+  gap: 6px;
   margin: 0;
-  min-height: calc(52px * 4 + 5px * 3);
+  min-height: calc(56px * 4 + 6px * 3);
   height: 100%;
   min-width: 0;
 }
 .note-screen .key {
-  min-height: 52px;
+  min-height: 56px;
   height: auto;
   width: 100%;
-  font-size: clamp(22px, 7.2vw, 34px);
-  border-radius: 10px;
+  font-size: clamp(23px, 7.4vw, 36px);
+  border-radius: 12px;
   padding: 0;
 }
 .note-screen .key.muted { font-size: clamp(13px, 4vw, 18px); }
 
-/* 存 sits full-width under both columns; priority lives under the number display */
-.save-row {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-  align-items: stretch;
-}
-.note-screen .btn-save {
-  position: static;
-  flex: 0 0 auto;
-  width: 100%;
-  margin: 0;
-  min-height: 48px;
-  height: 48px;
-  font-size: 22px;
-  border-radius: 12px;
-  letter-spacing: 0.1em;
-}
 .note-prio {
   flex: 0 0 auto;
   width: 100%;
@@ -1371,7 +1352,7 @@ input:focus, textarea:focus {
   grid-auto-flow: row;
   grid-auto-rows: auto;
   align-content: start;
-  gap: 4px;
+  gap: 5px;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0;
@@ -1380,9 +1361,9 @@ input:focus, textarea:focus {
 }
 .item-pick::-webkit-scrollbar { width: 0; height: 0; }
 .item-btn {
-  min-height: 48px;
-  padding: 3px 4px;
-  border-radius: 8px;
+  min-height: 52px;
+  padding: 4px 5px;
+  border-radius: 10px;
   background: var(--bg-card);
   border: 1px solid var(--line);
   font-weight: 800;
@@ -3322,15 +3303,71 @@ button.lot-cell {
   .note-head .num { font-size: clamp(30px, 9vw, 40px); }
   .note-prio,
   .prio-toggle { min-height: 40px; }
-  .note-screen .btn-save { min-height: 44px; height: 44px; font-size: 20px; }
   .note-tools { min-height: 48px; }
   .note-body {
-    min-height: calc(48px * 4 + 4px * 3);
+    min-height: calc(52px * 4 + 5px * 3);
   }
   .note-screen .keypad {
-    grid-template-rows: repeat(4, minmax(48px, 1fr));
-    min-height: calc(48px * 4 + 4px * 3);
-    gap: 4px;
+    grid-template-rows: repeat(4, minmax(52px, 1fr));
+    min-height: calc(52px * 4 + 5px * 3);
+    gap: 5px;
   }
-  .note-screen .key { min-height: 48px; }
+  .note-screen .key { min-height: 52px; }
+}
+
+/* v51: 備註 選品項/收起 sits on the thumb side of the 返回 bar */
+.plan-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0 16px calc(12px + var(--safe-b));
+}
+.plan-footer.hand-left { flex-direction: row; }
+.plan-footer.hand-right { flex-direction: row-reverse; }
+.plan-footer .plan-back-lg {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.plan-footer .plan-grid-toggle {
+  flex: 0 0 auto;
+  min-width: 7.6em;
+  max-width: 46%;
+  min-height: 56px;
+  height: auto;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 2px solid var(--yellow);
+  background: var(--bg-elev);
+  color: var(--yellow);
+  font-size: clamp(18px, 5vw, 20px);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  box-shadow: none;
+}
+.plan-screen:not(.is-picking) .plan-footer .plan-grid-toggle {
+  background: var(--yellow);
+  color: var(--yellow-text);
+  box-shadow: 0 4px 18px rgba(255, 229, 0, 0.22);
+}
+.plan-screen:not(.is-picking) .plan-footer .plan-back-lg {
+  background: var(--bg-elev);
+  color: var(--yellow);
+  box-shadow: none;
+  border: 2px solid var(--yellow);
+}
+.plan-screen.is-picking .plan-footer .plan-grid-toggle {
+  background: var(--bg-elev);
+  color: var(--yellow);
+}
+@media (max-width: 360px) {
+  .plan-footer .plan-grid-toggle {
+    min-width: 6.4em;
+    padding: 0 10px;
+    font-size: 18px;
+  }
+}
+@media (max-height: 640px) {
+  .plan-footer .plan-grid-toggle,
+  .plan-footer .plan-back-lg { min-height: 52px; }
 }
