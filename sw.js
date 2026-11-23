@@ -1,4 +1,4 @@
-const CACHE = 'auction-bid-v48';
+const CACHE = 'auction-bid-v49';
 const NETWORK_TIMEOUT_MS = 3000;
 const ASSETS = [
   './',

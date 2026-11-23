@@ -1022,6 +1022,19 @@ input:focus, textarea:focus {
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
 .switch-row .lbl { font-weight: 800; }
 .switch-row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.cutoff-select {
+  flex: 0 0 auto;
+  min-width: 7.6em;
+  max-width: 46%;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 8px 8px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
 .toggle { width: 52px; height: 32px; border-radius: 999px; background: #333; position: relative; border: 0; flex: 0 0 auto; }
 .toggle.on { background: var(--yellow); }
 .toggle i { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #111; display: block; transition: left 0.15s; }
@@ -1425,6 +1438,7 @@ input:focus, textarea:focus {
 .peel-paleGreen { --peel-bg: #c6e0a8; --peel-fg: #1c2f10; --peel-band: #7eaa4e; }
 .peel-green { --peel-bg: #2f6a32; --peel-fg: #eef8ee; --peel-band: #6fbf6a; }
 .peel-darkGreen { --peel-bg: #215438; --peel-fg: #e8f7ed; --peel-band: #5aaa74; }
+.peel-youngGreen { --peel-bg: #c8e86e; --peel-fg: #1a2c08; --peel-band: #6aaa22; }
 .peel-red { --peel-bg: #b11f1a; --peel-fg: #ffece9; --peel-band: #ff6a5a; }
 .peel-yellow { --peel-bg: #e2c01f; --peel-fg: #2c2400; --peel-band: #a88600; }
 .peel-tan { --peel-bg: #b3884a; --peel-fg: #1c1206; --peel-band: #7a5728; }
@@ -1907,8 +1921,8 @@ html.is-dragging .live-col-list {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  min-height: 46px;
-  height: 46px;
+  min-height: 54px;
+  height: auto;
   padding: 0 3px 0 0;
   border-radius: 6px;
   background: var(--bg-elev);
@@ -1997,20 +2011,24 @@ button.lot-cell {
   display: block;
   min-width: 0;
   width: 100%;
-  font-size: 11px;
+  font-size: clamp(15px, 4.4vw, 18px);
   font-weight: 800;
   color: var(--muted);
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
+  line-height: 1.2;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   margin: 0;
 }
 .cell-item-name {
   display: block;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .size-badge {
   flex: 0 0 auto;

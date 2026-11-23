@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v48';
+const APP_VERSION = 'v49';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -71,6 +71,13 @@ function findCrop(name, half) {
     }
   }
   return null;
+}
+
+function isPromoVariety(crop, variety) {
+  if (!crop || !variety) return false;
+  return GRID_PROMOTIONS.some((p) => (
+    p.cropN === crop.n && (p.varN === variety.n || p.l === variety.l || p.varN === variety.srcN)
+  ));
 }
 
 function everydayItemLabel(name) {
@@ -171,7 +178,8 @@ const GRID_PROMOTIONS = [
   { l: '甜豆', cropN: '豌豆', varN: '豌豆-甜豌豆' },
   { l: '荷蘭豆', cropN: '豌豆', varN: '豌豆-白花' },
   { l: '四季豆', cropN: '敏豆', varN: '敏豆-白豆' },
-  { l: '醜豆', cropN: '敏豆', varN: '敏豆-醜豆' }
+  { l: '醜豆', cropN: '敏豆', varN: '敏豆-醜豆' },
+  { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' }
 ];
 
 function promotionCrops(half, q, counts) {
@@ -351,6 +359,17 @@ function pinnedPickerVariants(crop) {
         l: '醜豆',
         srcN: ugly.n,
         a: [...new Set([...(ugly.a || []), '醜豆'])]
+      }));
+    }
+  }
+  if (crop.n === '芥藍菜' || crop.l === '芥藍') {
+    const sprout = (crop.s || []).find((v) => v.n === '芥藍菜-芥藍芽' || v.l === '芥藍芽');
+    if (sprout) {
+      out.push(Object.assign({}, sprout, {
+        n: '芥藍芽',
+        l: '芥藍芽',
+        srcN: sprout.n,
+        a: [...new Set([...(sprout.a || []), '芥藍芽'])]
       }));
     }
   }
@@ -585,12 +604,58 @@ let draftPriority = 'watch';
 let armTimer = null;
 let dragState = null;
 
-function todayStr() {
-  const d = new Date();
+const DEFAULT_DAY_CUTOFF_HOUR = 15;
+let clockNow = null;
+let pendingDayRollover = false;
+
+function nowDate() {
+  return clockNow instanceof Date && !Number.isNaN(clockNow.getTime())
+    ? new Date(clockNow.getTime())
+    : new Date();
+}
+
+function setAuctionNow(value) {
+  if (value == null || value === '') {
+    clockNow = null;
+    return null;
+  }
+  const d = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  clockNow = Number.isNaN(d.getTime()) ? null : d;
+  return clockNow;
+}
+
+function calendarDayStr(d) {
+  d = d || nowDate();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function dayCutoffHour() {
+  const h = Number(state && state.dayCutoffHour);
+  if (Number.isFinite(h) && h >= 0 && h <= 23) return Math.floor(h);
+  return DEFAULT_DAY_CUTOFF_HOUR;
+}
+
+function todayStr(d) {
+  d = d || nowDate();
+  const cutoff = (typeof state === 'undefined' || !state) ? DEFAULT_DAY_CUTOFF_HOUR : dayCutoffHour();
+  if (cutoff > 0 && d.getHours() >= cutoff) {
+    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    return calendarDayStr(next);
+  }
+  return calendarDayStr(d);
+}
+
+function cutoffHourLabel(h) {
+  h = Number(h);
+  if (!Number.isFinite(h)) h = DEFAULT_DAY_CUTOFF_HOUR;
+  h = Math.max(0, Math.min(23, Math.floor(h)));
+  if (h === 0) return '午夜 0 點';
+  if (h === 12) return '中午 12 點';
+  if (h < 12) return '上午 ' + h + ' 點';
+  return '下午 ' + (h - 12) + ' 點';
 }
 
 function formatDateLabel(iso) {
@@ -616,19 +681,20 @@ function tomorrowStr(from) {
   return addDaysIso(from || todayStr(), 1);
 }
 
-function planMorningHours() {
-  return new Date().getHours() < 12;
+function isBeforeDayCutoff(d) {
+  d = d || nowDate();
+  return todayStr(d) === calendarDayStr(d);
 }
 
 function defaultPlanAddTarget() {
-  return planMorningHours() ? 'today' : 'tomorrow';
+  return 'today';
 }
 
-/* Same-morning 備註 often lands on 明日 because the add-target defaulted
-   to tomorrow. During morning market hours, treat those as today's list
-   so 標到 can deduct them. After noon, leave a real 明日 list alone. */
+/* Before the auction-day cutoff, a same-calendar-day 明日 備註 is usually
+   a leftover from the old noon default. After cutoff, 明日 is the day after
+   the upcoming auction, so leave it alone. */
 function promoteMisfiledTomorrowPlans() {
-  if (!state || !Array.isArray(state.planItems) || !planMorningHours()) return false;
+  if (!state || !Array.isArray(state.planItems) || !isBeforeDayCutoff()) return false;
   const today = todayStr();
   const tomo = tomorrowStr(today);
   let changed = false;
@@ -1112,6 +1178,7 @@ const LEAFY_PEEL_CROP = {
   '青江菜': 'paleGreen',
   '芥藍菜': 'darkGreen',
   '芥藍': 'darkGreen',
+  '芥藍芽': 'youngGreen',
   '茼蒿': 'midGreen',
   '油菜': 'midGreen',
   '韭菜': 'darkGreen',
@@ -1141,6 +1208,8 @@ const LEAFY_PEEL_CROP = {
 };
 
 const LEAFY_PEEL_VARIANT = {
+  '芥藍菜-芥藍芽': 'youngGreen',
+  '芥藍芽': 'youngGreen',
   '萵苣菜-油麥菜': 'paleGreen',
   '萵苣菜-結球萵': 'white',
   '萵苣菜-進口結球萵': 'white',
@@ -1338,7 +1407,11 @@ function peelToneOf(name) {
   const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
   const key = parsed.name || raw;
   const everyday = (typeof everydayItemLabel === 'function') ? everydayItemLabel(key) || everydayItemLabel(raw) : '';
-  if (everyday && GOURD_PEEL_CROP[everyday]) return GOURD_PEEL_CROP[everyday];
+  if (everyday) {
+    const everydayTone = GOURD_PEEL_CROP[everyday] || FRUIT_PEEL_CROP[everyday]
+      || LEAFY_PEEL_CROP[everyday] || BULK_PEEL_CROP[everyday];
+    if (everydayTone) return everydayTone;
+  }
   const mapped = peelVariantTone(key) || peelVariantTone(raw);
   if (mapped) {
     const cropGuess = (typeof findCrop === 'function') ? (findCrop(key) || findCrop(raw)) : null;
@@ -1421,6 +1494,7 @@ function planLotMatchScore(plan, lot) {
   }
   if (resolved.level === 'crop' && resolved.crop) {
     if (!crop || crop.n !== resolved.crop.n) return 0;
+    if (variety && isPromoVariety(crop, variety)) return 0;
     return parsed.size ? 20 : 10;
   }
   const exacts = [itemDisplayName(lot.item), lot.item, itemCellName(lot.item), lotPlanText(lot)]
@@ -2367,6 +2441,8 @@ function defaultState() {
     itemsMigratedV17: true,
     itemsMigratedV21: true,
     itemsMigratedV46: true,
+    dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
+    skipAutoDay: '',
     planItems: [],
     boughtHistory: [],
     syncRoom: '',
@@ -2411,6 +2487,13 @@ function loadState() {
       };
     }
     if (!isHalf(merged.currentHalf)) merged.currentHalf = 'fruit';
+    {
+      const ch = Number(merged.dayCutoffHour);
+      merged.dayCutoffHour = (Number.isFinite(ch) && ch >= 0 && ch <= 23)
+        ? Math.floor(ch)
+        : DEFAULT_DAY_CUTOFF_HOUR;
+    }
+    if (merged.skipAutoDay != null && typeof merged.skipAutoDay !== 'string') merged.skipAutoDay = '';
     if (!Array.isArray(merged.lots)) merged.lots = [];
     if (!merged.alerted || typeof merged.alerted !== 'object') merged.alerted = {};
     if (!Array.isArray(merged.customItems)) merged.customItems = [];
@@ -2809,6 +2892,25 @@ function undoLast() {
     if (!state.lots.some((l) => l.id === snap.lot.id)) state.lots.push(snap.lot);
     restoreCurrent(snap);
     saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
+  if (snap.kind === 'new-day') {
+    state.lots = Array.isArray(snap.lots) ? snap.lots.slice() : [];
+    if (snap.day) state.day = snap.day;
+    if (snap.currentNumbers && typeof snap.currentNumbers === 'object') {
+      state.currentNumbers = snap.currentNumbers;
+    }
+    state.alerted = snap.alerted && typeof snap.alerted === 'object' ? snap.alerted : {};
+    if (Array.isArray(snap.boughtHistory)) state.boughtHistory = snap.boughtHistory;
+    if (snap.currentHalf) state.currentHalf = snap.currentHalf;
+    if (snap.tab) state.tab = snap.tab;
+    state.skipAutoDay = todayStr();
+    showSettings = false;
+    saveState();
+    freezeItemRanks();
     toast('已復原');
     buzz(24);
     render();
@@ -4132,8 +4234,10 @@ function themeLabel(theme) {
 }
 
 /* ---------- 新的一天 ---------- */
-function startNewDay(confirmed) {
-  if (!confirmed) {
+function startNewDay(confirmed, opts) {
+  opts = opts || {};
+  const auto = !!opts.auto;
+  if (!confirmed && !auto) {
     modal = {
       type: 'confirm',
       title: '開始新的一天？',
@@ -4148,13 +4252,30 @@ function startNewDay(confirmed) {
     render();
     return;
   }
-  rememberBoughtLots(state.lots);
+  const auctionDay = todayStr();
+  if (auto && state.day === auctionDay) return;
+  if (auto && isMidAction()) {
+    pendingDayRollover = true;
+    return;
+  }
+  const snap = {
+    kind: 'new-day',
+    lots: (state.lots || []).slice(),
+    day: state.day,
+    currentNumbers: structuredClone(state.currentNumbers),
+    alerted: { ...(state.alerted || {}) },
+    boughtHistory: structuredClone(state.boughtHistory || []),
+    currentHalf: state.currentHalf,
+    tab: state.tab
+  };
+  if ((state.lots || []).length) rememberBoughtLots(state.lots);
   state.lots = [];
   state.alerted = {};
-  state.day = todayStr();
+  state.day = auctionDay;
   state.currentNumbers = defaultCurrents(state.machines);
   state.tab = 'note';
   state.currentHalf = 'fruit';
+  state.skipAutoDay = '';
   showSettings = false;
   modal = null;
   draftNum = '';
@@ -4164,35 +4285,43 @@ function startNewDay(confirmed) {
   draftMachineId = '';
   itemTargetId = null;
   itemTargetAuto = false;
+  pendingDayRollover = false;
   saveState();
   freezeItemRanks();
-  toast('已開始新的一天，預計備註還在，先從水果場開始');
+  if (auto) offerUndo(snap, '已開始新的一天');
+  else toast('已開始新的一天，預計備註還在，先從水果場開始');
   render();
 }
 
 function checkNewDay() {
+  if (!state) return;
   const today = todayStr();
-  if (state.day !== today && (state.lots || []).some((l) => l.day === state.day)) {
-    modal = {
-      type: 'confirm',
-      title: `今天是 ${formatDateLabel(today)}`,
-      body: `還留著 ${formatDateLabel(state.day)} 的抄號。要開始新的一天嗎？（設定會保留）`,
-      ok: '開始新的一天',
-      cancel: '先看昨天的',
-      danger: false,
-      onOk: () => startNewDay(true),
-      onCancel: () => {
-        modal = null;
-        render();
-      }
-    };
-  } else if (state.day !== today) {
-    state.day = today;
-    state.currentNumbers = defaultCurrents(state.machines);
-    state.alerted = {};
-    state.currentHalf = 'fruit';
-    saveState();
-    freezeItemRanks();
+  if (state.day === today) {
+    pendingDayRollover = false;
+    return;
+  }
+  if (state.skipAutoDay === today) return;
+  if (today < state.day) return;
+  if (isMidAction()) {
+    pendingDayRollover = true;
+    return;
+  }
+  pendingDayRollover = false;
+  startNewDay(true, { auto: true });
+}
+
+function maybeRollAuctionDay() {
+  if (!state || (typeof isSetupNeeded === 'function' && isSetupNeeded())) return;
+  if (isMidAction()) {
+    if (state.day !== todayStr() && state.skipAutoDay !== todayStr()) pendingDayRollover = true;
+    return;
+  }
+  if (!pendingDayRollover && state.day === todayStr()) return;
+  const before = state.day;
+  const lotsBefore = (state.lots || []).length;
+  checkNewDay();
+  if (state.day !== before || (state.lots || []).length !== lotsBefore) {
+    if (typeof render === 'function') render();
   }
 }
 
@@ -4497,9 +4626,10 @@ function fitItemBtnLabels() {
 function fitLotCellNames() {
   document.querySelectorAll('.lot-cell .cell-item-name').forEach((el) => {
     el.style.fontSize = '';
-    let size = parseFloat(getComputedStyle(el).fontSize) || 11;
-    const min = 8;
-    while (size > min && el.scrollWidth > el.clientWidth + 0.5) {
+    let size = parseFloat(getComputedStyle(el).fontSize) || 16;
+    const min = 11;
+    const maxH = size * 3.3;
+    while (size > min && (el.scrollWidth > el.clientWidth + 0.5 || el.scrollHeight > maxH + 0.5)) {
       size -= 0.5;
       el.style.fontSize = size + 'px';
     }
@@ -4954,6 +5084,15 @@ function renderSettings() {
           <button type="button" class="${thumbHand() === 'left' ? 'on' : ''}" data-act="set-hand" data-v="left">左手</button>
           <button type="button" class="${thumbHand() === 'right' ? 'on' : ''}" data-act="set-hand" data-v="right">右手</button>
         </div>
+      </div>
+      <div class="switch-row">
+        <div><div class="lbl">新的一天開始時間</div><div class="sub">過了這個時間就自動進入下一場拍賣日，預設下午 3 點</div></div>
+        <select class="cutoff-select" data-act="day-cutoff" aria-label="新的一天開始時間">
+          ${Array.from({ length: 24 }, (_, h) => {
+            const sel = dayCutoffHour() === h ? ' selected' : '';
+            return `<option value="${h}"${sel}>${cutoffHourLabel(h)}</option>`;
+          }).join('')}
+        </select>
       </div>
     </div>
     ${halfBlocks}
@@ -5754,6 +5893,8 @@ function onClick(e) {
       saveState();
       render();
       break;
+    case 'day-cutoff':
+      break;
     case 'new-day':
       startNewDay(false);
       break;
@@ -5837,6 +5978,14 @@ function onInput(e) {
     render();
     return;
   }
+  if (act === 'day-cutoff') {
+    const h = Number(el.value);
+    state.dayCutoffHour = (Number.isFinite(h) && h >= 0 && h <= 23) ? Math.floor(h) : DEFAULT_DAY_CUTOFF_HOUR;
+    saveState();
+    checkNewDay();
+    render();
+    return;
+  }
   if (act === 'draft-note') {
     draftNote = el.value;
     return;
@@ -5907,8 +6056,7 @@ function onVisibility() {
     pokeSWUpdate();
     maybeReloadForNewSW();
     if (typeof checkNewDay === 'function' && state && !isSetupNeeded()) {
-      checkNewDay();
-      if (typeof render === 'function') render();
+      maybeRollAuctionDay();
     }
   }
   if (document.visibilityState === 'visible' && paddleOpen) {
@@ -6352,8 +6500,9 @@ function bind() {
     window.visualViewport.addEventListener('resize', syncViewportHeight);
     window.visualViewport.addEventListener('scroll', syncViewportHeight);
   }
-  document.addEventListener('click', (e) => { syncWakeLock(); onClick(e); });
+  document.addEventListener('click', (e) => { syncWakeLock(); onClick(e); maybeReloadForNewSW(); maybeRollAuctionDay(); });
   document.addEventListener('input', onInput);
+  document.addEventListener('change', onInput);
   window.addEventListener('popstate', onPlanPopState);
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
@@ -6378,6 +6527,12 @@ function bind() {
       e.preventDefault();
     }
   });
+  if (!window.__auctionDayTimer) {
+    window.__auctionDayTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      maybeRollAuctionDay();
+    }, 30000);
+  }
   document.addEventListener('selectstart', (e) => {
     if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list')) e.preventDefault();
   });
@@ -6491,7 +6646,28 @@ function registerSW() {
     .catch(() => {});
 }
 
+if (typeof window !== 'undefined') {
+  window.__setAuctionNow = setAuctionNow;
+  window.__auctionDayStr = todayStr;
+  window.__calendarDayStr = calendarDayStr;
+  window.__checkNewDay = checkNewDay;
+  window.__startNewDay = startNewDay;
+  window.__maybeRollAuctionDay = maybeRollAuctionDay;
+  window.__defaultPlanAddTarget = defaultPlanAddTarget;
+  window.__resolvePlanName = resolvePlanName;
+  window.__planLotMatchScore = planLotMatchScore;
+  window.__canonicalItemKey = canonicalItemKey;
+  window.__peelClass = peelClass;
+  window.__peelToneOf = peelToneOf;
+  window.__undoLast = undoLast;
+  window.__setDraftNum = (v) => { draftNum = String(v || ''); };
+  window.__getDraftNum = () => draftNum;
+}
+
 function init() {
+  if (typeof window !== 'undefined' && window.__pendingAuctionNow) {
+    setAuctionNow(window.__pendingAuctionNow);
+  }
   state = loadState();
   if (state.keepAwake == null) state.keepAwake = true;
   ensureItemUseLog(state);

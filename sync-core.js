@@ -258,6 +258,7 @@
   function kvFromState(state) {
     const kv = {};
     kv.day = state.day;
+    kv.dayCutoffHour = state.dayCutoffHour;
     kv.machines = state.machines;
     kv.customItemsByHalf = state.customItemsByHalf;
     kv.boughtHistory = state.boughtHistory;
@@ -272,6 +273,11 @@
     }
     const day = val('day');
     if (day != null) state.day = day;
+    const cutoff = val('dayCutoffHour');
+    if (cutoff != null) {
+      const h = Number(cutoff);
+      if (Number.isFinite(h) && h >= 0 && h <= 23) state.dayCutoffHour = Math.floor(h);
+    }
     const machines = val('machines');
     if (machines && typeof machines === 'object') state.machines = machines;
     const customs = val('customItemsByHalf');
