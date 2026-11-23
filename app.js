@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v49';
+const APP_VERSION = 'v50';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4856,6 +4856,12 @@ function renderNote() {
         <div class="num${num ? '' : ' empty'}${dupFlash ? ' dup-flash' : ''}">${num ? escapeHtml(num) : '----'}</div>
         <div class="${chipClass}">${escapeHtml(machineHint)}</div>
       </div>
+      <div class="prio-toggle note-prio" role="group" aria-label="標貨優先">
+        ${['must', 'watch', 'skip'].map((p) => {
+          const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
+          return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${p === 'must' ? '必標' : p === 'skip' ? '可不' : '看價'}</button>`;
+        }).join('')}
+      </div>
       ${picker}
       ${recentHtml}
       <div class="note-body">
@@ -4863,12 +4869,6 @@ function renderNote() {
         ${itemPick}
       </div>
       <div class="save-row">
-        <div class="prio-toggle" role="group" aria-label="標貨優先">
-          ${['must', 'watch', 'skip'].map((p) => {
-            const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
-            return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${p === 'must' ? '必標' : p === 'skip' ? '可不' : '看價'}</button>`;
-          }).join('')}
-        </div>
         <button type="button" class="btn-save" data-act="save" ${num ? '' : 'disabled'}>存</button>
       </div>
       ${sizeBlock}

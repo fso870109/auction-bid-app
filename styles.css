@@ -1252,18 +1252,18 @@ input:focus, textarea:focus {
 }
 .note-screen .key.muted { font-size: clamp(13px, 4vw, 18px); }
 
-/* 存 sits under both columns, with priority toggle beside it */
+/* 存 sits full-width under both columns; priority lives under the number display */
 .save-row {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: minmax(124px, 0.85fr) minmax(140px, 1.25fr);
+  grid-template-columns: 1fr;
   gap: 6px;
   align-items: stretch;
 }
 .note-screen .btn-save {
   position: static;
   flex: 0 0 auto;
-  width: auto;
+  width: 100%;
   margin: 0;
   min-height: 48px;
   height: 48px;
@@ -1271,28 +1271,38 @@ input:focus, textarea:focus {
   border-radius: 12px;
   letter-spacing: 0.1em;
 }
+.note-prio {
+  flex: 0 0 auto;
+  width: 100%;
+}
 .prio-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 2px;
+  gap: 3px;
   background: var(--bg-card);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 3px;
-  min-height: 48px;
+  min-height: 44px;
   min-width: 0;
 }
 .prio-toggle button {
   border-radius: 9px;
   font-weight: 800;
-  font-size: 11px;
+  font-size: clamp(15px, 4.4vw, 18px);
   line-height: 1.1;
   min-width: 0;
-  padding: 0 2px;
+  padding: 0 4px;
+  color: #9a9a9a;
+  background: transparent;
+  box-shadow: none;
 }
-.prio-toggle button.on.prio-must { background: #3a1608; color: #ff8a3d; }
-.prio-toggle button.on.prio-watch { background: #3a2e08; color: #ffcc33; }
-.prio-toggle button.on.prio-skip { background: #2a2a2a; color: #d0d0d0; }
+.prio-toggle button.on {
+  font-weight: 900;
+}
+.prio-toggle button.on.prio-must { background: #3a1608; color: #ff8a3d; box-shadow: inset 0 0 0 2px #ff8a3d; }
+.prio-toggle button.on.prio-watch { background: #3a2e08; color: #ffcc33; box-shadow: inset 0 0 0 2px #ffcc33; }
+.prio-toggle button.on.prio-skip { background: #2a2a2a; color: #f0f0f0; box-shadow: inset 0 0 0 2px #c8c8c8; }
 .sheet-prio { margin: 0 0 10px; min-height: 44px; }
 .move-lot-row {
   display: grid;
@@ -2774,8 +2784,6 @@ button.lot-cell {
   .half-switch { padding: 2px; gap: 1px; }
   .half-switch button { padding: 5px 2px; font-size: 10px; min-height: 30px; }
   .app-logo { width: 22px; height: 22px; }
-  .save-row { grid-template-columns: minmax(96px, 0.8fr) minmax(0, 1.3fr); }
-  .prio-toggle button { font-size: 10px; }
   .live-bar { gap: 6px; }
   .live-counts { gap: 6px; font-size: 11px; }
   .sync-qr { width: 200px; height: 200px; padding: 10px; }
@@ -3304,4 +3312,25 @@ button.lot-cell {
   .plan-yest-list, .plan-add .item-pick.plan-yest-list { max-height: 44px; }
   .plan-target-seg, .plan-target-seg button, .plan-grid-toggle { min-height: 34px; }
   .plan-add input { min-height: 38px; }
+}
+
+/* v50: keep 抄號 (priority above keypad) on one screen, including short phones */
+@media (max-height: 640px) {
+  .note-head,
+  .note-head .num,
+  .note-head .machine-chip { min-height: 42px; }
+  .note-head .num { font-size: clamp(30px, 9vw, 40px); }
+  .note-prio,
+  .prio-toggle { min-height: 40px; }
+  .note-screen .btn-save { min-height: 44px; height: 44px; font-size: 20px; }
+  .note-tools { min-height: 48px; }
+  .note-body {
+    min-height: calc(48px * 4 + 4px * 3);
+  }
+  .note-screen .keypad {
+    grid-template-rows: repeat(4, minmax(48px, 1fr));
+    min-height: calc(48px * 4 + 4px * 3);
+    gap: 4px;
+  }
+  .note-screen .key { min-height: 48px; }
 }
