@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v55';
+const APP_VERSION = 'v56';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4039,6 +4039,29 @@ function setProgress(machineId, next, half) {
   syncProgressTimer();
 }
 
+function ensureAutoAnchors() {
+  if (!autoAdvanceOn() || !state) return false;
+  let changed = false;
+  for (const half of HALVES) {
+    for (const m of state.machines[half] || []) {
+      const cur = currentOf(m.id, half);
+      if (cur == null) continue;
+      const cap = progressCap(m.id, half);
+      if (cap != null && cur >= cap) continue;
+      if (isAutoRunning(m.id, half)) continue;
+      if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+      state.currentNumbers[half][m.id] = cur;
+      writeAnchor(m.id, half, { number: cur, at: nowDate().getTime(), paused: false, ended: false });
+      changed = true;
+    }
+  }
+  if (changed) {
+    saveState();
+    syncProgressTimer();
+  }
+  return changed;
+}
+
 function pauseProgress(machineId, half) {
   const h = half || state.currentHalf;
   if (!isAutoRunning(machineId, h)) return;
@@ -5310,34 +5333,6 @@ function renderLive() {
       const next = upcoming[0] || null;
       const title = columnTitle(m, half);
       const curLabel = cur == null ? '—' : String(cur);
-      const running = isAutoRunning(m.id, half);
-      const anchor = getAnchor(m.id, half);
-      const ended = !!(anchor && anchor.ended) || (cur != null && progressCap(m.id, half) != null && cur >= progressCap(m.id, half) && autoAdvanceOn());
-      let autoBit = '';
-      let pauseBtn = '';
-      if (autoAdvanceOn() && cur != null) {
-        if (running) {
-          autoBit = '<span class="auto-flag on">自動</span>';
-          pauseBtn = `<button type="button" class="cur-pause" data-act="pause-progress" data-id="${m.id}">暫停</button>`;
-        } else if (ended) {
-          autoBit = '<span class="auto-flag ended">到尾</span>';
-        } else {
-          autoBit = '<span class="auto-flag paused">暫停</span>';
-          pauseBtn = `<button type="button" class="cur-pause resume" data-act="resume-progress" data-id="${m.id}">繼續</button>`;
-        }
-      }
-      const foot = `<div class="live-col-foot hand-${thumbHand()}" data-stop="1">
-            <button type="button" class="cur-now" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
-              <span class="cur-now-lbl">現在</span>
-              <span class="cur-now-num">${curLabel}</span>
-              ${autoBit}
-            </button>
-            ${pauseBtn}
-            <div class="cur-steps">
-              <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
-              <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
-            </div>
-          </div>`;
       const cells = lots.length
         ? lots
             .map((l) => {
@@ -5383,12 +5378,20 @@ function renderLive() {
             .join('')
         : '<div class="col-empty">還沒抄號</div>';
       return `<section class="live-col" data-id="${m.id}">
-        <div class="live-col-head">
-          <div class="col-name">${escapeHtml(title)}</div>
-          <button type="button" class="live-cur" data-act="edit-cur" data-id="${m.id}">${curLabel}</button>
+        <div class="live-col-head hand-${thumbHand()}">
+          <div class="live-head-top">
+            <div class="col-name">${escapeHtml(title)}</div>
+            <button type="button" class="live-cur" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
+              <span class="cur-now-lbl">現在</span>
+              <span class="cur-now-num">${curLabel}</span>
+            </button>
+          </div>
+          <div class="live-cur-row">
+            <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
+            <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
+          </div>
         </div>
         <div class="live-col-list" data-id="${m.id}">${cells}</div>
-        ${foot}
       </section>`;
     })
     .join('');
@@ -5514,7 +5517,7 @@ function renderSettings() {
         </select>
       </div>
       <div class="switch-row">
-        <div><div class="lbl">自動前跳</div><div class="sub">用「現在」設定後，會依拍賣速度自動往前跳。可在每一台按暫停。只會移動現在進度，不會自動把貨標成標到或沒標到。</div></div>
+        <div><div class="lbl">自動前跳</div><div class="sub">用「現在」或加減設定後，會依拍賣速度自動往前跳。只會移動現在進度，不會自動把貨標成標到或沒標到。不想自動跳時可在這裡關掉。</div></div>
         <button type="button" class="toggle${autoAdvanceOn() ? ' on' : ''}" data-act="toggle-auto-advance"><i></i></button>
       </div>
       <div class="switch-row">
@@ -6003,16 +6006,12 @@ function onClick(e) {
             }
           }
         }
+      } else {
+        ensureAutoAnchors();
       }
       saveState();
       syncProgressTimer();
       render();
-      break;
-    case 'pause-progress':
-      pauseProgress(btn.dataset.id);
-      break;
-    case 'resume-progress':
-      resumeProgress(btn.dataset.id);
       break;
     case 'toggle-note':
     case 'open-summary':
@@ -7171,6 +7170,7 @@ if (typeof window !== 'undefined') {
   window.__maybeRollAuctionDay = maybeRollAuctionDay;
   window.__tickAutoProgress = tickAutoProgress;
   window.__currentOf = (id, half) => currentOf(id, half);
+  window.__ensureAutoAnchors = ensureAutoAnchors;
   window.__isAutoRunning = (id, half) => isAutoRunning(id, half);
   window.__getAnchor = (id, half) => getAnchor(id, half);
   window.__defaultPlanAddTarget = defaultPlanAddTarget;
@@ -7200,6 +7200,7 @@ function init() {
   bind();
   registerSW();
   if (typeof initSync === 'function') initSync();
+  ensureAutoAnchors();
   render();
   syncProgressTimer();
   syncWakeLock();

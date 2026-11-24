@@ -216,6 +216,7 @@ function applySnapshot(snap, flash) {
     state.planItems = slice.planItems;
     if (slice.tombstones) state.syncTombstones = slice.tombstones;
     BidSyncCore.applyKvToState(state, snap.kv || {});
+    if (typeof ensureAutoAnchors === "function") ensureAutoAnchors();
     if (flash && flash.length) {
       const now = Date.now();
       for (const id of flash) remoteFlash[id] = now + 2200;
@@ -238,6 +239,7 @@ function applyRemoteOps(ops, flashes, from) {
     state.planItems = BidSyncCore.mapToPlans(snap.planItems);
     state.syncTombstones = snap.tombstones;
     BidSyncCore.applyKvToState(state, snap.kv);
+    if (typeof ensureAutoAnchors === "function") ensureAutoAnchors();
     const ids = (flashes && flashes.length) ? flashes : result.flashes;
     if (from && from !== ensureDeviceId() && from !== ensurePeerId() && ids && ids.length) {
       const now = Date.now();
@@ -274,6 +276,7 @@ function mergeSnapshotOnHello(incoming) {
     state.planItems = BidSyncCore.mapToPlans(localSnap.planItems);
     state.syncTombstones = localSnap.tombstones;
     BidSyncCore.applyKvToState(state, localSnap.kv);
+    if (typeof ensureAutoAnchors === "function") ensureAutoAnchors();
     lastShared = sharedSlice();
     persistSyncState();
     if (flashes && flashes.length) {
