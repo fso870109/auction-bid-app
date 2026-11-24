@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v53';
+const APP_VERSION = 'v54';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -605,6 +605,7 @@ let armTimer = null;
 let dragState = null;
 
 const DEFAULT_DAY_CUTOFF_HOUR = 15;
+const DEFAULT_LOTS_PER_MIN = 4;
 let clockNow = null;
 let pendingDayRollover = false;
 
@@ -2443,6 +2444,7 @@ function defaultState() {
     itemsMigratedV21: true,
     itemsMigratedV46: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
+    lotsPerMin: DEFAULT_LOTS_PER_MIN,
     skipAutoDay: '',
     planItems: [],
     boughtHistory: [],
@@ -2493,6 +2495,12 @@ function loadState() {
       merged.dayCutoffHour = (Number.isFinite(ch) && ch >= 0 && ch <= 23)
         ? Math.floor(ch)
         : DEFAULT_DAY_CUTOFF_HOUR;
+    }
+    {
+      const r = Number(merged.lotsPerMin);
+      merged.lotsPerMin = (Number.isFinite(r) && r >= 1 && r <= 12)
+        ? Math.round(r * 10) / 10
+        : DEFAULT_LOTS_PER_MIN;
     }
     if (merged.skipAutoDay != null && typeof merged.skipAutoDay !== 'string') merged.skipAutoDay = '';
     if (!Array.isArray(merged.lots)) merged.lots = [];
@@ -2765,6 +2773,25 @@ function secondLots() {
 
 function isPassed(lot, cur) {
   return !!(lot && lot.status === 'pending' && !lot.secondMarket && cur != null && lot.number < cur);
+}
+
+function lotsPerMin() {
+  const n = Number(state && state.lotsPerMin);
+  return (Number.isFinite(n) && n >= 1 && n <= 12) ? Math.round(n * 10) / 10 : DEFAULT_LOTS_PER_MIN;
+}
+
+function lotEtaMinutes(lot, cur) {
+  if (cur == null || !lot || lot.status !== 'pending' || lot.secondMarket) return null;
+  const d = Number(lot.number) - Number(cur);
+  if (!Number.isFinite(d) || d <= 0) return null;
+  const rate = lotsPerMin();
+  if (!(rate > 0)) return null;
+  return Math.max(1, Math.round(d / rate));
+}
+
+function lotEtaLabel(lot, cur) {
+  const m = lotEtaMinutes(lot, cur);
+  return m == null ? '' : '約' + m + '分';
 }
 
 function isFlow(lot) {
@@ -5045,8 +5072,9 @@ function renderLive() {
               if (isNext) cls += ' next';
               if (l.status === 'lost') cls += ' strike';
               let badge = '';
-              if (near && d === 0) badge = '<span class="cell-badge now">到</span>';
-              else if (near && d > 0) badge = `<span class="cell-badge">差${d}</span>`;
+              if (d === 0) badge = '<span class="cell-badge now">到</span>';
+              const eta = lotEtaLabel(l, cur);
+              const etaHtml = eta ? `<span class="eta-badge">${escapeHtml(eta)}</span>` : '';
               const movedMark = l.status === 'moved' ? '<span class="moved-mark">✓搬</span>' : '';
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
               const size = itemNeedsSize(l.item) && l.item
@@ -5063,9 +5091,8 @@ function renderLive() {
                 <span class="cell-main">
                   <span class="cell-top">
                     ${lotNumHtml(l, { edit: true, numClass: 'cell-num' })}
-                    <span class="cell-end">${size}<span class="cell-flags">${movedMark}${badge}${er}</span></span>
                   </span>
-                  ${item}
+                  <span class="cell-item-row">${item}${etaHtml}<span class="cell-end">${size}<span class="cell-flags">${movedMark}${badge}${er}</span></span></span>
                 </span>
               </button>`;
             })
@@ -5199,6 +5226,15 @@ function renderSettings() {
           ${Array.from({ length: 24 }, (_, h) => {
             const sel = dayCutoffHour() === h ? ' selected' : '';
             return `<option value="${h}"${sel}>${cutoffHourLabel(h)}</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div class="switch-row">
+        <div><div class="lbl">拍賣速度</div><div class="sub">用來估算還要幾分鐘輪到你的貨。預設每分鐘約 4 號。進度仍要自己用「現在」設定，不會自動往前。</div></div>
+        <select class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
+          ${[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => {
+            const sel = lotsPerMin() === n ? ' selected' : '';
+            return `<option value="${n}"${sel}>每分鐘 ${n} 號</option>`;
           }).join('')}
         </select>
       </div>
@@ -6141,6 +6177,13 @@ function onInput(e) {
     state.dayCutoffHour = (Number.isFinite(h) && h >= 0 && h <= 23) ? Math.floor(h) : DEFAULT_DAY_CUTOFF_HOUR;
     saveState();
     checkNewDay();
+    render();
+    return;
+  }
+  if (act === 'lots-per-min') {
+    const n = Number(el.value);
+    state.lotsPerMin = (Number.isFinite(n) && n >= 1 && n <= 12) ? Math.round(n * 10) / 10 : DEFAULT_LOTS_PER_MIN;
+    saveState();
     render();
     return;
   }

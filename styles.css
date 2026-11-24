@@ -1982,7 +1982,8 @@ button.lot-cell {
 }
 .cell-top {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  flex-wrap: nowrap;
   gap: 2px;
   min-width: 0;
 }
@@ -1991,7 +1992,7 @@ button.lot-cell {
   align-items: center;
   gap: 1px;
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-left: 0;
 }
 .cell-num {
   flex: 0 0 auto;
@@ -2004,10 +2005,30 @@ button.lot-cell {
 @media (max-width: 360px) {
   .cell-num { letter-spacing: 0.04em; }
 }
-.cell-item {
-  display: block;
+.cell-item-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
   min-width: 0;
   width: 100%;
+}
+.eta-badge {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--yellow);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.lot-cell.passed .eta-badge { color: #c8b84a; }
+.cell-item {
+  display: block;
+  flex: 1 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
   font-size: clamp(15px, 4.4vw, 18px);
   font-weight: 800;
   color: var(--muted);
@@ -3378,7 +3399,7 @@ button.lot-cell {
   .plan-footer .plan-back-lg { min-height: 52px; }
 }
 
-/* v53: 3-digit subcode as a subscript at the bottom-right of the lot number */
+/* v54: 3-digit subcode inline at the bottom-right of the lot number, never wraps */
 .num-sub-wrap {
   position: relative;
   display: inline-flex;
@@ -3386,39 +3407,43 @@ button.lot-cell {
   flex: 0 0 auto;
   min-width: 0;
   line-height: 1;
+  white-space: nowrap;
+}
+.num-sub-wrap .cell-num,
+.num-sub-wrap .ln-num {
+  white-space: nowrap;
 }
 .num-sub {
   flex: 0 0 auto;
   font-weight: 800;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   line-height: 1;
   color: #7ee0f0;
   text-decoration: none;
+  white-space: nowrap;
 }
 .lot-cell .num-sub.on {
-  position: absolute;
-  left: auto;
-  right: 0;
-  top: 100%;
-  margin: 0;
-  padding: 2px 0 0 0;
+  position: static;
+  margin: 0 0 0 1px;
+  padding: 0;
   z-index: 1;
   pointer-events: auto;
+  transform: none;
 }
+.num-sub-wrap.has-sub .cell-num { letter-spacing: 0.03em; }
 .lot-cell .cell-top:has(.has-sub) {
-  align-items: flex-start;
-  padding-bottom: 15px;
+  padding-bottom: 0;
   overflow: visible;
 }
 .lot-cell .cell-main { overflow: visible; }
 .num-sub.empty {
   position: absolute;
-  right: -8px;
-  bottom: -10px;
-  width: 24px;
-  height: 20px;
+  right: -6px;
+  bottom: -2px;
+  width: 22px;
+  height: 18px;
   margin: 0;
   padding: 0;
   min-width: 0;
@@ -3526,9 +3551,11 @@ button.lot-cell {
 .subcode-sheet.hand-right .sheet-actions { flex-direction: row-reverse; }
 .subcode-sheet .sheet-actions .btn { flex: 1 1 auto; min-height: 52px; font-weight: 800; font-size: 18px; }
 @media (max-width: 360px) {
-  .num-sub { font-size: 11px; letter-spacing: 0.02em; }
-  .lot-cell .cell-top:has(.has-sub) { padding-bottom: 14px; }
-  .num-sub-wrap.has-sub .cell-num { letter-spacing: 0.02em; }
+  .num-sub { font-size: 11px; letter-spacing: 0; }
+  .lot-cell .num-sub.on { margin-left: 0; }
+  .num-sub-wrap.has-sub .cell-num { letter-spacing: 0.01em; }
+  .eta-badge { font-size: 11px; }
+  .moved-mark { font-size: 10px; padding: 1px 3px; }
   .cur-now { min-height: 34px; }
   .cur-now-num { font-size: 17px; letter-spacing: 0.02em; }
   .cur-step { min-height: 48px; font-size: 24px; }

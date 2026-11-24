@@ -259,6 +259,7 @@
     const kv = {};
     kv.day = state.day;
     kv.dayCutoffHour = state.dayCutoffHour;
+    kv.lotsPerMin = state.lotsPerMin;
     kv.machines = state.machines;
     kv.customItemsByHalf = state.customItemsByHalf;
     kv.boughtHistory = state.boughtHistory;
@@ -277,6 +278,11 @@
     if (cutoff != null) {
       const h = Number(cutoff);
       if (Number.isFinite(h) && h >= 0 && h <= 23) state.dayCutoffHour = Math.floor(h);
+    }
+    const rate = val('lotsPerMin');
+    if (rate != null) {
+      const n = Number(rate);
+      if (Number.isFinite(n) && n >= 1 && n <= 12) state.lotsPerMin = Math.round(n * 10) / 10;
     }
     const machines = val('machines');
     if (machines && typeof machines === 'object') state.machines = machines;
