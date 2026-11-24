@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v52';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2518,6 +2518,10 @@ function loadState() {
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
+      if (lot.subCode != null) {
+        const c = String(lot.subCode).replace(/\D/g, '').slice(0, 3);
+        lot.subCode = c;
+      }
     }
     if (/^\d{4}$/.test(String(merged.sellerCode || ''))) merged.setupDone = true;
     if (merged.tab === 'track' || merged.tab === 'result' || merged.tab === 'settings') {
@@ -3135,11 +3139,74 @@ function recentLots() {
     .slice(0, 8);
 }
 
+function lotSubCode(lot) {
+  const s = String(lot && lot.subCode != null ? lot.subCode : '').replace(/\D/g, '').slice(0, 3);
+  return s;
+}
+
 function lotLabel(lot) {
   if (!lot) return '';
-  if (!lot.item) return String(lot.number);
+  const code = lotSubCode(lot);
+  const codeBit = code ? '　小碼 ' + code : '';
+  if (!lot.item) return String(lot.number) + codeBit;
   const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
-  return `${lot.number} ${itemDisplayName(lot.item)}${size}`;
+  return `${lot.number} ${itemDisplayName(lot.item)}${size}${codeBit}`;
+}
+
+function openSubCodeEditor(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  modal = { type: 'subcode', id, value: lotSubCode(lot) };
+  buzz(12);
+  render();
+}
+
+function typeSubCodeDigit(d) {
+  if (!modal || modal.type !== 'subcode') return;
+  let v = String(modal.value || '');
+  if (v.length >= 3) v = '';
+  v = (v + String(d)).replace(/\D/g, '').slice(0, 3);
+  modal.value = v;
+  if (v.length === 3) {
+    setLotSubCode(modal.id, v);
+    return;
+  }
+  render();
+}
+
+function backspaceSubCode() {
+  if (!modal || modal.type !== 'subcode') return;
+  modal.value = String(modal.value || '').slice(0, -1);
+  render();
+}
+
+function clearSubCodeDraft() {
+  if (!modal || modal.type !== 'subcode') return;
+  modal.value = '';
+  render();
+}
+
+function setLotSubCode(id, code) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) return;
+  const next = String(code || '').replace(/\D/g, '').slice(0, 3);
+  const prev = lotSubCode(lot);
+  if (next === prev) {
+    modal = null;
+    render();
+    return;
+  }
+  const snap = snapshotLot(lot);
+  lot.subCode = next;
+  saveState();
+  offerUndo(snap, next ? `${lot.number}　小碼 ${next}` : `${lot.number}　已清除小代碼`);
+  modal = null;
+  buzz(26);
+  render();
+}
+
+function eraseLotSubCode(id) {
+  setLotSubCode(id, '');
 }
 
 function migrateItemLists(merged) {
@@ -4380,6 +4447,11 @@ function daySummaryText() {
       lines.push(`  ${label}　${it.pieces} 件`);
     }
   }
+  const coded = (state.lots || []).filter((l) => l.day === d.date && isWon(l) && lotSubCode(l));
+  if (coded.length) {
+    lines.push('', '小代碼');
+    for (const l of coded) lines.push(`  ${lotLabel(l)}`);
+  }
   if (!d.grouped.length) lines.push('', '今天還沒有標到的貨。');
   if (d.remainPlans.length) {
     lines.push('', '備註還差');
@@ -4420,6 +4492,12 @@ function renderDaySummary() {
         <div class="tot"><b>${d.remainPlans.length}</b><span>備註還差</span></div>
       </div>
       ${groups}
+      ${(() => {
+        const coded = (state.lots || []).filter((l) => l.day === d.date && isWon(l) && lotSubCode(l));
+        if (!coded.length) return '';
+        const rows = coded.map((l) => `<div class="sum-row"><span class="sum-name">${escapeHtml(lotLabel(l))}</span></div>`).join('');
+        return `<section class="sum-sec"><h2>小代碼</h2>${rows}</section>`;
+      })()}
       <section class="sum-sec">
         <h2>備註還差</h2>
         ${remain}
@@ -4800,9 +4878,12 @@ function renderNote() {
           (l) => {
             const on = itemTargetId === l.id ? ' on' : '';
             const item = l.item ? `<span class="itm">${escapeHtml(itemDisplayName(l.item))}</span>` : '';
+            const sub = lotSubCode(l);
+            const subHtml = sub ? `<span class="subc">小碼 ${escapeHtml(sub)}</span>` : '';
             return `<button type="button" class="recent-chip${on}" data-act="select-lot" data-id="${escapeHtml(l.id)}">
               <span>${l.number}</span>
               ${item}
+              ${subHtml}
               <span class="mch">${escapeHtml(shortMachineName(machineNameOf(l)))}</span>
               <span class="del" data-act="del-lot" data-id="${escapeHtml(l.id)}" aria-label="刪除 ${l.number}">×</span>
             </button>`;
@@ -4938,6 +5019,8 @@ function renderLive() {
               const item = l.item
                 ? `<span class="cell-item"><span class="cell-item-name">${escapeHtml(itemCellName(l.item))}</span></span>`
                 : '<span class="cell-item dim"></span>';
+              const sub = lotSubCode(l);
+              const subBadge = `<span class="sub-badge${sub ? ' on' : ''}" data-act="edit-subcode" data-id="${escapeHtml(l.id)}" aria-label="${sub ? '小代碼 ' + sub + '，點一下可改或清除' : '註記小代碼'}">${sub ? '小碼 ' + escapeHtml(sub) : '小碼'}</span>`;
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
                 <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
                   <span class="prio-bar"></span>
@@ -4949,6 +5032,7 @@ function renderLive() {
                     <span class="cell-end">${size}<span class="cell-flags">${movedMark}${badge}${er}</span></span>
                   </span>
                   ${item}
+                  ${subBadge}
                 </span>
               </button>`;
             })
@@ -5277,6 +5361,7 @@ function renderModal() {
           <span class="lot-qty-unit">件</span>
           <button type="button" class="plan-qty-btn" data-act="lot-qty-inc" data-id="${escapeHtml(lot.id)}" aria-label="增加件數">＋</button>
         </div>
+        <button type="button" class="action-btn" data-act="edit-subcode" data-id="${escapeHtml(lot.id)}">${lotSubCode(lot) ? '小代碼 ' + lotSubCode(lot) + '（改或清除）' : '註記小代碼'}</button>
         <div class="prio-toggle sheet-prio" role="group" aria-label="標貨優先">
           ${['must', 'watch', 'skip'].map((p) => {
             const on = lotPriority(lot) === p ? ' on' : '';
@@ -5328,7 +5413,34 @@ function renderModal() {
       </div>
     </div>`;
   }
-  if (modal.type === 'second-sheet') {
+  if (modal.type === 'subcode') {
+    const lot = state.lots.find((l) => l.id === modal.id);
+    if (!lot) return '';
+    const val = String(modal.value || '');
+    const existing = lotSubCode(lot);
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
+    const keypad = keys
+      .map((k) => {
+        if (k === '⌫') return `<button type="button" class="key muted" data-act="sc-back">⌫</button>`;
+        if (k === 'C') return `<button type="button" class="key muted" data-act="sc-clear">清除</button>`;
+        return `<button type="button" class="key" data-act="sc-digit" data-v="${k}">${k}</button>`;
+      })
+      .join('');
+    const erase = existing
+      ? `<button type="button" class="btn" data-act="sc-erase" data-id="${escapeHtml(lot.id)}">清除小代碼</button>`
+      : '';
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet subcode-sheet hand-${thumbHand()}" data-stop="1">
+        <h3>小代碼</h3>
+        <p>${escapeHtml(String(lot.number))}${lot.item ? '　' + escapeHtml(itemDisplayName(lot.item)) : ''}　${escapeHtml(machineNameOf(lot))}</p>
+        <div class="lot-display"><div class="num${val ? '' : ' empty'}">${val ? escapeHtml(val) : '---'}</div></div>
+        <p class="empty-hint">輸入三碼就會存下，不必再按確定。</p>
+        <div class="keypad">${keypad}</div>
+        <div class="sheet-actions">${erase}<button type="button" class="btn" data-act="modal-cancel">取消</button></div>
+      </div>
+    </div>`;
+  }
+    if (modal.type === 'second-sheet') {
     const second = secondLots();
     const allToday = state.lots.filter((l) => l.day === state.day);
     const won = allToday.filter((l) => isWon(l)).length;
@@ -5701,6 +5813,27 @@ function onClick(e) {
         break;
       }
       cycleLotStatus(btn.dataset.id);
+      break;
+    case 'edit-subcode':
+      e.stopPropagation();
+      if (ignoreLotClick || dragState) {
+        ignoreLotClick = false;
+        break;
+      }
+      openSubCodeEditor(btn.dataset.id);
+      break;
+    case 'sc-digit':
+      typeSubCodeDigit(v);
+      buzz(8);
+      break;
+    case 'sc-back':
+      backspaceSubCode();
+      break;
+    case 'sc-clear':
+      clearSubCodeDraft();
+      break;
+    case 'sc-erase':
+      eraseLotSubCode(btn.dataset.id || (modal && modal.id));
       break;
     case 'cycle-prio':
       e.stopPropagation();
@@ -6369,7 +6502,7 @@ function onPressStart(e, pt) {
     }
     return;
   }
-  if (cell && state.tab === 'live' && !showSettings && !modal) {
+  if (cell && state.tab === 'live' && !showSettings && !modal && !(target.closest && target.closest('[data-act="edit-subcode"]'))) {
     const id = cell.dataset.id;
     pressOrigin.cell = cell;
     pressOrigin.id = id;

@@ -1215,6 +1215,12 @@ input:focus, textarea:focus {
   border-color: var(--yellow);
   background: #221f00;
 }
+.recent-chip .subc {
+  color: #7ee0f0;
+  font-size: 11px;
+  font-weight: 800;
+  margin-left: 1px;
+}
 .recent-chip .itm {
   color: var(--yellow);
   font-size: 11px;
@@ -3370,4 +3376,59 @@ button.lot-cell {
 @media (max-height: 640px) {
   .plan-footer .plan-grid-toggle,
   .plan-footer .plan-back-lg { min-height: 52px; }
+}
+
+/* v52: optional 3-digit 小代碼 on 拍賣中 lots */
+.sub-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: 2px;
+  min-height: 20px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #3a3a3a;
+  background: #171717;
+  color: #8a8a8a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.sub-badge.on {
+  background: #0d2a32;
+  color: #7ee0f0;
+  border-color: #2a6a78;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.subcode-sheet .lot-display .num {
+  font-size: clamp(64px, 20vw, 96px);
+  letter-spacing: 0.16em;
+  min-height: 1.05em;
+}
+.subcode-sheet .key {
+  min-height: 72px;
+  font-size: clamp(28px, 8vw, 36px);
+  letter-spacing: 0.04em;
+}
+.subcode-sheet .key.muted { font-size: clamp(16px, 4.4vw, 20px); }
+.subcode-sheet .empty-hint { text-align: center; padding: 4px 0 0; }
+.subcode-sheet .sheet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.subcode-sheet.hand-left .sheet-actions { flex-direction: row; }
+.subcode-sheet.hand-right .sheet-actions { flex-direction: row-reverse; }
+.subcode-sheet .sheet-actions .btn { flex: 1 1 auto; min-height: 52px; font-weight: 800; font-size: 18px; }
+@media (max-width: 360px) {
+  .sub-badge { font-size: 10px; min-height: 18px; padding: 2px 5px; }
+  .sub-badge.on { font-size: 11px; }
+  .subcode-sheet .key { min-height: 64px; }
+}
+@media (max-height: 640px) {
+  .subcode-sheet .lot-display .num { font-size: clamp(52px, 16vw, 72px); }
+  .subcode-sheet .key { min-height: 60px; }
 }

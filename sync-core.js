@@ -5,7 +5,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const LOT_FIELDS = ['number', 'day', 'half', 'machineId', 'item', 'size', 'note', 'status', 'priority', 'secondMarket', 'createdAt', 'qty'];
+  const LOT_FIELDS = ['number', 'day', 'half', 'machineId', 'item', 'size', 'note', 'status', 'priority', 'secondMarket', 'createdAt', 'qty', 'subCode'];
   const PLAN_FIELDS = ['text', 'forDay', 'done', 'doneOn', 'createdOn', 'qty', 'doneBy', 'lockCount'];
 
   function emptySnapshot() {
