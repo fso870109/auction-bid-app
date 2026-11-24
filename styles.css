@@ -1215,11 +1215,11 @@ input:focus, textarea:focus {
   border-color: var(--yellow);
   background: #221f00;
 }
-.recent-chip .subc {
-  color: #7ee0f0;
+.recent-chip .num-sub-wrap { margin-right: 1px; }
+.recent-chip .num-sub {
   font-size: 11px;
-  font-weight: 800;
-  margin-left: 1px;
+  margin-bottom: -1px;
+  color: #7ee0f0;
 }
 .recent-chip .itm {
   color: var(--yellow);
@@ -3378,31 +3378,133 @@ button.lot-cell {
   .plan-footer .plan-back-lg { min-height: 52px; }
 }
 
-/* v52: optional 3-digit 小代碼 on 拍賣中 lots */
-.sub-badge {
+/* v53: 3-digit subcode as a subscript at the bottom-right of the lot number */
+.num-sub-wrap {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  margin-top: 2px;
-  min-height: 20px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  border: 1px solid #3a3a3a;
-  background: #171717;
-  color: #8a8a8a;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  min-width: 0;
+  line-height: 1;
+}
+.num-sub {
+  flex: 0 0 auto;
+  font-weight: 800;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: #7ee0f0;
+  text-decoration: none;
+}
+.lot-cell .num-sub.on {
+  position: absolute;
+  left: auto;
+  right: 0;
+  top: 100%;
+  margin: 0;
+  padding: 2px 0 0 0;
+  z-index: 1;
+  pointer-events: auto;
+}
+.lot-cell .cell-top:has(.has-sub) {
+  align-items: flex-start;
+  padding-bottom: 15px;
+  overflow: visible;
+}
+.lot-cell .cell-main { overflow: visible; }
+.num-sub.empty {
+  position: absolute;
+  right: -8px;
+  bottom: -10px;
+  width: 24px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  color: transparent;
+  z-index: 1;
+}
+.lot-cell.won .num-sub { color: #9af0ff; }
+.lot-cell.moved .num-sub { color: #0d2a32; }
+.lot-cell.lost .num-sub { color: #8fd8e4; text-decoration: none; }
+.lot-cell.passed .num-sub { color: #6ec8d4; }
+.second-item .num-sub,
+.sum-name .num-sub { font-size: 13px; color: #7ee0f0; }
+.action-sheet h3 .num-sub-wrap { margin-right: 4px; }
+.action-sheet h3 .num-sub { font-size: 16px; }
+
+.live-col-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 3px 5px;
+  border-top: 1px solid var(--line);
+  background: #141414;
+  z-index: 2;
+}
+.cur-now {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  min-height: 36px;
+  width: 100%;
+  padding: 2px 4px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+}
+.cur-now-lbl {
   font-size: 11px;
   font-weight: 800;
-  line-height: 1.2;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  line-height: 1;
 }
-.sub-badge.on {
-  background: #0d2a32;
-  color: #7ee0f0;
-  border-color: #2a6a78;
-  font-size: 12px;
+.cur-now-num {
+  font-size: clamp(18px, 5vw, 22px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--yellow);
+  line-height: 1.1;
   letter-spacing: 0.04em;
 }
+.cur-steps {
+  display: flex;
+  gap: 3px;
+}
+.live-col-foot.hand-left .cur-steps { flex-direction: row-reverse; }
+.live-col-foot.hand-right .cur-steps { flex-direction: row; }
+.cur-step {
+  flex: 1 1 0;
+  min-height: 52px;
+  font-size: 26px;
+  font-weight: 900;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+}
+.cur-step:active { background: var(--bg-press); }
+.action-btn.go-here-btn {
+  font-weight: 900;
+  border: 1px solid var(--yellow);
+  background: #221f00;
+  color: var(--yellow);
+}
+.cur-sheet .lot-display .num {
+  font-size: clamp(56px, 18vw, 88px);
+  letter-spacing: 0.16em;
+  min-height: 1.05em;
+}
+.cur-sheet .key { min-height: 64px; font-size: clamp(26px, 7.5vw, 34px); }
+.cur-sheet .key.muted { font-size: clamp(16px, 4.4vw, 20px); }
+.cur-sheet .sheet-actions { display: flex; gap: 8px; margin-top: 12px; }
+.cur-sheet.hand-left .sheet-actions { flex-direction: row; }
+.cur-sheet.hand-right .sheet-actions { flex-direction: row-reverse; }
+.cur-sheet .sheet-actions .btn { flex: 1 1 auto; min-height: 52px; font-weight: 800; font-size: 18px; }
+
 .subcode-sheet .lot-display .num {
   font-size: clamp(64px, 20vw, 96px);
   letter-spacing: 0.16em;
@@ -3424,11 +3526,19 @@ button.lot-cell {
 .subcode-sheet.hand-right .sheet-actions { flex-direction: row-reverse; }
 .subcode-sheet .sheet-actions .btn { flex: 1 1 auto; min-height: 52px; font-weight: 800; font-size: 18px; }
 @media (max-width: 360px) {
-  .sub-badge { font-size: 10px; min-height: 18px; padding: 2px 5px; }
-  .sub-badge.on { font-size: 11px; }
+  .num-sub { font-size: 11px; letter-spacing: 0.02em; }
+  .lot-cell .cell-top:has(.has-sub) { padding-bottom: 14px; }
+  .num-sub-wrap.has-sub .cell-num { letter-spacing: 0.02em; }
+  .cur-now { min-height: 34px; }
+  .cur-now-num { font-size: 17px; letter-spacing: 0.02em; }
+  .cur-step { min-height: 48px; font-size: 24px; }
   .subcode-sheet .key { min-height: 64px; }
 }
 @media (max-height: 640px) {
+  .cur-now { min-height: 32px; }
+  .cur-step { min-height: 46px; }
   .subcode-sheet .lot-display .num { font-size: clamp(52px, 16vw, 72px); }
   .subcode-sheet .key { min-height: 60px; }
+  .cur-sheet .lot-display .num { font-size: clamp(48px, 15vw, 68px); }
+  .cur-sheet .key { min-height: 56px; }
 }

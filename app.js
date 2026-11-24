@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v52';
+const APP_VERSION = 'v53';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2902,6 +2902,14 @@ function undoLast() {
     render();
     return;
   }
+  if (snap.kind === 'progress') {
+    restoreCurrent(snap);
+    saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
   if (snap.kind === 'new-day') {
     state.lots = Array.isArray(snap.lots) ? snap.lots.slice() : [];
     if (snap.day) state.day = snap.day;
@@ -2967,7 +2975,6 @@ function cycleLotStatus(id) {
     label = '改回未拍';
   }
   lot.status = next;
-  if (next === 'won' || next === 'lost') jumpToLot(lot, { force: false });
   rememberBoughtLots(state.lots);
   saveState();
   checkAlerts();
@@ -2982,7 +2989,6 @@ function markFlow(id) {
   const snap = snapshotLot(lot);
   lot.status = 'flow';
   lot.secondMarket = true;
-  jumpToLot(lot, { force: false });
   saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`流標・二市 ${lotLabel(lot)}`));
@@ -3033,7 +3039,6 @@ function markLost(id) {
   if (!lot || lot.status === 'lost') return;
   const snap = snapshotLot(lot);
   lot.status = 'lost';
-  jumpToLot(lot, { force: false });
   rememberBoughtLots(state.lots);
   saveState();
   checkAlerts();
@@ -3147,10 +3152,32 @@ function lotSubCode(lot) {
 function lotLabel(lot) {
   if (!lot) return '';
   const code = lotSubCode(lot);
-  const codeBit = code ? '　小碼 ' + code : '';
+  const codeBit = code ? '　' + code : '';
   if (!lot.item) return String(lot.number) + codeBit;
   const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
   return `${lot.number} ${itemDisplayName(lot.item)}${size}${codeBit}`;
+}
+
+function lotNumHtml(lot, opts) {
+  const sub = lotSubCode(lot);
+  const num = escapeHtml(String(lot && lot.number != null ? lot.number : ''));
+  const numClass = (opts && opts.numClass) || 'ln-num';
+  const edit = !!(opts && opts.edit);
+  const label = sub ? ('小代碼 ' + sub + '，點一下可改或清除') : '註記小代碼';
+  if (!sub && !edit) {
+    return `<span class="${numClass}">${num}</span>`;
+  }
+  const act = edit
+    ? ` data-act="edit-subcode" data-id="${escapeHtml(lot.id)}" aria-label="${escapeHtml(label)}"`
+    : '';
+  return `<span class="num-sub-wrap${sub ? ' has-sub' : ''}"><span class="${numClass}">${num}</span><span class="num-sub${sub ? ' on' : ' empty'}"${act}>${sub ? escapeHtml(sub) : ''}</span></span>`;
+}
+
+function lotLabelHtml(lot, opts) {
+  if (!lot) return '';
+  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + escapeHtml(lot.size) : '';
+  const item = lot.item ? ` <span class="ln-item">${escapeHtml(itemDisplayName(lot.item))}${size}</span>` : '';
+  return `${lotNumHtml(lot, opts)}${item}`;
 }
 
 function openSubCodeEditor(id) {
@@ -3199,7 +3226,7 @@ function setLotSubCode(id, code) {
   const snap = snapshotLot(lot);
   lot.subCode = next;
   saveState();
-  offerUndo(snap, next ? `${lot.number}　小碼 ${next}` : `${lot.number}　已清除小代碼`);
+  offerUndo(snap, next ? `${lot.number}　${next}` : `${lot.number}　已清除`);
   modal = null;
   buzz(26);
   render();
@@ -4025,7 +4052,6 @@ function setLotStatus(id, status) {
   } else {
     lot.status = status;
     if (status === 'won' || status === 'moved') lot.secondMarket = false;
-    if (status === 'won' || status === 'lost') jumpToLot(lot, { force: false });
   }
   rememberBoughtLots(state.lots);
   saveState();
@@ -4049,8 +4075,9 @@ function jumpToLot(lot, { force } = {}) {
 function goToHere(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
+  const snap = snapshotLot(lot);
   jumpToLot(lot, { force: true });
-  toast(`${lot.number}　已設為打到這裡`);
+  offerUndo(snap, `${lot.number}　已設為現在進度`);
   render();
 }
 
@@ -4097,10 +4124,20 @@ function setCurrent(machineId, value) {
   const half = state.currentHalf;
   if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
   const n = parseInt(value, 10);
-  state.currentNumbers[half][machineId] = Number.isFinite(n) ? n : null;
+  const next = Number.isFinite(n) ? n : null;
+  const prev = currentOf(machineId, half);
   editCurrent = null;
+  if (next === prev || (next == null && prev == null)) {
+    modal = null;
+    render();
+    return;
+  }
+  const snap = { kind: 'progress', half, machineId, current: prev };
+  state.currentNumbers[half][machineId] = next;
+  modal = null;
   saveState();
   checkAlerts();
+  offerUndo(snap, next == null ? '已清除進度' : `${next}　已設為現在進度`);
   render();
 }
 
@@ -4449,7 +4486,7 @@ function daySummaryText() {
   }
   const coded = (state.lots || []).filter((l) => l.day === d.date && isWon(l) && lotSubCode(l));
   if (coded.length) {
-    lines.push('', '小代碼');
+    lines.push('');
     for (const l of coded) lines.push(`  ${lotLabel(l)}`);
   }
   if (!d.grouped.length) lines.push('', '今天還沒有標到的貨。');
@@ -4495,8 +4532,8 @@ function renderDaySummary() {
       ${(() => {
         const coded = (state.lots || []).filter((l) => l.day === d.date && isWon(l) && lotSubCode(l));
         if (!coded.length) return '';
-        const rows = coded.map((l) => `<div class="sum-row"><span class="sum-name">${escapeHtml(lotLabel(l))}</span></div>`).join('');
-        return `<section class="sum-sec"><h2>小代碼</h2>${rows}</section>`;
+        const rows = coded.map((l) => `<div class="sum-row"><span class="sum-name">${lotLabelHtml(l)}</span></div>`).join('');
+        return `<section class="sum-sec">${rows}</section>`;
       })()}
       <section class="sum-sec">
         <h2>備註還差</h2>
@@ -4878,12 +4915,9 @@ function renderNote() {
           (l) => {
             const on = itemTargetId === l.id ? ' on' : '';
             const item = l.item ? `<span class="itm">${escapeHtml(itemDisplayName(l.item))}</span>` : '';
-            const sub = lotSubCode(l);
-            const subHtml = sub ? `<span class="subc">小碼 ${escapeHtml(sub)}</span>` : '';
             return `<button type="button" class="recent-chip${on}" data-act="select-lot" data-id="${escapeHtml(l.id)}">
-              <span>${l.number}</span>
+              ${lotNumHtml(l, { numClass: 'ln-num' })}
               ${item}
-              ${subHtml}
               <span class="mch">${escapeHtml(shortMachineName(machineNameOf(l)))}</span>
               <span class="del" data-act="del-lot" data-id="${escapeHtml(l.id)}" aria-label="刪除 ${l.number}">×</span>
             </button>`;
@@ -4983,14 +5017,16 @@ function renderLive() {
       const next = upcoming[0] || null;
       const title = columnTitle(m, half);
       const curLabel = cur == null ? '—' : String(cur);
-      const pop = progressPopId === m.id
-        ? `<div class="prog-pop" data-stop="1">
-            <button type="button" class="step-btn" data-act="bump" data-id="${m.id}" data-d="-1">−</button>
-            <span class="prog-val">${curLabel}</span>
-            <button type="button" class="step-btn" data-act="bump" data-id="${m.id}" data-d="1">＋</button>
-            <button type="button" class="linkish" data-act="edit-cur" data-id="${m.id}">輸入</button>
-          </div>`
-        : '';
+      const foot = `<div class="live-col-foot hand-${thumbHand()}" data-stop="1">
+            <button type="button" class="cur-now" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
+              <span class="cur-now-lbl">現在</span>
+              <span class="cur-now-num">${curLabel}</span>
+            </button>
+            <div class="cur-steps">
+              <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
+              <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
+            </div>
+          </div>`;
       const cells = lots.length
         ? lots
             .map((l) => {
@@ -5019,8 +5055,6 @@ function renderLive() {
               const item = l.item
                 ? `<span class="cell-item"><span class="cell-item-name">${escapeHtml(itemCellName(l.item))}</span></span>`
                 : '<span class="cell-item dim"></span>';
-              const sub = lotSubCode(l);
-              const subBadge = `<span class="sub-badge${sub ? ' on' : ''}" data-act="edit-subcode" data-id="${escapeHtml(l.id)}" aria-label="${sub ? '小代碼 ' + sub + '，點一下可改或清除' : '註記小代碼'}">${sub ? '小碼 ' + escapeHtml(sub) : '小碼'}</span>`;
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
                 <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
                   <span class="prio-bar"></span>
@@ -5028,11 +5062,10 @@ function renderLive() {
                 </span>
                 <span class="cell-main">
                   <span class="cell-top">
-                    <span class="cell-num">${l.number}</span>
+                    ${lotNumHtml(l, { edit: true, numClass: 'cell-num' })}
                     <span class="cell-end">${size}<span class="cell-flags">${movedMark}${badge}${er}</span></span>
                   </span>
                   ${item}
-                  ${subBadge}
                 </span>
               </button>`;
             })
@@ -5041,10 +5074,10 @@ function renderLive() {
       return `<section class="live-col" data-id="${m.id}">
         <div class="live-col-head">
           <div class="col-name">${escapeHtml(title)}</div>
-          <button type="button" class="live-cur" data-act="toggle-progress" data-id="${m.id}">${curLabel}</button>
-          ${pop}
+          <button type="button" class="live-cur" data-act="edit-cur" data-id="${m.id}">${curLabel}</button>
         </div>
         <div class="live-col-list" data-id="${m.id}">${cells}</div>
+        ${foot}
       </section>`;
     })
     .join('');
@@ -5301,6 +5334,7 @@ function renderModal() {
   }
   if (modal.type === 'edit-cur' || editCurrent) {
     const ed = editCurrent;
+    if (!ed) return '';
     const m = machineById(ed.machineId);
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
     const keypad = keys
@@ -5311,14 +5345,14 @@ function renderModal() {
       })
       .join('');
     return `<div class="overlay" data-act="ec-cancel">
-      <div class="sheet" data-stop="1">
-        <h3>現在打到哪一號？</h3>
-        <p>${escapeHtml(m?.name || '')}</p>
+      <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
+        <h3>現在拍到哪一號？</h3>
+        <p>${escapeHtml(m?.name || '')}　自己設定進度，不會因為點貨而自動往前。</p>
         <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
         <div class="keypad">${keypad}</div>
         <div class="sheet-actions">
-          <button type="button" class="btn" data-act="ec-cancel">取消</button>
           <button type="button" class="btn primary" data-act="ec-ok">確定</button>
+          <button type="button" class="btn" data-act="ec-cancel">取消</button>
         </div>
       </div>
     </div>`;
@@ -5352,7 +5386,7 @@ function renderModal() {
     const qty = lotQty(lot);
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet action-sheet" data-stop="1">
-        <h3>${escapeHtml(lotLabel(lot))}</h3>
+        <h3>${lotLabelHtml(lot)}</h3>
         <p>${escapeHtml(machineNameOf(lot))}${lot.item ? '　' + escapeHtml(itemDisplayName(lot.item)) : ''}</p>
         <div class="lot-qty-row" aria-label="件數">
           <span class="lot-qty-label">件數</span>
@@ -5361,7 +5395,7 @@ function renderModal() {
           <span class="lot-qty-unit">件</span>
           <button type="button" class="plan-qty-btn" data-act="lot-qty-inc" data-id="${escapeHtml(lot.id)}" aria-label="增加件數">＋</button>
         </div>
-        <button type="button" class="action-btn" data-act="edit-subcode" data-id="${escapeHtml(lot.id)}">${lotSubCode(lot) ? '小代碼 ' + lotSubCode(lot) + '（改或清除）' : '註記小代碼'}</button>
+        <button type="button" class="action-btn" data-act="edit-subcode" data-id="${escapeHtml(lot.id)}">${lotSubCode(lot) ? lotSubCode(lot) + '（改或清除）' : '註記小代碼'}</button>
         <div class="prio-toggle sheet-prio" role="group" aria-label="標貨優先">
           ${['must', 'watch', 'skip'].map((p) => {
             const on = lotPriority(lot) === p ? ' on' : '';
@@ -5379,7 +5413,7 @@ function renderModal() {
             `<button type="button" class="action-btn" data-act="move-lot" data-id="${escapeHtml(lot.id)}" data-v="${escapeHtml(m.id)}">移到${escapeHtml(columnTitle(m, lot.half || state.currentHalf))}</button>`
           ).join('')}
         </div>
-        <button type="button" class="action-btn" data-act="go-here" data-id="${escapeHtml(lot.id)}">打到這裡</button>
+        <button type="button" class="action-btn go-here-btn" data-act="go-here" data-id="${escapeHtml(lot.id)}">設為現在進度</button>
         ${secondBtn}
         <button type="button" class="action-btn danger" data-act="del-lot-live" data-id="${escapeHtml(lot.id)}">刪除</button>
         <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="modal-cancel">取消</button>
@@ -5450,7 +5484,7 @@ function renderModal() {
           const tag = l.status === 'flow' ? '流標・二市' : (l.status === 'lost' ? '沒標到轉入' : '過號轉入');
           return `<div class="second-item">
             <div>
-              <div class="ln">${escapeHtml(lotLabel(l))}</div>
+              <div class="ln">${lotLabelHtml(l)}</div>
               <div class="meta">${escapeHtml(machineNameOf(l))}　${escapeHtml(tag)}</div>
             </div>
             <button type="button" class="btn-here" data-act="from-second" data-id="${escapeHtml(l.id)}">移回</button>
