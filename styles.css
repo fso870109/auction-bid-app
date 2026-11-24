@@ -3470,13 +3470,17 @@ button.lot-cell {
   z-index: 2;
 }
 .cur-now {
-  display: flex;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: auto auto;
   justify-content: center;
-  gap: 5px;
+  align-items: center;
+  column-gap: 5px;
+  row-gap: 2px;
   min-height: 36px;
   width: 100%;
-  padding: 2px 4px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 3px 4px;
   border-radius: 8px;
   background: var(--bg-elev);
   border: 1px solid var(--line);
@@ -3487,6 +3491,7 @@ button.lot-cell {
   color: var(--muted);
   letter-spacing: 0.04em;
   line-height: 1;
+  white-space: nowrap;
 }
 .cur-now-num {
   font-size: clamp(18px, 5vw, 22px);
@@ -3494,8 +3499,49 @@ button.lot-cell {
   font-variant-numeric: tabular-nums;
   color: var(--yellow);
   line-height: 1.1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
+.auto-flag {
+  grid-column: 1 / -1;
+  justify-self: center;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #0d2a18;
+  color: #5ee08a;
+  border: 1px solid #1e5a28;
+}
+.auto-flag.paused {
+  background: #2a2a2a;
+  color: #c8c8c8;
+  border-color: #4a4a4a;
+}
+.auto-flag.ended {
+  background: #2a2208;
+  color: #ffcc33;
+  border-color: #6a5a10;
+}
+.cur-pause {
+  width: 100%;
+  min-height: 52px;
+  font-size: 20px;
+  font-weight: 900;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.cur-pause.resume {
+  background: var(--yellow);
+  color: var(--yellow-text);
+  border-color: var(--yellow);
+}
+.cur-pause:active { background: var(--bg-press); }
+.cur-pause.resume:active { filter: brightness(0.92); }
 .cur-steps {
   display: flex;
   gap: 3px;
@@ -3558,11 +3604,14 @@ button.lot-cell {
   .moved-mark { font-size: 10px; padding: 1px 3px; }
   .cur-now { min-height: 34px; }
   .cur-now-num { font-size: 17px; letter-spacing: 0.02em; }
+  .auto-flag { font-size: 10px; padding: 3px 5px; }
+  .cur-pause { min-height: 48px; font-size: 18px; }
   .cur-step { min-height: 48px; font-size: 24px; }
   .subcode-sheet .key { min-height: 64px; }
 }
 @media (max-height: 640px) {
   .cur-now { min-height: 32px; }
+  .cur-pause { min-height: 46px; }
   .cur-step { min-height: 46px; }
   .subcode-sheet .lot-display .num { font-size: clamp(52px, 16vw, 72px); }
   .subcode-sheet .key { min-height: 60px; }

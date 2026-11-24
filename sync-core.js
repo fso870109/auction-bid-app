@@ -264,6 +264,8 @@
     kv.customItemsByHalf = state.customItemsByHalf;
     kv.boughtHistory = state.boughtHistory;
     kv.currentNumbers = state.currentNumbers;
+    kv.progressAnchors = state.progressAnchors;
+    kv.autoAdvance = state.autoAdvance !== false;
     return kv;
   }
 
@@ -295,6 +297,10 @@
     }
     const nums = val('currentNumbers');
     if (nums && typeof nums === 'object') state.currentNumbers = nums;
+    const anchors = val('progressAnchors');
+    if (anchors && typeof anchors === 'object') state.progressAnchors = anchors;
+    const autoAdv = val('autoAdvance');
+    if (typeof autoAdv === 'boolean') state.autoAdvance = autoAdv;
   }
 
   function snapshotToOps(snap) {

@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v54';
+const APP_VERSION = 'v55';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2412,6 +2412,17 @@ function defaultCurrents(machines) {
   return out;
 }
 
+function defaultAnchors(machines) {
+  const out = { fruit: {}, morning: {}, afternoon: {} };
+  for (const half of HALVES) {
+    out[half] = {};
+    for (const m of machines[half] || []) {
+      out[half][m.id] = null;
+    }
+  }
+  return out;
+}
+
 function defaultState() {
   const machines = structuredClone(DEFAULT_MACHINES);
   return {
@@ -2426,6 +2437,8 @@ function defaultState() {
     tab: 'note',
     machines,
     currentNumbers: defaultCurrents(machines),
+    progressAnchors: defaultAnchors(machines),
+    autoAdvance: true,
     lots: [],
     day: todayStr(),
     alerted: {},
@@ -2473,6 +2486,7 @@ function loadState() {
     const merged = { ...base, ...saved };
     merged.machines = {};
     merged.currentNumbers = {};
+    merged.progressAnchors = {};
     for (const half of HALVES) {
       const savedMachines = saved.machines && Array.isArray(saved.machines[half]) ? saved.machines[half] : null;
       merged.machines[half] = savedMachines && savedMachines.length
@@ -2488,7 +2502,12 @@ function loadState() {
         ...(base.currentNumbers[half] || {}),
         ...((saved.currentNumbers && saved.currentNumbers[half]) || {})
       };
+      merged.progressAnchors[half] = {
+        ...(base.progressAnchors[half] || {}),
+        ...((saved.progressAnchors && saved.progressAnchors[half]) || {})
+      };
     }
+    merged.autoAdvance = merged.autoAdvance !== false;
     if (!isHalf(merged.currentHalf)) merged.currentHalf = 'fruit';
     {
       const ch = Number(merged.dayCutoffHour);
@@ -2537,6 +2556,7 @@ function loadState() {
     }
     if (!merged.progressV2) {
       merged.currentNumbers = defaultCurrents(merged.machines);
+      merged.progressAnchors = defaultAnchors(merged.machines);
       merged.progressV2 = true;
     }
     merged.planItems = normalizePlanItems(merged.planItems);
@@ -2662,6 +2682,9 @@ function addSessionMachine(half) {
   list.push({ id, name, ranges: [] });
   if (!state.currentNumbers[h]) state.currentNumbers[h] = {};
   state.currentNumbers[h][id] = null;
+  if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
+  if (!state.progressAnchors[h]) state.progressAnchors[h] = {};
+  state.progressAnchors[h][id] = null;
   saveState();
   toast(`已加上${name}`);
   render();
@@ -2682,6 +2705,7 @@ function removeSessionMachine(half, machineId) {
     if (lot.half === h && lot.machineId === gone.id) lot.machineId = keep.id;
   }
   if (state.currentNumbers[h]) delete state.currentNumbers[h][gone.id];
+  if (state.progressAnchors && state.progressAnchors[h]) delete state.progressAnchors[h][gone.id];
   saveState();
   toast(`已移除${gone.name}`);
   render();
@@ -2907,6 +2931,20 @@ function restoreCurrent(snap) {
   const half = snap.half || state.currentHalf;
   if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
   state.currentNumbers[half][snap.machineId] = snap.current;
+  if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
+  if (!state.progressAnchors[half]) state.progressAnchors[half] = {};
+  if (Object.prototype.hasOwnProperty.call(snap, 'anchor')) {
+    state.progressAnchors[half][snap.machineId] = snap.anchor ? { ...snap.anchor } : null;
+  } else if (snap.current == null || snap.current === '') {
+    state.progressAnchors[half][snap.machineId] = null;
+  } else {
+    state.progressAnchors[half][snap.machineId] = {
+      number: Number(snap.current),
+      at: nowDate().getTime(),
+      paused: true
+    };
+  }
+  syncProgressTimer();
 }
 
 function offerUndo(snap, msg) {
@@ -2943,6 +2981,10 @@ function undoLast() {
     if (snap.currentNumbers && typeof snap.currentNumbers === 'object') {
       state.currentNumbers = snap.currentNumbers;
     }
+    if (snap.progressAnchors && typeof snap.progressAnchors === 'object') {
+      state.progressAnchors = snap.progressAnchors;
+    }
+    if (typeof snap.autoAdvance === 'boolean') state.autoAdvance = snap.autoAdvance;
     state.alerted = snap.alerted && typeof snap.alerted === 'object' ? snap.alerted : {};
     if (Array.isArray(snap.boughtHistory)) state.boughtHistory = snap.boughtHistory;
     if (snap.currentHalf) state.currentHalf = snap.currentHalf;
@@ -3871,10 +3913,237 @@ function openTypeItem(half, lotId) {
   render();
 }
 
+function autoAdvanceOn() {
+  return !state || state.autoAdvance !== false;
+}
+
+function getAnchor(machineId, half) {
+  const h = half || state.currentHalf;
+  const a = state && state.progressAnchors && state.progressAnchors[h] && state.progressAnchors[h][machineId];
+  if (!a || typeof a !== 'object') return null;
+  const number = a.number == null || a.number === '' ? null : Number(a.number);
+  const at = Number(a.at);
+  return {
+    number: Number.isFinite(number) ? number : null,
+    at: Number.isFinite(at) ? at : null,
+    paused: !!a.paused,
+    ended: !!a.ended
+  };
+}
+
+function writeAnchor(machineId, half, anchor) {
+  const h = half || state.currentHalf;
+  if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
+  if (!state.progressAnchors[h]) state.progressAnchors[h] = {};
+  if (!anchor) {
+    state.progressAnchors[h][machineId] = null;
+    return;
+  }
+  state.progressAnchors[h][machineId] = {
+    number: anchor.number,
+    at: anchor.at,
+    paused: !!anchor.paused,
+    ended: !!anchor.ended
+  };
+}
+
+function progressCap(machineId, half) {
+  const h = half || state.currentHalf;
+  let cap = null;
+  const m = typeof machineById === 'function' ? machineById(machineId, h) : null;
+  for (const r of (m && m.ranges) || []) {
+    if (r && r.end != null && r.end !== '') {
+      const n = Number(r.end);
+      if (Number.isFinite(n)) cap = cap == null ? n : Math.max(cap, n);
+    }
+  }
+  const lots = typeof columnLots === 'function' ? columnLots(machineId, h) : [];
+  for (const l of lots || []) {
+    const n = Number(l && l.number);
+    if (Number.isFinite(n)) cap = cap == null ? n : Math.max(cap, n);
+  }
+  if (cap == null) cap = 9999;
+  return cap;
+}
+
 function currentOf(machineId, half) {
   const h = half || state.currentHalf;
-  const v = state.currentNumbers[h]?.[machineId];
-  return v == null || v === '' ? null : Number(v);
+  const stored = state && state.currentNumbers && state.currentNumbers[h] && state.currentNumbers[h][machineId];
+  const storedN = stored == null || stored === '' ? null : Number(stored);
+  const a = getAnchor(machineId, h);
+  if (autoAdvanceOn() && a && !a.paused && a.number != null && a.at != null) {
+    const elapsed = Math.max(0, nowDate().getTime() - a.at);
+    const rate = lotsPerMin();
+    const advanced = rate > 0 ? Math.floor((elapsed * rate) / 60000) : 0;
+    let n = a.number + advanced;
+    const cap = progressCap(machineId, h);
+    if (cap != null && n > cap) n = cap;
+    return n;
+  }
+  if (a && a.number != null) return a.number;
+  return Number.isFinite(storedN) ? storedN : null;
+}
+
+function isAutoRunning(machineId, half) {
+  const h = half || state.currentHalf;
+  if (!autoAdvanceOn()) return false;
+  const a = getAnchor(machineId, h);
+  if (!a || a.paused || a.ended || a.number == null || a.at == null) return false;
+  const cap = progressCap(machineId, h);
+  const cur = currentOf(machineId, h);
+  if (cap != null && cur != null && cur >= cap) return false;
+  return true;
+}
+
+function snapshotProgress(machineId, half) {
+  const h = half || state.currentHalf;
+  const a = getAnchor(machineId, h);
+  return {
+    kind: 'progress',
+    half: h,
+    machineId,
+    current: currentOf(machineId, h),
+    anchor: a ? { ...a } : null
+  };
+}
+
+function setProgress(machineId, next, half) {
+  const h = half || state.currentHalf;
+  if (!state.currentNumbers[h]) state.currentNumbers[h] = {};
+  if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
+  if (!state.progressAnchors[h]) state.progressAnchors[h] = {};
+  if (next == null || next === '') {
+    state.currentNumbers[h][machineId] = null;
+    writeAnchor(machineId, h, null);
+  } else {
+    let n = Number(next);
+    if (!Number.isFinite(n)) {
+      state.currentNumbers[h][machineId] = null;
+      writeAnchor(machineId, h, null);
+    } else {
+      n = Math.max(0, Math.round(n));
+      const cap = progressCap(machineId, h);
+      const atCap = cap != null && n >= cap;
+      if (atCap) n = cap;
+      state.currentNumbers[h][machineId] = n;
+      writeAnchor(machineId, h, {
+        number: n,
+        at: nowDate().getTime(),
+        paused: !autoAdvanceOn() || atCap,
+        ended: atCap
+      });
+    }
+  }
+  saveState();
+  checkAlerts();
+  syncProgressTimer();
+}
+
+function pauseProgress(machineId, half) {
+  const h = half || state.currentHalf;
+  if (!isAutoRunning(machineId, h)) return;
+  const snap = snapshotProgress(machineId, h);
+  const cur = currentOf(machineId, h);
+  if (!state.currentNumbers[h]) state.currentNumbers[h] = {};
+  state.currentNumbers[h][machineId] = cur;
+  writeAnchor(machineId, h, { number: cur, at: nowDate().getTime(), paused: true });
+  saveState();
+  syncProgressTimer();
+  offerUndo(snap, `${cur}　已暫停自動`);
+  render();
+}
+
+function resumeProgress(machineId, half) {
+  const h = half || state.currentHalf;
+  const cur = currentOf(machineId, h);
+  if (cur == null) return;
+  const cap = progressCap(machineId, h);
+  if (cap != null && cur >= cap) {
+    toast('已經到這台的最後一號');
+    return;
+  }
+  const snap = snapshotProgress(machineId, h);
+  if (!state.currentNumbers[h]) state.currentNumbers[h] = {};
+  state.currentNumbers[h][machineId] = cur;
+  writeAnchor(machineId, h, { number: cur, at: nowDate().getTime(), paused: false, ended: false });
+  saveState();
+  syncProgressTimer();
+  offerUndo(snap, `${cur}　繼續自動`);
+  render();
+}
+
+function reanchorRunningAtNewRate() {
+  if (!state || !autoAdvanceOn()) return;
+  let changed = false;
+  for (const half of HALVES) {
+    for (const m of state.machines[half] || []) {
+      if (!isAutoRunning(m.id, half)) continue;
+      const cur = currentOf(m.id, half);
+      if (cur == null) continue;
+      if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+      state.currentNumbers[half][m.id] = cur;
+      writeAnchor(m.id, half, { number: cur, at: nowDate().getTime(), paused: false, ended: false });
+      changed = true;
+    }
+  }
+  if (changed) saveState();
+}
+
+let progressTimer = null;
+let lastProgressSig = '';
+
+function anyAutoRunning() {
+  if (!state || !autoAdvanceOn()) return false;
+  for (const half of HALVES) {
+    for (const m of state.machines[half] || []) {
+      if (isAutoRunning(m.id, half)) return true;
+    }
+  }
+  return false;
+}
+
+function progressSignature() {
+  if (!state) return '';
+  const half = state.currentHalf;
+  return (state.machines[half] || []).map((m) => m.id + ':' + currentOf(m.id, half)).join('|');
+}
+
+function tickAutoProgress() {
+  if (!state) return;
+  let hitCap = false;
+  for (const half of HALVES) {
+    if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+    for (const m of state.machines[half] || []) {
+      if (!isAutoRunning(m.id, half)) continue;
+      const cur = currentOf(m.id, half);
+      const cap = progressCap(m.id, half);
+      if (cap != null && cur != null && cur >= cap) {
+        state.currentNumbers[half][m.id] = cap;
+        writeAnchor(m.id, half, { number: cap, at: nowDate().getTime(), paused: true, ended: true });
+        hitCap = true;
+      }
+    }
+  }
+  if (hitCap) {
+    saveState();
+    syncProgressTimer();
+  }
+  const sig = progressSignature();
+  if (sig !== lastProgressSig) {
+    lastProgressSig = sig;
+    checkAlerts();
+    if (typeof render === 'function') render();
+  }
+}
+
+function syncProgressTimer() {
+  const need = anyAutoRunning();
+  if (need && !progressTimer) {
+    progressTimer = setInterval(tickAutoProgress, 1000);
+  } else if (!need && progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
 }
 
 function buzz(pattern) {
@@ -3887,6 +4156,7 @@ function buzz(pattern) {
 }
 
 function toast(msg, ms, action) {
+  if (!action && toastAction && toastMsg) return;
   toastMsg = msg;
   toastAction = action || null;
   const el = document.getElementById('toast');
@@ -4091,18 +4361,15 @@ function setLotStatus(id, status) {
 function jumpToLot(lot, { force } = {}) {
   if (!lot) return;
   const half = lot.half || state.currentHalf;
-  if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
-  const cur = state.currentNumbers[half][lot.machineId];
+  const cur = currentOf(lot.machineId, half);
   if (!force && cur != null && lot.number < cur) return;
-  state.currentNumbers[half][lot.machineId] = lot.number;
-  saveState();
-  checkAlerts();
+  setProgress(lot.machineId, lot.number, half);
 }
 
 function goToHere(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
-  const snap = snapshotLot(lot);
+  const snap = snapshotProgress(lot.machineId, lot.half);
   jumpToLot(lot, { force: true });
   offerUndo(snap, `${lot.number}　已設為現在進度`);
   render();
@@ -4133,37 +4400,32 @@ function returnFromSecond(id) {
 /* ---------- 追蹤 ---------- */
 function bumpCurrent(machineId, delta) {
   const half = state.currentHalf;
-  if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
-  let cur = currentOf(machineId);
+  let cur = currentOf(machineId, half);
   if (cur == null) {
     const m = machineById(machineId, half);
     const start = (m?.ranges || []).find((r) => r.start != null)?.start;
     cur = start ?? 0;
   }
   const next = Math.max(0, cur + delta);
-  state.currentNumbers[half][machineId] = next;
-  saveState();
-  checkAlerts();
+  const snap = snapshotProgress(machineId, half);
+  setProgress(machineId, next, half);
+  offerUndo(snap, `${next}　已設為現在進度`);
   render();
 }
 
 function setCurrent(machineId, value) {
   const half = state.currentHalf;
-  if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
   const n = parseInt(value, 10);
   const next = Number.isFinite(n) ? n : null;
   const prev = currentOf(machineId, half);
   editCurrent = null;
-  if (next === prev || (next == null && prev == null)) {
-    modal = null;
+  modal = null;
+  if (next == null && prev == null) {
     render();
     return;
   }
-  const snap = { kind: 'progress', half, machineId, current: prev };
-  state.currentNumbers[half][machineId] = next;
-  modal = null;
-  saveState();
-  checkAlerts();
+  const snap = snapshotProgress(machineId, half);
+  setProgress(machineId, next, half);
   offerUndo(snap, next == null ? '已清除進度' : `${next}　已設為現在進度`);
   render();
 }
@@ -4388,6 +4650,8 @@ function startNewDay(confirmed, opts) {
     lots: (state.lots || []).slice(),
     day: state.day,
     currentNumbers: structuredClone(state.currentNumbers),
+    progressAnchors: structuredClone(state.progressAnchors),
+    autoAdvance: state.autoAdvance,
     alerted: { ...(state.alerted || {}) },
     boughtHistory: structuredClone(state.boughtHistory || []),
     currentHalf: state.currentHalf,
@@ -4398,6 +4662,8 @@ function startNewDay(confirmed, opts) {
   state.alerted = {};
   state.day = auctionDay;
   state.currentNumbers = defaultCurrents(state.machines);
+  state.progressAnchors = defaultAnchors(state.machines);
+  if (typeof syncProgressTimer === 'function') syncProgressTimer();
   state.tab = 'note';
   state.currentHalf = 'fruit';
   state.skipAutoDay = '';
@@ -5044,11 +5310,29 @@ function renderLive() {
       const next = upcoming[0] || null;
       const title = columnTitle(m, half);
       const curLabel = cur == null ? '—' : String(cur);
+      const running = isAutoRunning(m.id, half);
+      const anchor = getAnchor(m.id, half);
+      const ended = !!(anchor && anchor.ended) || (cur != null && progressCap(m.id, half) != null && cur >= progressCap(m.id, half) && autoAdvanceOn());
+      let autoBit = '';
+      let pauseBtn = '';
+      if (autoAdvanceOn() && cur != null) {
+        if (running) {
+          autoBit = '<span class="auto-flag on">自動</span>';
+          pauseBtn = `<button type="button" class="cur-pause" data-act="pause-progress" data-id="${m.id}">暫停</button>`;
+        } else if (ended) {
+          autoBit = '<span class="auto-flag ended">到尾</span>';
+        } else {
+          autoBit = '<span class="auto-flag paused">暫停</span>';
+          pauseBtn = `<button type="button" class="cur-pause resume" data-act="resume-progress" data-id="${m.id}">繼續</button>`;
+        }
+      }
       const foot = `<div class="live-col-foot hand-${thumbHand()}" data-stop="1">
             <button type="button" class="cur-now" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
               <span class="cur-now-lbl">現在</span>
               <span class="cur-now-num">${curLabel}</span>
+              ${autoBit}
             </button>
+            ${pauseBtn}
             <div class="cur-steps">
               <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
               <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
@@ -5230,7 +5514,11 @@ function renderSettings() {
         </select>
       </div>
       <div class="switch-row">
-        <div><div class="lbl">拍賣速度</div><div class="sub">用來估算還要幾分鐘輪到你的貨。預設每分鐘約 4 號。進度仍要自己用「現在」設定，不會自動往前。</div></div>
+        <div><div class="lbl">自動前跳</div><div class="sub">用「現在」設定後，會依拍賣速度自動往前跳。可在每一台按暫停。只會移動現在進度，不會自動把貨標成標到或沒標到。</div></div>
+        <button type="button" class="toggle${autoAdvanceOn() ? ' on' : ''}" data-act="toggle-auto-advance"><i></i></button>
+      </div>
+      <div class="switch-row">
+        <div><div class="lbl">拍賣速度</div><div class="sub">每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。預設每分鐘 4 號。</div></div>
         <select class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
           ${[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => {
             const sel = lotsPerMin() === n ? ' selected' : '';
@@ -5700,6 +5988,31 @@ function onClick(e) {
       state.autoSave4 = !state.autoSave4;
       saveState();
       render();
+      break;
+    case 'toggle-auto-advance':
+      state.autoAdvance = !autoAdvanceOn();
+      if (!state.autoAdvance) {
+        for (const half of HALVES) {
+          for (const m of state.machines[half] || []) {
+            const a = getAnchor(m.id, half);
+            if (a && !a.paused && a.number != null && a.at != null) {
+              const cur = currentOf(m.id, half);
+              if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+              state.currentNumbers[half][m.id] = cur;
+              writeAnchor(m.id, half, { number: cur, at: nowDate().getTime(), paused: true, ended: !!a.ended });
+            }
+          }
+        }
+      }
+      saveState();
+      syncProgressTimer();
+      render();
+      break;
+    case 'pause-progress':
+      pauseProgress(btn.dataset.id);
+      break;
+    case 'resume-progress':
+      resumeProgress(btn.dataset.id);
       break;
     case 'toggle-note':
     case 'open-summary':
@@ -6183,6 +6496,7 @@ function onInput(e) {
   if (act === 'lots-per-min') {
     const n = Number(el.value);
     state.lotsPerMin = (Number.isFinite(n) && n >= 1 && n <= 12) ? Math.round(n * 10) / 10 : DEFAULT_LOTS_PER_MIN;
+    reanchorRunningAtNewRate();
     saveState();
     render();
     return;
@@ -6259,6 +6573,7 @@ function onVisibility() {
     if (typeof checkNewDay === 'function' && state && !isSetupNeeded()) {
       maybeRollAuctionDay();
     }
+    if (typeof tickAutoProgress === 'function') tickAutoProgress();
   }
   if (document.visibilityState === 'visible' && paddleOpen) {
     if (orientationLocked) lockLandscape();
@@ -6854,6 +7169,10 @@ if (typeof window !== 'undefined') {
   window.__checkNewDay = checkNewDay;
   window.__startNewDay = startNewDay;
   window.__maybeRollAuctionDay = maybeRollAuctionDay;
+  window.__tickAutoProgress = tickAutoProgress;
+  window.__currentOf = (id, half) => currentOf(id, half);
+  window.__isAutoRunning = (id, half) => isAutoRunning(id, half);
+  window.__getAnchor = (id, half) => getAnchor(id, half);
   window.__defaultPlanAddTarget = defaultPlanAddTarget;
   window.__resolvePlanName = resolvePlanName;
   window.__planLotMatchScore = planLotMatchScore;
@@ -6882,6 +7201,7 @@ function init() {
   registerSW();
   if (typeof initSync === 'function') initSync();
   render();
+  syncProgressTimer();
   syncWakeLock();
 }
 
