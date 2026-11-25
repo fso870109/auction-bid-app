@@ -1576,7 +1576,7 @@ input:focus, textarea:focus {
 }
 .custom-chip span { flex: 1; }
 
-/* 舉牌：自然比例、粗體加描邊，橫向鎖定或 CSS 旋轉 */
+/* 舉牌：自然比例、粗體加描邊，數字約佔畫面高度七成五 */
 #paddle {
   display: block;
   overflow: hidden;
@@ -1599,18 +1599,18 @@ input:focus, textarea:focus {
 }
 #paddle-bar {
   top: 0;
-  padding: calc(6px + var(--safe-t)) 10px 4px;
+  padding: calc(4px + var(--safe-t)) 8px 2px;
 }
 #paddle-bar button {
   pointer-events: auto;
-  min-height: 36px;
-  padding: 0 10px;
-  font-size: 13px;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 #paddle-hint {
   bottom: 0;
-  padding: 4px 12px calc(8px + var(--safe-b));
-  font-size: 12px;
+  padding: 2px 10px calc(6px + var(--safe-b));
+  font-size: 11px;
 }
 #paddle-box {
   position: absolute;

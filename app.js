@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v62';
+const APP_VERSION = 'v63';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4656,20 +4656,24 @@ function fitPaddleDigits() {
   if (bw < 20 || bh < 20) return;
   const text = String(el.innerText || '0000').replace(/\s+/g, '');
   const n = Math.max(1, text.length);
-  const padX = Math.max(12, bw * 0.03);
-  const padTop = Math.max(10, bh * 0.03);
-  const padBottom = Math.max(28, bh * 0.07);
-  const availW = Math.max(20, bw - padX * 2);
-  const availH = Math.max(20, bh - padTop - padBottom);
-  const gap = Math.max(18, Math.min(availW * 0.045, availH * 0.1));
+  const TARGET = 0.75;
+  const strokeRatio = 0.028;
   const probe = 200;
   const met = paddleInkMetrics(text, probe);
-  const strokeRatio = 0.028;
   const inkWem = met.widths.reduce((s, w) => s + w, 0) / probe;
-  const inkHem = met.inkH / probe;
-  const sizeW = (availW - gap * (n - 1)) / Math.max(0.1, inkWem + 2 * strokeRatio * n);
-  const sizeH = availH / Math.max(0.1, inkHem + 2 * strokeRatio);
-  let size = Math.min(sizeW, sizeH);
+  const inkHem = Math.max(met.inkH / probe, 0.01);
+  // Glyph box height tracks font-size; aim for 75% of the short screen side.
+  let size = bh * TARGET;
+  const spacing = (tight) => {
+    const stroke = Math.max(3, Math.min(12, size * strokeRatio));
+    const gap = tight
+      ? Math.max(8, Math.min(12, bw * 0.015))
+      : Math.max(14, Math.min(22, bw * 0.026));
+    const padX = tight
+      ? Math.max(4, bw * 0.005)
+      : Math.max(8, bw * 0.012);
+    return { gap, padX, stroke };
+  };
   el.style.display = 'flex';
   el.style.alignItems = 'center';
   el.style.justifyContent = 'center';
@@ -4679,13 +4683,12 @@ function fitPaddleDigits() {
   el.style.fontWeight = '800';
   el.style.fontStretch = 'normal';
   el.style.fontFamily = '"Paddle Inter", Inter, sans-serif';
-  el.style.gap = gap + 'px';
   el.style.width = 'max-content';
   el.style.maxWidth = 'none';
   el.style.transform = 'none';
   el.style.transformOrigin = 'center center';
-  const applySize = (px) => {
-    const stroke = Math.max(3, Math.min(12, px * strokeRatio));
+  const applySize = (px, gap, stroke) => {
+    el.style.gap = gap + 'px';
     el.style.fontSize = px + 'px';
     el.style.webkitTextStroke = stroke + 'px currentColor';
     el.style.paintOrder = 'stroke fill';
@@ -4699,14 +4702,40 @@ function fitPaddleDigits() {
       d.style.paintOrder = 'stroke fill';
     }
   };
-  applySize(size);
+  const fits = (tight) => {
+    const sp = spacing(tight);
+    const widthAt = (inkWem + 2 * strokeRatio * n) * size + sp.gap * (n - 1) + 2 * sp.stroke;
+    return widthAt <= bw - 2 * sp.padX + 0.5;
+  };
+  let tight = !fits(false);
+  if (tight && !fits(true)) {
+    const sp = spacing(true);
+    const widthAt = (inkWem + 2 * strokeRatio * n) * size + sp.gap * (n - 1) + 2 * sp.stroke;
+    const availW = Math.max(20, bw - 2 * sp.padX);
+    size *= availW / Math.max(widthAt, 1);
+    tight = true;
+  }
+  let sp = spacing(tight);
+  applySize(size, sp.gap, sp.stroke);
   void el.offsetWidth;
-  const usedW = Math.max(el.scrollWidth, 1) + 2 * Math.max(3, Math.min(12, size * strokeRatio));
-  const usedH = (inkHem + 2 * strokeRatio) * size;
-  const fit = Math.min(1, availW / usedW, availH / Math.max(usedH, 1));
-  if (fit < 0.995) {
-    size *= fit;
-    applySize(size);
+  const measuredH = Math.max(
+    1,
+    ...Array.from(el.querySelectorAll('span'), (s) => s.offsetHeight),
+    el.offsetHeight
+  );
+  const wantH = bh * TARGET;
+  if (Math.abs(measuredH - wantH) / wantH > 0.012) {
+    size *= wantH / measuredH;
+    sp = spacing(tight);
+    applySize(size, sp.gap, sp.stroke);
+    void el.offsetWidth;
+  }
+  const usedW = Math.max(el.scrollWidth, 1) + 2 * sp.stroke;
+  const availW = Math.max(20, bw - 2 * sp.padX);
+  if (usedW > availW + 0.5) {
+    size *= availW / usedW;
+    sp = spacing(true);
+    applySize(size, sp.gap, sp.stroke);
   }
 }
 
