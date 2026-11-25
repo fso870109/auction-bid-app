@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v79';
+const APP_VERSION = 'v80';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -562,7 +562,7 @@ function renderItemPicker(half, opts) {
     : '';
   return `<div class="item-pick-wrap${inSheet ? ' in-sheet' : ''}">
       ${hintOpt}
-      <input id="${searchId}" class="item-search" type="search" enterkeyhint="search" placeholder="搜尋品項" value="${escapeHtml(q)}" data-act="item-search" autocomplete="off" />
+      <div class="item-search-wrap">${iconSvg('search')}<input id="${searchId}" class="item-search" type="search" enterkeyhint="search" placeholder="搜尋品項" value="${escapeHtml(q)}" data-act="item-search" autocomplete="off" /></div>
       <div class="item-pick${inSheet ? ' sheet-items' : ''}">${parts.join('')}</div>
       ${sheet}
     </div>`;
@@ -6615,6 +6615,23 @@ function restoreFocus(focusId, start, end) {
   }
 }
 
+
+function iconSvg(name) {
+  const paths = {
+    pencil: '<path fill="currentColor" d="M4.5 16.8 16.2 5.1l2.7 2.7L7.2 19.5H4.5v-2.7zm13.4-13.4 1.3 1.3c.5.5.5 1.3 0 1.8l-1.2 1.2-2.7-2.7 1.2-1.2c.5-.5 1.3-.5 1.8 0z"/>',
+    hand: '<path fill="currentColor" d="M8.2 11.2V5.8a1.3 1.3 0 0 1 2.6 0v4.2h.2V4.7a1.3 1.3 0 0 1 2.6 0v5.3h.2V5.5a1.3 1.3 0 0 1 2.6 0v5.8h.2V7.6a1.3 1.3 0 0 1 2.6 0V14c0 3.4-2.2 6-5.7 6.5-2.6.4-5.3-.7-6.8-2.8L5 15.2c-.5-.7-.4-1.7.3-2.2.7-.5 1.7-.4 2.2.3l.7 1v-3.1z"/>',
+    play: '<path fill="currentColor" d="M8 5.2v13.6l11-6.8L8 5.2z"/>',
+    gear: '<path fill="currentColor" d="M10.1 3.2h3.8l.4 2.3 1.9.8 2-1.3 2.7 2.7-1.3 2 0.8 1.9 2.3.4v3.8l-2.3.4-.8 1.9 1.3 2-2.7 2.7-2-1.3-1.9.8-.4 2.3h-3.8l-.4-2.3-1.9-.8-2 1.3-2.7-2.7 1.3-2-.8-1.9L3.2 13.9V10.1l2.3-.4.8-1.9-1.3-2 2.7-2.7 2 1.3 1.9-.8.4-2.3zM12 9.2A2.8 2.8 0 1 0 12 14.8 2.8 2.8 0 0 0 12 9.2z"/>',
+    close: '<path fill="currentColor" d="M6.2 6.2 12 12l5.8-5.8 1.8 1.8L13.8 13.8l5.8 5.8-1.8 1.8L12 15.6l-5.8 5.8-1.8-1.8 5.8-5.8-5.8-5.8 1.8-1.8z"/>',
+    target: '<path fill="currentColor" d="M11 3h2v2.1c3 .4 5.5 2.9 5.9 5.9H21v2h-2.1c-.4 3-2.9 5.5-5.9 5.9V21h-2v-2.1C8 18.5 5.5 16 5.1 13H3v-2h2.1C5.5 8 8 5.5 11 5.1V3zm1 4.5A4.5 4.5 0 1 0 16.5 12 4.5 4.5 0 0 0 12 7.5zm0 2.5A2 2 0 1 1 10 12a2 2 0 0 1 2-2z"/>',
+    search: '<path fill="currentColor" d="M10.2 4.2a6 6 0 1 1 0 12 6 6 0 0 1 0-12zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm6.4 7.3 4.2 4.2-1.5 1.5-4.2-4.2 1.5-1.5z"/>',
+    doc: '<path fill="currentColor" d="M7 3.5h7.2L19 8.3V20.5H7V3.5zm7.4 1.2v4.1h4.1l-4.1-4.1zM9.2 12.2h7.6v1.6H9.2v-1.6zm0 3.2h7.6v1.6H9.2v-1.6z"/>',
+  };
+  const inner = paths[name];
+  if (!inner) return '';
+  return `<svg class="ico-svg ico-${name}" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true" focusable="false">${inner}</svg>`;
+}
+
 function renderHeader() {
   const half = state.currentHalf;
   return `
@@ -6628,7 +6645,7 @@ function renderHeader() {
           ${HALVES.map((h) => `<button type="button" data-act="half" data-v="${h}" class="sess-${h}${half === h ? ' on' : ''}">${halfLabel(h)}</button>`).join('')}
         </div>
         ${typeof renderSyncPill === 'function' ? renderSyncPill() : ''}
-        <button type="button" class="gear-btn${showSettings ? ' on' : ''}" data-act="settings" aria-label="設定">${showSettings ? '✕' : '⚙'}</button>
+        <button type="button" class="gear-btn${showSettings ? ' on' : ''}" data-act="settings" aria-label="設定">${showSettings ? iconSvg('close') : iconSvg('gear')}</button>
       </div>
     </header>`;
 }
@@ -6638,13 +6655,13 @@ function renderNav() {
   return `
     <nav class="nav">
       <button type="button" class="nav-btn${tab === 'note' ? ' on' : ''}" data-act="tab" data-v="note">
-        <span class="ico">✏️</span><span>抄號</span>
+        <span class="ico">${iconSvg('pencil')}</span><span>抄號</span>
       </button>
       <button type="button" class="nav-btn paddle" data-act="paddle">
-        <span class="ico">✋</span><span>舉牌</span>
+        <span class="ico">${iconSvg('hand')}</span><span>舉牌</span>
       </button>
       <button type="button" class="nav-btn${tab === 'live' ? ' on' : ''}" data-act="tab" data-v="live">
-        <span class="ico">▶</span><span>拍賣中</span>
+        <span class="ico">${iconSvg('play')}</span><span>拍賣中</span>
       </button>
     </nav>`;
 }
@@ -6774,8 +6791,8 @@ function renderNote() {
         <button type="button" class="btn primary range-ok" data-act="range-ok"${rangeReady() ? '' : ' disabled'}>${escapeHtml(rangeOkLabel)}</button>
       </div>`
     : `<div class="note-head">
-        <div class="num${num ? '' : ' empty'}${dupFlash ? ' dup-flash' : ''}">${num ? escapeHtml(num) : '----'}</div>
-        <div class="${chipClass}">${escapeHtml(machineHint)}</div>
+        <div class="num${num ? '' : ' empty'}${dupFlash ? ' dup-flash' : ''}">${num ? escapeHtml(num) : '- - - -'}</div>
+        <div class="${chipClass}">${iconSvg('target')}<span class="machine-chip-txt">${escapeHtml(machineHint)}</span></div>
       </div>`;
 
   return `
@@ -6796,7 +6813,7 @@ function renderNote() {
       </div>
       ${sizeBlock}
       <div class="note-tools hand-${thumbHand()}">
-        <button type="button" class="plan-open-btn" data-act="open-plan">備註${planN ? `<span class="plan-count">${planN}</span>` : ''}</button>
+        <button type="button" class="plan-open-btn" data-act="open-plan">${iconSvg('doc')}<span>備註</span>${planN ? `<span class="plan-count">${planN}</span>` : ''}</button>
       </div>
     </div>`;
 }

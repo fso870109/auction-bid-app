@@ -4509,3 +4509,315 @@ input:focus, textarea:focus, select:focus {
 .toast {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
+
+/* ===== v80 note polish =====
+   Style only. Gold corner glows, gold-active segments, and inline SVG icons.
+   Font sizes, weights, and tap-target heights stay at least as large as v79. */
+
+html, body, #app {
+  background-color: #07070a;
+  background-image:
+    radial-gradient(ellipse 70% 42% at 100% 0%, rgba(245, 197, 24, 0.16) 0%, transparent 58%),
+    radial-gradient(ellipse 65% 40% at 0% 100%, rgba(245, 197, 24, 0.13) 0%, transparent 58%),
+    linear-gradient(155deg, transparent 38%, rgba(245, 197, 24, 0.045) 50%, transparent 62%),
+    linear-gradient(180deg, #12121a 0%, #07070a 44%, #050508 100%);
+  background-attachment: fixed;
+}
+
+.ico-svg {
+  display: block;
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+}
+
+/* Header date stays a raised pill (no fake dropdown caret). */
+.header-date {
+  border-color: rgba(245, 197, 24, 0.28);
+  color: #f6f0d8;
+}
+.gear-btn {
+  color: var(--gold-soft);
+}
+.gear-btn .ico-svg { width: 18px; height: 18px; margin: auto; }
+.gear-btn.on { color: var(--yellow-text); }
+
+/* Session segmented control: inactive keep a tint; active is gold + dark text. */
+.half-switch button.sess-fruit {
+  color: #9ee0b8;
+  background: rgba(3, 135, 54, 0.22);
+}
+.half-switch button.sess-morning {
+  color: #f6d37a;
+  background: rgba(240, 160, 0, 0.2);
+}
+.half-switch button.sess-afternoon {
+  color: #ead68a;
+  background: rgba(245, 197, 24, 0.1);
+}
+.half-switch button.on,
+.half-switch button.sess-fruit.on,
+.half-switch button.sess-morning.on,
+.half-switch button.sess-afternoon.on {
+  background: var(--gloss-yellow);
+  color: var(--yellow-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 0 10px rgba(245, 197, 24, 0.35);
+}
+
+/* Gold-active 美/普/交 (and other matching segments). Lot chips stay colored. */
+.prio-toggle {
+  background: #0c0c10;
+  border: 1px solid #3a3a44;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.prio-toggle button {
+  color: #fff;
+  background: transparent;
+  border-radius: 999px;
+}
+.prio-toggle button.on,
+.prio-toggle button.on.prio-must,
+.prio-toggle button.on.prio-watch,
+.prio-toggle button.on.prio-skip {
+  background: var(--gloss-yellow);
+  color: #111;
+  font-weight: 900;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 2px 10px rgba(245, 197, 24, 0.42);
+}
+.hand-seg {
+  background: #0c0c10;
+  border: 1px solid #3a3a44;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.hand-seg button.on {
+  background: var(--gloss-yellow);
+  color: var(--yellow-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 8px rgba(245, 197, 24, 0.3);
+}
+
+/* Number box + 台別 hint */
+.note-head .num {
+  border-radius: 14px;
+  border: 1px solid rgba(245, 197, 24, 0.22);
+  background: linear-gradient(180deg, #22222a 0%, #141418 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 3px 8px rgba(0, 0, 0, 0.45);
+  color: var(--yellow);
+}
+.note-head .num.empty {
+  color: #b0b0b0;
+  letter-spacing: 0.18em;
+}
+.note-head .machine-chip {
+  border-radius: 14px;
+  background: var(--gloss-dark);
+  border: 1px solid rgba(245, 197, 24, 0.28);
+  color: var(--gold-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 3px 8px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  place-items: unset;
+}
+.note-head .machine-chip .ico-svg {
+  width: 16px;
+  height: 16px;
+  color: var(--gold);
+}
+.note-head .machine-chip.warn {
+  border-color: rgba(255, 159, 10, 0.45);
+  color: var(--orange);
+}
+.note-head .machine-chip.warn .ico-svg { color: var(--orange); }
+.machine-chip-txt { min-width: 0; }
+
+/* Recent chips: white number, gold item */
+.recent-chip {
+  background: var(--gloss-dark);
+  border: 1px solid rgba(245, 197, 24, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 3px rgba(0, 0, 0, 0.35);
+  color: #fff;
+}
+.recent-chip .ln-num,
+.recent-chip .cell-num,
+.recent-chip .num-sub-wrap {
+  color: #fff;
+  font-weight: 800;
+}
+.recent-chip .itm { color: var(--gold); }
+.recent-chip .mch { color: #c8c8c8; }
+.recent-chip .del {
+  background: #2a2a32;
+  color: #eee;
+}
+
+/* Numpad: tall glossy keys, gold-tinted edge, huge white digits */
+.key,
+.note-screen .key,
+.sheet .key,
+.cur-sheet .key {
+  color: #fff;
+  border-radius: 14px;
+  border: 1px solid rgba(245, 197, 24, 0.28);
+  background: var(--gloss-key);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    0 3px 6px rgba(0, 0, 0, 0.45);
+}
+.key.muted,
+.note-screen .key.muted {
+  color: #f0f0f0;
+}
+.key:active,
+.note-screen .key:active,
+.sheet .key:active {
+  color: #fff;
+}
+
+/* Search pill with magnifier */
+.item-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 32px;
+  margin: 0 0 4px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--gloss-dark);
+  border: 1px solid rgba(245, 197, 24, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 3px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  min-width: 0;
+}
+.item-search-wrap .ico-svg {
+  width: 16px;
+  height: 16px;
+  color: var(--gold-soft);
+}
+.item-search-wrap .item-search {
+  flex: 1 1 auto;
+  width: auto;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.item-search-wrap .item-search:focus {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+.item-search-wrap:focus-within {
+  border-color: var(--gold);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(245, 197, 24, 0.3);
+}
+
+/* Section label: small gold bar + name */
+.item-group-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gold-soft);
+  font-size: 11px;
+}
+.item-group-h::before {
+  content: "";
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(245, 197, 24, 0.45);
+  flex: 0 0 auto;
+}
+
+/* Item tiles: keep peel colors, add gloss */
+.item-btn,
+.plan-pick {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+.item-btn.peel,
+.plan-pick.peel,
+.plan-suggest-item.peel {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 3px 0 0 var(--peel-band),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* 備註 pill with document icon */
+.plan-open-btn {
+  border-radius: 999px;
+  background: var(--gloss-dark);
+  border: 1px solid rgba(245, 197, 24, 0.25);
+  color: #f6f6f6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+.plan-open-btn .ico-svg {
+  width: 18px;
+  height: 18px;
+  color: var(--gold);
+}
+
+/* Bottom nav: gold icons + thin gold outline glow */
+.nav-btn {
+  border: 1px solid rgba(245, 197, 24, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px rgba(245, 197, 24, 0.12),
+    0 0 8px rgba(245, 197, 24, 0.16),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+  color: var(--gold-soft);
+}
+.nav-btn .ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold);
+}
+.nav-btn .ico-svg {
+  width: 1.15em;
+  height: 1.15em;
+}
+.nav-btn.on {
+  color: var(--yellow);
+  border-color: rgba(245, 197, 24, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 10px rgba(245, 197, 24, 0.28);
+}
+.nav-btn.on .ico { color: var(--yellow); }
+.nav-btn.paddle {
+  border: 1px solid #fff4a0;
+  color: var(--yellow-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(120, 90, 0, 0.35),
+    0 0 0 1px rgba(245, 197, 24, 0.35),
+    0 0 16px rgba(245, 197, 24, 0.48),
+    0 3px 6px rgba(0, 0, 0, 0.4);
+}
+.nav-btn.paddle .ico,
+.nav-btn.paddle .ico-svg { color: var(--yellow-text); }
+
+/* Sync status dot, if present: slightly raised */
+.sync-dot {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 1px 3px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
