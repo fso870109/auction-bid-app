@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v59';
+const APP_VERSION = 'v60';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2310,7 +2310,7 @@ function renderPlanScreen() {
   const items = state.planItems || [];
   const todayItems = items.filter((p) => !p.done && p.forDay <= today);
   const tomorrowItems = items.filter((p) => !p.done && p.forDay > today);
-  const doneItems = items.filter((p) => p.done).slice().reverse().slice(0, 20);
+  const doneItems = items.filter((p) => p.done && p.doneOn === today).slice().reverse();
   const wonMap = assignWonToPlans();
   const row = (p, kind) => {
     const qty = planQtyOf(p);
