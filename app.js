@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v85';
+const APP_VERSION = 'v86';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -191,6 +191,7 @@ function dedupeCrops(list) {
 
 function cropShownOnGrid(crop, counts) {
   if (!crop || crop.legacy) return false;
+  if (isHiddenGridParent(crop)) return false;
   if ((crop.v || 0) >= VOLUME_GRID_MIN) return true;
   const used = (counts && (counts[crop.l] || counts[crop.n])) || 0;
   return used > 0;
@@ -236,9 +237,25 @@ function defaultSizeForItem(name) {
 
 const GRID_PROMOTIONS = [
   { l: '甜豆', cropN: '豌豆', varN: '豌豆-甜豌豆' },
+  { l: '紅花', cropN: '豌豆', varN: '豌豆-紅花' },
   { l: '荷蘭豆', cropN: '豌豆', varN: '豌豆-白花' },
   { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' }
 ];
+
+/* Parents whose everyday varieties are already top-level buttons. Hidden
+   from the grid; search still lists the individual variety buttons. */
+const HIDDEN_GRID_PARENTS = new Set(['豌豆']);
+
+function isHiddenGridParent(crop) {
+  return !!(crop && !crop.promo && (HIDDEN_GRID_PARENTS.has(crop.n) || HIDDEN_GRID_PARENTS.has(crop.l)));
+}
+
+function cropParentNameMatchesQuery(crop, q) {
+  q = String(q || '').trim();
+  if (!crop || !q) return false;
+  const fields = [crop.n, crop.l, ...(crop.a || [])];
+  return fields.some((f) => f && (q.length >= 2 ? String(f).includes(q) : f === q || String(f).startsWith(q)));
+}
 
 function promotionCrops(half, q, counts) {
   const h = half || (state && state.currentHalf) || 'morning';
@@ -261,8 +278,9 @@ function promotionCrops(half, q, counts) {
       promoCrop: crop.n,
       promoVar: v.n
     };
-    if (String(q || '').trim() && !cropMatchesQuery(promo, q)) continue;
-    if (!String(q || '').trim() && !cropShownOnGrid(promo, counts)) continue;
+    const qq = String(q || '').trim();
+    if (qq && !cropMatchesQuery(promo, q) && !cropParentNameMatchesQuery(crop, q)) continue;
+    if (!qq && !cropShownOnGrid(promo, counts)) continue;
     out.push(promo);
   }
   return out;
@@ -668,6 +686,23 @@ function pickerVariants(crop, q) {
   return out;
 }
 
+function shouldListSearchVariety(crop, v, q) {
+  q = String(q || '').trim();
+  if (!crop || !v || !q) return false;
+  if (GRID_PROMOTIONS.some((p) => p.cropN === crop.n && (p.varN === v.n || p.l === v.l || (v.a || []).includes(p.l)))) return false;
+  const varHit = variantMatchesQuery(v, q);
+  const parentNameHit = cropParentNameMatchesQuery(crop, q);
+  if (isHiddenGridParent(crop) && (parentNameHit || cropMatchesQuery(crop, q))) {
+    const fields = [v.l, ...(v.a || [])];
+    const labelHit = fields.some((f) => f && (q.length >= 2 ? String(f).includes(q) : f === q || String(f).startsWith(q)));
+    if (labelHit) return true;
+    /* Searching 豌豆/碗豆 also lists leftover ≥500 varieties (imports). */
+    if (parentNameHit) return (Number(v.v) || 0) >= VOLUME_GRID_MIN;
+    return false;
+  }
+  return usefulVariant(v, crop) && varHit;
+}
+
 function shouldOpenVariants(crop, q) {
   const vars = pickerVariants(crop, q);
   if (vars.length > 1) return true;
@@ -729,22 +764,24 @@ function renderItemPicker(half, opts) {
       );
       continue;
     }
-    const on = itemIsActive(crop, active) ? ' on' : '';
-    const badge = shouldOpenVariants(crop, q) ? '<span class="var-n">▾</span>' : '';
     const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
-    const need = needBadgeHtml([crop.l, crop.n]);
-    parts.push(
-      `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}" data-name="${escapeHtml(crop.l)}" data-group="${escapeHtml(crop.g || '')}"${lotAttr}>${escapeHtml(crop.l)}${badge}${need.html}</button>`
-    );
+    if (!isHiddenGridParent(crop)) {
+      const on = itemIsActive(crop, active) ? ' on' : '';
+      const badge = shouldOpenVariants(crop, q) ? '<span class="var-n">▾</span>' : '';
+      const need = needBadgeHtml([crop.l, crop.n]);
+      parts.push(
+        `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}" data-name="${escapeHtml(crop.l)}" data-group="${escapeHtml(crop.g || '')}"${lotAttr}>${escapeHtml(crop.l)}${badge}${need.html}</button>`
+      );
+    }
     if (q) {
       for (const v of (crop.s || [])) {
-        if (!usefulVariant(v, crop) || !variantMatchesQuery(v, q)) continue;
-        if (GRID_PROMOTIONS.some((p) => p.cropN === crop.n && (p.varN === v.n || p.l === v.l || (v.a || []).includes(p.l)))) continue;
+        if (!shouldListSearchVariety(crop, v, q)) continue;
         const von = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
-        const vlabel = (v.imp ? '進口 ' : '') + (v.l || v.n);
+        const baseLabel = v.l || v.n;
+        const vlabel = (v.imp && baseLabel && !String(baseLabel).startsWith('進口')) ? ('進口 ' + baseLabel) : baseLabel;
         const vneed = needBadgeHtml([v.n, v.l, vlabel]);
         parts.push(
-          `<button type="button" class="item-btn${von}${vneed.cls}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}"${lotAttr}>${escapeHtml(vlabel)}${vneed.html}</button>`
+          `<button type="button" class="item-btn${von}${vneed.cls}${peelClass(v.n)}" data-act="pick-item" data-name="${escapeHtml(v.n)}" data-group="${escapeHtml(crop.g || '')}"${lotAttr}>${escapeHtml(vlabel)}${vneed.html}</button>`
         );
       }
     }
@@ -1144,6 +1181,7 @@ const GOURD_PEEL_CROP = {
   '豌豆': 'green',
   '豌豆苗': 'green',
   '甜豆': 'green',
+  '紅花': 'red',
   '荷蘭豆': 'green',
   '四季豆': 'green',
   '醜豆': 'green',
@@ -3212,6 +3250,7 @@ function defaultState() {
     itemsMigratedV46: true,
     itemsMigratedV67: true,
     itemsMigratedV85: true,
+    itemsMigratedV86: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
     lotsPerMin: DEFAULT_LOTS_PER_MIN,
     skipAutoDay: '',
@@ -3322,6 +3361,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV85) {
       migrateItemsV85(merged);
+    }
+    if (!saved.itemsMigratedV86) {
+      migrateItemsV86(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -4526,6 +4568,32 @@ function migrateItemsV46(merged) {
   merged.itemsMigratedV46 = true;
 }
 
+
+
+function migrateItemsV86(merged) {
+  /* Keep historical lots/notes named 豌豆. Just drop the hidden parent from
+     saved button order so it does not occupy a grid slot. */
+  const drop = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    return arr.filter((n) => {
+      const name = String(n || '').trim();
+      return name && name !== '豌豆' && name !== '碗豆';
+    });
+  };
+  if (merged.itemOrderByHalf && typeof merged.itemOrderByHalf === 'object') {
+    for (const half of Object.keys(merged.itemOrderByHalf)) {
+      const groups = merged.itemOrderByHalf[half];
+      if (!groups || typeof groups !== 'object') continue;
+      for (const group of Object.keys(groups)) {
+        groups[group] = drop(groups[group]);
+      }
+    }
+    if (typeof normalizeItemOrderMap === 'function') {
+      merged.itemOrderByHalf = normalizeItemOrderMap(merged.itemOrderByHalf);
+    }
+  }
+  merged.itemsMigratedV86 = true;
+}
 
 function migrateItemsV85(merged) {
   const rename = (raw) => {
