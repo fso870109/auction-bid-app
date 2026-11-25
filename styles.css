@@ -1,10 +1,20 @@
 :root {
   --paddle-font: "Paddle Inter", Inter, sans-serif;
-  --bg: #090909;
-  --bg-elev: #121212;
-  --bg-card: #1a1a1a;
-  --bg-press: #262626;
-  --line: #2c2c2c;
+  --bg: #07070a;
+  --bg-elev: #16161b;
+  --bg-card: #1c1c22;
+  --bg-press: #2a2a32;
+  --line: #3c3c46;
+  --gold: #f5c518;
+  --gold-soft: #ffe18a;
+  --raise: 0 3px 8px rgba(0, 0, 0, 0.45);
+  --raise-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --inset-top: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --inset-bot: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  --gloss-dark: linear-gradient(180deg, #2c2c34 0%, #1a1a20 52%, #121217 100%);
+  --gloss-panel: linear-gradient(180deg, #24242c 0%, #1a1a20 40%, #16161b 100%);
+  --gloss-key: linear-gradient(180deg, #32323a 0%, #1e1e24 55%, #15151a 100%);
+  --gloss-yellow: linear-gradient(180deg, #fff36a 0%, #ffe500 46%, #e6c200 100%);
   --text: #f6f6f6;
   --muted: #9b9b9b;
   --dim: #6a6a6a;
@@ -4138,4 +4148,364 @@ button.lot-cell {
   .subcode-sheet .key { min-height: 60px; }
   .cur-sheet .lot-display .num { font-size: clamp(48px, 15vw, 68px); }
   .cur-sheet .key { min-height: 56px; }
+}
+
+/* ===== v79 glossy theme =====
+   Style only: no layout sizes, font sizes, or font weights are reduced.
+   Depth comes from short box-shadows and simple gradients, not blur. */
+
+html, body {
+  background:
+    radial-gradient(120% 70% at 50% -8%, #1c1c26 0%, transparent 52%),
+    linear-gradient(180deg, #12121a 0%, #07070a 42%, #050508 100%);
+  background-color: #07070a;
+}
+#app {
+  background: transparent;
+}
+
+/* Shared raised / glossy language */
+.header {
+  background: linear-gradient(180deg, #16161c 0%, #0e0e12 100%);
+  border-bottom-color: #2e2e36;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.header-date {
+  background: var(--gloss-dark);
+  border: 1px solid #4a4a54;
+  border-radius: 999px;
+  padding: 5px 10px;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.half-switch {
+  background: #0a0a0e;
+  border-radius: 999px;
+  border-color: #3a3a44;
+  padding: 3px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.half-switch button {
+  border-radius: 999px;
+  box-shadow: none;
+}
+.half-switch button.sess-fruit.on,
+.half-switch button.sess-morning.on,
+.half-switch button.sess-afternoon.on {
+  box-shadow: var(--inset-top), 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.half-switch button.sess-fruit.on {
+  background: linear-gradient(180deg, #14a848 0%, #038736 100%);
+}
+.half-switch button.sess-morning.on {
+  background: linear-gradient(180deg, #ffb833 0%, #f0a000 100%);
+}
+.half-switch button.sess-afternoon.on {
+  background: linear-gradient(180deg, #4d84ff 0%, #2f6bff 100%);
+}
+.gear-btn {
+  border-radius: 999px;
+  background: var(--gloss-dark);
+  border-color: #4a4a54;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.gear-btn.on {
+  background: var(--gloss-yellow);
+  box-shadow: var(--inset-top), 0 0 8px rgba(245, 197, 24, 0.35);
+}
+
+/* Bottom nav: solid (no backdrop blur), glossy 3D pills */
+.nav {
+  background: linear-gradient(180deg, #16161c 0%, #0c0c10 100%);
+  border-top-color: #2e2e36;
+  box-shadow: 0 -3px 10px rgba(0, 0, 0, 0.4);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.nav-btn {
+  border-radius: 16px;
+  background: var(--gloss-dark);
+  border: 1px solid #3a3a44;
+  color: var(--gold-soft);
+  box-shadow: var(--inset-top), var(--inset-bot), var(--raise-sm);
+}
+.nav-btn.on {
+  color: var(--yellow);
+  background: linear-gradient(180deg, #2a2608 0%, #1a1800 100%);
+  border-color: #6a5a10;
+  box-shadow: var(--inset-top), 0 0 8px rgba(245, 197, 24, 0.22);
+}
+.nav-btn.paddle {
+  background: var(--gloss-yellow);
+  color: var(--yellow-text);
+  border: 1px solid #fff4a0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(120, 90, 0, 0.35),
+    0 0 16px rgba(245, 197, 24, 0.42),
+    0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Cards, sheets, dialogs */
+.card,
+.switch-row,
+.result-item,
+.sheet,
+.plan-screen,
+.plan-row,
+.plan-add,
+.merge-banner {
+  background: var(--gloss-panel);
+  border: 1px solid #4a4a54;
+  box-shadow: var(--inset-top), var(--raise);
+}
+.sheet {
+  border-radius: 18px;
+  background: linear-gradient(180deg, #24242c 0%, #16161c 100%);
+}
+.overlay {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+/* Generic buttons */
+.btn,
+.chip,
+.filters button,
+.live-sheet-btn,
+.plan-open-btn,
+.plan-back,
+.plan-back-lg,
+.plan-clear-btn,
+.plan-clear-all,
+.plan-qty-btn,
+.extra-toggle,
+.merge-banner button,
+.xfer-dest,
+.cutoff-select {
+  background: var(--gloss-dark);
+  border-color: #4a4a54;
+  box-shadow: var(--inset-top), var(--inset-bot), var(--raise-sm);
+}
+.btn.primary,
+.chip.on,
+.filters button.on,
+.item-btn.on,
+.plan-open-btn:active {
+  background: var(--gloss-yellow);
+  color: var(--yellow-text);
+  border-color: #fff0a0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+.btn-save {
+  background: var(--gloss-yellow);
+  border: 1px solid #fff0a0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(120, 90, 0, 0.3),
+    0 3px 8px rgba(245, 197, 24, 0.28);
+}
+.btn-won.on, .btn-won:active {
+  background: linear-gradient(180deg, #1c9a3c 0%, #157a30 60%, #0f6a28 100%);
+  border-color: #4dff86;
+  box-shadow: var(--inset-top), var(--raise-sm);
+  color: #fff;
+}
+.btn-lost.on, .btn-lost:active {
+  background: linear-gradient(180deg, #e01e1e 0%, #c41616 60%, #a01010 100%);
+  border-color: #ff6a6a;
+  box-shadow: var(--inset-top), var(--raise-sm);
+  color: #fff;
+}
+
+/* Inputs: inset wells */
+input, textarea, select, .cutoff-select, .remark input {
+  background: linear-gradient(180deg, #0c0c10 0%, #141418 100%);
+  border-color: #3a3a44;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--gold);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(245, 197, 24, 0.35);
+}
+
+/* 抄號 keypad + item chips */
+.key,
+.note-screen .key {
+  background: var(--gloss-key);
+  border: 1px solid #4a4a54;
+  box-shadow: var(--inset-top), var(--inset-bot), var(--raise);
+}
+.key:active,
+.note-screen .key:active {
+  background: linear-gradient(180deg, #1a1a20 0%, #101014 100%);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.item-btn,
+.plan-pick {
+  background: var(--gloss-dark);
+  border-color: #4a4a54;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.item-btn.on,
+.plan-pick.on {
+  background: var(--gloss-yellow);
+  color: var(--yellow-text);
+  border-color: #fff0a0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), var(--raise-sm);
+}
+.note-head .num {
+  background: linear-gradient(180deg, #1a1a20 0%, #101014 100%);
+  border-color: #4a4a54;
+  box-shadow: var(--inset-top), var(--raise-sm);
+  color: var(--yellow);
+}
+.prio-toggle {
+  background: #121216;
+  border-color: #3a3a44;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.prio-toggle button.on.prio-must {
+  background: linear-gradient(180deg, #ff7340 0%, #ff5c1a 100%);
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.prio-toggle button.on.prio-watch {
+  background: var(--gloss-yellow);
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.prio-toggle button.on.prio-skip {
+  background: linear-gradient(180deg, #4a7aff 0%, #2f62e8 100%);
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+
+/* 拍賣中 columns */
+.live-col {
+  border-radius: 14px;
+  background: var(--gloss-panel);
+  border: 1px solid #4a4a54;
+  box-shadow: var(--inset-top), 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+.live-col-head {
+  background: linear-gradient(180deg, #1e1e26 0%, #141418 100%);
+  border-bottom-color: #2e2e36;
+}
+.live-col-foot {
+  background: linear-gradient(180deg, #1a1a20 0%, #121216 100%);
+  border-top-color: #2e2e36;
+  border-radius: 0 0 13px 13px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.live-col-foot .live-cur {
+  border-radius: 12px;
+}
+.cur-now-num { color: var(--yellow); }
+.live-info-lbl { color: var(--gold-soft); }
+
+/* Footer buttons: pill, dark, glossy 3D. Heights stay as in v78. */
+.cur-step,
+.xfer-btn,
+.start-btn {
+  border-radius: 999px;
+  background: var(--gloss-key);
+  border: 1px solid #4a4a54;
+  box-shadow: var(--inset-top), var(--inset-bot), 0 2px 4px rgba(0, 0, 0, 0.45);
+}
+.cur-step:active,
+.xfer-btn:active,
+.start-btn:active {
+  background: linear-gradient(180deg, #1a1a20 0%, #101014 100%);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55);
+}
+
+/* Lot rows: raised mini-cards. Height stays 54px. */
+.lot-cell {
+  border-radius: 10px;
+  background: linear-gradient(180deg, #26262e 0%, #1a1a20 100%);
+  border: 1px solid #3f3f48;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.lot-cell.next {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, #3d340c 0%, #241f04 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 240, 160, 0.28),
+    0 0 0 1px var(--gold),
+    0 0 10px rgba(245, 197, 24, 0.42);
+}
+.lot-cell.next .cell-num { color: var(--yellow); }
+.lot-cell.next .cell-item { color: #fff; }
+.lot-cell.won {
+  background: linear-gradient(180deg, #1c9a3c 0%, #157a30 58%, #0f6a28 100%);
+  border-color: #2fd65c;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.lot-cell.lost {
+  background: linear-gradient(180deg, #e01e1e 0%, #c41616 58%, #a01010 100%);
+  border-color: #ff5a5a;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.lot-cell.moved {
+  background: linear-gradient(180deg, #f0ac14 0%, #d49600 58%, #b87e00 100%);
+  border-color: #ffd24a;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.lot-cell.passed {
+  background: linear-gradient(180deg, #2a2a2e 0%, #1a1a1a 100%);
+  border-color: #3a3a40;
+}
+.lot-cell.flow {
+  background: linear-gradient(180deg, #163646 0%, #102a36 100%);
+  border-color: #2a7a94;
+}
+
+/* 美/普/交 chips stay solid and saturated, with a light raise */
+.prio-tag,
+.lot-cell.prio-must .prio-tag,
+.lot-cell.prio-watch .prio-tag,
+.lot-cell.prio-skip .prio-tag {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* 舉牌: keep huge high-contrast digits; add a soft gold halo only */
+#paddle.theme-yellow,
+#paddle.theme-white {
+  background:
+    radial-gradient(80% 70% at 50% 45%, #1a1608 0%, #000 70%);
+}
+#paddle-code {
+  text-shadow: 0 0 18px rgba(245, 197, 24, 0.28);
+}
+#paddle-bar button {
+  background: var(--gloss-dark);
+  border: 1px solid #4a4a54;
+  box-shadow: var(--inset-top), var(--raise-sm);
+  border-radius: 999px;
+}
+
+/* Toggles */
+.toggle {
+  background: linear-gradient(180deg, #3a3a42 0%, #2a2a30 100%);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.toggle.on {
+  background: var(--gloss-yellow);
+}
+.toggle i {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* Plan / 備註 */
+.plan-bar, .plan-footer {
+  background: linear-gradient(180deg, #16161c 0%, #0e0e12 100%);
+  border-color: #2e2e36;
+}
+.plan-check,
+.plan-del,
+.plan-qty-btn {
+  background: var(--gloss-dark);
+  border: 1px solid #4a4a54;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+
+/* Toast stays high-contrast; slight raise only */
+.toast {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
