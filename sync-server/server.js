@@ -155,6 +155,12 @@ function emptyRoom(secret, label, ownerDeviceId) {
   };
 }
 
+function sanitizeName(raw) {
+  let s = String(raw == null ? '' : raw).replace(/[\u0000-\u001F\u007F]/g, '').trim().replace(/\s+/g, ' ');
+  if ([...s].length > 20) s = [...s].slice(0, 20).join('').trim();
+  return s;
+}
+
 function approvedCount(room) {
   return Object.values(room.devices || {}).filter((d) => d && d.approved && !d.revoked).length;
 }
@@ -164,6 +170,7 @@ function publicDevices(room, me) {
     .filter(([, d]) => d && d.approved && !d.revoked)
     .map(([id, d]) => ({
       deviceId: id,
+      name: sanitizeName(d && d.name),
       role: id === room.ownerDeviceId ? 'owner' : 'member',
       isMe: id === me,
       joinedAt: d.joinedAt || 0
@@ -175,6 +182,7 @@ function publicPending(room) {
   return Object.entries(room.pending || {}).map(([id, p]) => ({
     requestId: id,
     deviceId: p.deviceId,
+    name: sanitizeName((room.devices[p.deviceId] && room.devices[p.deviceId].name) || p.name),
     createdAt: p.createdAt
   }));
 }
@@ -316,14 +324,15 @@ function membershipPayload(room, deviceId, extra) {
   return out;
 }
 
-function registerDevice(room, deviceId, token, asOwner) {
+function registerDevice(room, deviceId, token, asOwner, name) {
   const id = deviceId && /^[A-Za-z0-9_-]{8,64}$/.test(deviceId) ? deviceId : newId();
   const tok = token || newToken();
   room.devices[id] = {
     tokenHash: hashToken(tok),
     approved: true,
     revoked: false,
-    joinedAt: Date.now()
+    joinedAt: Date.now(),
+    name: sanitizeName(name)
   };
   if (asOwner || !room.ownerDeviceId) room.ownerDeviceId = id;
   return { deviceId: id, deviceToken: tok, role: id === room.ownerDeviceId ? 'owner' : 'member' };
@@ -360,7 +369,7 @@ const server = http.createServer(async (req, res) => {
       const secret = newSecret();
       const room = emptyRoom(secret, newLabel(), '');
       if (body && body.snapshot) room.snap = adoptSnapshot(body.snapshot);
-      const dev = registerDevice(room, body && body.deviceId, null, true);
+      const dev = registerDevice(room, body && body.deviceId, null, true, body && body.name);
       rooms.set(secret, room);
       await persistRoom(secret);
       recordSuccess(ip, dev.deviceId);
@@ -390,6 +399,9 @@ const server = http.createServer(async (req, res) => {
       }
       // Rejoin of an approved device
       if (deviceId && room.devices[deviceId] && tokenOk(room.devices[deviceId], body.deviceToken) && room.devices[deviceId].approved && !room.devices[deviceId].revoked) {
+        if (body && body.name) {
+          room.devices[deviceId].name = sanitizeName(body.name);
+        }
         const merged = mergeIncoming(room, body);
         await persistRoom(code);
         if (merged.length) broadcast(room, null, { type: 'ops', ops: merged, from: deviceId });
@@ -409,7 +421,7 @@ const server = http.createServer(async (req, res) => {
       }
       prunePending(room);
       if (approvedCount(room) < MAX_DEVICES) {
-        const dev = registerDevice(room, deviceId, null, false);
+        const dev = registerDevice(room, deviceId, null, false, body && body.name);
         const merged = mergeIncoming(room, body);
         await persistRoom(code);
         recordSuccess(ip, dev.deviceId);
@@ -430,10 +442,11 @@ const server = http.createServer(async (req, res) => {
       const id = deviceId && /^[A-Za-z0-9_-]{8,64}$/.test(deviceId) ? deviceId : newId();
       const tok = newToken();
       const requestId = newId();
-      room.devices[id] = { tokenHash: hashToken(tok), approved: false, revoked: false, joinedAt: Date.now() };
-      room.pending[requestId] = { deviceId: id, createdAt: Date.now() };
+      const joinName = sanitizeName(body && body.name);
+      room.devices[id] = { tokenHash: hashToken(tok), approved: false, revoked: false, joinedAt: Date.now(), name: joinName };
+      room.pending[requestId] = { deviceId: id, createdAt: Date.now(), name: joinName };
       await persistRoom(code);
-      broadcast(room, null, { type: 'join-request', request: { requestId, deviceId: id, createdAt: Date.now() } });
+      broadcast(room, null, { type: 'join-request', request: { requestId, deviceId: id, name: joinName, createdAt: Date.now() } });
       json(res, 200, { status: 'pending', requestId, deviceId: id, deviceToken: tok, code: room.secret, label: room.label });
       return;
     }
@@ -453,7 +466,7 @@ const server = http.createServer(async (req, res) => {
         room = emptyRoom(code, (body && body.label) || newLabel(), deviceId);
         if (body && body.snapshot) room.snap = adoptSnapshot(body.snapshot);
         const tok = body.deviceToken || newToken();
-        room.devices[deviceId] = { tokenHash: hashToken(tok), approved: true, revoked: false, joinedAt: Date.now() };
+        room.devices[deviceId] = { tokenHash: hashToken(tok), approved: true, revoked: false, joinedAt: Date.now(), name: sanitizeName(body && body.name) };
         room.ownerDeviceId = deviceId;
         rooms.set(code, room);
         await persistRoom(code);
@@ -547,6 +560,28 @@ const server = http.createServer(async (req, res) => {
       }
       await persistRoom(code);
       kickDeviceSockets(room, target, 'kicked');
+      broadcast(room, null, { type: 'devices', devices: publicDevices(room, ''), pending: publicPending(room) });
+      json(res, 200, membershipPayload(room, body.deviceId));
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/rooms/profile') {
+      const body = await readBody(req);
+      const code = String((body && body.code) || '');
+      const room = isSecret(code) ? await loadRoom(code) : null;
+      if (!room || room.legacy) { json(res, 403, { error: JOIN_ERROR }); return; }
+      const rec = room.devices[body.deviceId];
+      if (!rec || !tokenOk(rec, body.deviceToken) || rec.revoked) {
+        json(res, 403, { error: JOIN_ERROR });
+        return;
+      }
+      rec.name = sanitizeName(body && body.name);
+      if (room.pending) {
+        for (const p of Object.values(room.pending)) {
+          if (p && p.deviceId === body.deviceId) p.name = rec.name;
+        }
+      }
+      await persistRoom(code);
       broadcast(room, null, { type: 'devices', devices: publicDevices(room, ''), pending: publicPending(room) });
       json(res, 200, membershipPayload(room, body.deviceId));
       return;

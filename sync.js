@@ -46,6 +46,129 @@ function normalizeInvite(raw) {
   return s.replace(/\s+/g, '');
 }
 
+const SYNC_NAME_MAX = 20;
+
+function normalizeSyncName(raw) {
+  let s = String(raw == null ? '' : raw).replace(/[\u0000-\u001F\u007F]/g, '').trim().replace(/\s+/g, ' ');
+  if ([...s].length > SYNC_NAME_MAX) s = [...s].slice(0, SYNC_NAME_MAX).join('').trim();
+  return s;
+}
+
+function currentSyncName() {
+  return normalizeSyncName(state && state.syncDisplayName);
+}
+
+function devicePublicName(d) {
+  const n = normalizeSyncName(d && d.name);
+  if (n) return d && d.isMe ? n + '（這支手機）' : n;
+  return d && d.isMe ? '這支手機' : '另一支手機';
+}
+
+function openSyncNamePrompt(opts) {
+  opts = opts || {};
+  modal = {
+    type: 'sync-name',
+    reason: opts.reason || 'join',
+    pendingCode: opts.code || '',
+    value: currentSyncName() || '',
+    canSkip: opts.reason === 'existing',
+    title: opts.reason === 'create' ? '建立房間前，請先留下你的名稱' : (opts.reason === 'existing' ? '請先設定你的名稱' : '加入前請輸入你的名稱'),
+    body: opts.reason === 'existing'
+      ? '這樣房間裡的人才能認出是誰。名稱只在同一個房間裡顯示。'
+      : '請輸入你自己的名稱，讓對方知道是誰加入。最多 20 個字。'
+  };
+  if (typeof render === 'function') render();
+  requestAnimationFrame(() => {
+    const el = document.getElementById('sync-name-input');
+    if (el) {
+      try { el.focus(); if (el.value) el.select(); } catch { /* ignore */ }
+    }
+  });
+}
+
+function renderSyncNameModal() {
+  if (!modal || modal.type !== 'sync-name') return '';
+  const skip = modal.canSkip
+    ? `<button type="button" class="btn" data-act="sync-name-skip">稍後</button>`
+    : `<button type="button" class="btn" data-act="sync-name-cancel">取消</button>`;
+  const okLabel = modal.reason === 'create' ? '建立房間' : (modal.reason === 'existing' ? '儲存名稱' : '加入');
+  return `<div class="overlay center">
+    <div class="sheet sync-name-sheet" data-stop="1">
+      <h3>${escapeHtml(modal.title || '請輸入你的名稱')}</h3>
+      <p>${escapeHtml(modal.body || '')}</p>
+      <label class="sync-name-label" for="sync-name-input">我的名稱</label>
+      <input id="sync-name-input" class="sync-name-input" maxlength="20" autocomplete="name" enterkeyhint="done" value="${escapeHtml(modal.value || '')}" data-act="sync-name-input" placeholder="例如：小美" />
+      <div class="sheet-actions">
+        ${skip}
+        <button type="button" class="btn primary" data-act="sync-name-ok">${okLabel}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function maybePromptMissingName() {
+  if (!state || !state.syncRoom || isLegacyRoom(state.syncRoom) || state.syncPending) return;
+  if (currentSyncName()) return;
+  if (state.syncNamePrompted) return;
+  if (modal) return;
+  state.syncNamePrompted = true;
+  persistSyncState();
+  openSyncNamePrompt({ reason: 'existing' });
+}
+
+async function saveSyncDisplayName(raw, opts) {
+  opts = opts || {};
+  const name = normalizeSyncName(raw);
+  if (!name) {
+    toast('請先輸入你的名稱');
+    return false;
+  }
+  state.syncDisplayName = name;
+  state.syncNamePrompted = true;
+  persistSyncState();
+  if (state.syncRoom && isSyncSecret(state.syncRoom) && state.syncDeviceToken && !opts.skipServer) {
+    try {
+      const res = await fetch(syncBase() + '/api/rooms/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: state.syncRoom,
+          deviceId: state.syncDeviceId,
+          deviceToken: state.syncDeviceToken,
+          name
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) applyMembership(data);
+    } catch { /* keep local name even if the server is waking */ }
+  }
+  return true;
+}
+
+function submitSyncNamePrompt() {
+  if (!modal || modal.type !== 'sync-name') return;
+  const el = document.getElementById('sync-name-input');
+  const raw = el ? el.value : modal.value;
+  const name = normalizeSyncName(raw);
+  if (!name) {
+    toast('請先輸入你的名稱');
+    return;
+  }
+  const reason = modal.reason;
+  const code = modal.pendingCode;
+  modal = null;
+  saveSyncDisplayName(name, { skipServer: reason === 'join' || reason === 'create' }).then((ok) => {
+    if (!ok) return;
+    if (reason === 'create') createSyncRoom();
+    else if (reason === 'join') joinSyncRoom(code || pendingJoinCode, { hasName: true });
+    else {
+      toast('已儲存名稱 ' + name);
+      if (typeof render === 'function') render();
+    }
+  });
+}
+
 function ensurePeerId() {
   if (!state) return 'x';
   if (state.peerId && String(state.peerId).length >= 6) return state.peerId;
@@ -559,8 +682,8 @@ function maybePromptJoin(request) {
   shownJoinRequestId = request.requestId;
   modal = {
     type: 'confirm',
-    title: '有人要加入房間？',
-    body: '另一支裝置想加入你的房間' + (state.syncLabel ? '（' + state.syncLabel + '）' : '') + '。一個房間最多兩支手機。允許後就可以一起看、一起改抄號和備註。',
+    title: request.name ? (normalizeSyncName(request.name) + ' 想加入房間？') : '有人要加入房間？',
+    body: (request.name ? (normalizeSyncName(request.name) + ' 想加入你的房間') : '另一支裝置想加入你的房間') + (state.syncLabel ? '（' + state.syncLabel + '）' : '') + '。一個房間最多兩支手機。允許後就可以一起看、一起改抄號和備註。',
     ok: '允許加入',
     cancel: '拒絕',
     _syncRequestId: request.requestId,
@@ -633,11 +756,15 @@ async function kickDevice(targetDeviceId) {
 
 async function createSyncRoom() {
   lastSyncError = '';
+  if (!currentSyncName()) {
+    openSyncNamePrompt({ reason: 'create' });
+    return;
+  }
   try {
     const res = await fetch(syncBase() + '/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ snapshot: stampedSnapshot(), deviceId: ensureDeviceId() })
+      body: JSON.stringify({ snapshot: stampedSnapshot(), deviceId: ensureDeviceId(), name: currentSyncName() })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.code) throw new Error(data.error || '建立房間失敗');
@@ -656,8 +783,9 @@ async function createSyncRoom() {
   }
 }
 
-async function joinSyncRoom(code) {
+async function joinSyncRoom(code, opts) {
   lastSyncError = '';
+  opts = opts || {};
   code = normalizeInvite(code);
   if (isLegacyRoom(code)) {
     lastSyncError = '舊的 6 位數房號已無法加入，請請對方更新邀請。';
@@ -669,6 +797,11 @@ async function joinSyncRoom(code) {
     toast('請貼上完整邀請碼或邀請連結');
     return;
   }
+  if (!opts.hasName && !currentSyncName()) {
+    pendingJoinCode = code;
+    openSyncNamePrompt({ reason: 'join', code });
+    return;
+  }
   try {
     const res = await fetch(syncBase() + '/api/rooms/join', {
       method: 'POST',
@@ -676,7 +809,8 @@ async function joinSyncRoom(code) {
       body: JSON.stringify({
         code,
         deviceId: ensureDeviceId(),
-        snapshot: stampedSnapshot()
+        snapshot: stampedSnapshot(),
+        name: currentSyncName()
       }),
       signal: AbortSignal.timeout(20000)
     });
@@ -784,8 +918,10 @@ function renderSyncSettings() {
   if (!joined) {
     return `<div class="setting-block" id="sync-settings">
       <h2>兩人同步</h2>
-      <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">兩支手機看同一份抄號、標到和備註，不用再口頭對。建立房間後，用「複製邀請連結」或畫面中的 QR 碼分享給另一支手機。加入時請貼上完整邀請碼或連結。沒加入房間時，這個手機還是只存在自己這裡、離線也能用。</p>
-      <button type="button" class="btn primary" style="width:100%;margin-bottom:8px" data-act="sync-create">建立房間</button>
+      <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">兩支手機看同一份抄號、標到和備註，不用再口頭對。建立房間後，用「複製邀請連結」或畫面中的 QR 碼分享給另一支手機。加入時要先輸入自己的名稱。沒加入房間時，這個手機還是只存在自己這裡、離線也能用。</p>
+      <label class="sync-name-label" for="sync-settings-name">我的名稱</label>
+      <input id="sync-settings-name" class="sync-name-input" maxlength="20" autocomplete="name" value="${escapeHtml(currentSyncName())}" data-act="sync-name-input" placeholder="例如：小美" />
+      <button type="button" class="btn primary" style="width:100%;margin:10px 0 8px" data-act="sync-create">建立房間</button>
       <textarea id="sync-join-code" class="sync-join-input" rows="2" placeholder="貼上邀請碼或邀請連結" data-act="sync-join-input">${escapeHtml(pendingJoinCode)}</textarea>
       <button type="button" class="btn" style="width:100%;margin-top:8px" data-act="sync-join">加入</button>
       ${lastSyncError ? `<p class="empty-hint" style="text-align:left;color:#ff8a8a">${escapeHtml(lastSyncError)}</p>` : ''}
@@ -818,7 +954,7 @@ function renderSyncSettings() {
     </div>`;
   }
   const devices = (state.syncDevices || []).map((d) => {
-    const name = d.isMe ? '這支手機' : '另一支手機';
+    const name = devicePublicName(d);
     const role = d.role === 'owner' ? ' · 建立者' : '';
     const kick = state.syncRole === 'owner' && !d.isMe
       ? `<button type="button" class="btn danger sync-kick-btn" data-act="sync-kick" data-v="${escapeHtml(d.deviceId)}">移除</button>`
@@ -827,7 +963,7 @@ function renderSyncSettings() {
   }).join('');
   const pending = (state.syncJoinRequests || []).map((r) =>
     `<div class="sync-pending">
-      <span>有裝置想加入</span>
+      <span>${escapeHtml(normalizeSyncName(r.name) ? normalizeSyncName(r.name) + ' 想加入' : '有裝置想加入')}</span>
       <button type="button" class="btn primary" data-act="sync-approve" data-v="${escapeHtml(r.requestId)}">允許</button>
       <button type="button" class="btn danger" data-act="sync-reject" data-v="${escapeHtml(r.requestId)}">拒絕</button>
     </div>`
@@ -835,6 +971,11 @@ function renderSyncSettings() {
   return `<div class="setting-block" id="sync-settings">
     <h2>兩人同步</h2>
     <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">兩支手機都可以改抄號、標到和備註。離線先記在手機，連上再同步。承銷人代號只留在自己手機；第三支要先經你允許。</p>
+    <label class="sync-name-label" for="sync-settings-name">我的名稱</label>
+    <div class="sync-name-row">
+      <input id="sync-settings-name" class="sync-name-input" maxlength="20" autocomplete="name" value="${escapeHtml(currentSyncName())}" data-act="sync-name-input" placeholder="例如：小美" />
+      <button type="button" class="btn primary sync-name-save" data-act="sync-name-save">儲存</button>
+    </div>
     <div class="sync-code-box">
       <div class="sync-code-label">房間</div>
       <div class="sync-code">${escapeHtml(state.syncLabel || '')}</div>
@@ -896,10 +1037,11 @@ function initSync() {
   } else if (isSyncSecret(q) && state.syncRoom !== q) {
     pendingJoinCode = q;
     if (!state.syncRoom || isLegacyRoom(state.syncRoom)) {
-      joinSyncRoom(q);
+      openSyncNamePrompt({ reason: 'join', code: q });
     }
   } else if (isSyncSecret(state.syncRoom)) {
     connectSync();
+    maybePromptMissingName();
   }
   setInterval(() => {
     const now = Date.now();
@@ -931,6 +1073,31 @@ function handleSyncAction(act, v, ev) {
     joinSyncRoom((input && input.value) || pendingJoinCode);
     return true;
   }
+  if (act === 'sync-name-ok') { submitSyncNamePrompt(); return true; }
+  if (act === 'sync-name-cancel') {
+    modal = null;
+    if (typeof render === 'function') render();
+    return true;
+  }
+  if (act === 'sync-name-skip') {
+    if (modal && modal.type === 'sync-name') {
+      state.syncNamePrompted = true;
+      persistSyncState();
+    }
+    modal = null;
+    if (typeof render === 'function') render();
+    return true;
+  }
+  if (act === 'sync-name-save') {
+    const input = document.getElementById('sync-settings-name') || document.getElementById('sync-name-input');
+    saveSyncDisplayName(input && input.value).then((ok) => {
+      if (ok) {
+        toast('已儲存名稱 ' + currentSyncName());
+        if (typeof render === 'function') render();
+      }
+    });
+    return true;
+  }
   if (act === 'sync-leave') { leaveSyncRoom(); return true; }
   if (act === 'sync-copy-code') { copyRoomCode(); return true; }
   if (act === 'sync-copy-link') { copyRoomLink(); return true; }
@@ -943,6 +1110,12 @@ function handleSyncAction(act, v, ev) {
 function handleSyncInput(el, act) {
   if (act === 'sync-join-input' || el.id === 'sync-join-code') {
     pendingJoinCode = String(el.value || '').trim();
+    return true;
+  }
+  if (act === 'sync-name-input' || el.id === 'sync-name-input' || el.id === 'sync-settings-name') {
+    const val = el.value;
+    if (modal && modal.type === 'sync-name') modal.value = val;
+    state.syncDisplayName = normalizeSyncName(val);
     return true;
   }
   return false;

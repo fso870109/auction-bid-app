@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v63';
+const APP_VERSION = 'v64';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2475,7 +2475,9 @@ function defaultState() {
     syncJoinRequests: [],
     syncQueue: [],
     syncKvTs: {},
-    syncTombstones: { lots: {}, plan: {} }
+    syncTombstones: { lots: {}, plan: {} },
+    syncDisplayName: '',
+    syncNamePrompted: false
   };
 }
 
@@ -2577,6 +2579,9 @@ function loadState() {
     if (!Array.isArray(merged.syncDevices)) merged.syncDevices = [];
     if (!Array.isArray(merged.syncJoinRequests)) merged.syncJoinRequests = [];
     if (!Array.isArray(merged.syncQueue)) merged.syncQueue = [];
+    if (typeof merged.syncDisplayName !== 'string') merged.syncDisplayName = '';
+    else if (typeof normalizeSyncName === 'function') merged.syncDisplayName = normalizeSyncName(merged.syncDisplayName);
+    merged.syncNamePrompted = !!merged.syncNamePrompted;
     if (!merged.syncKvTs || typeof merged.syncKvTs !== 'object') merged.syncKvTs = {};
     if (!merged.syncTombstones || typeof merged.syncTombstones !== 'object') {
       merged.syncTombstones = { lots: {}, plan: {} };
@@ -5712,6 +5717,7 @@ function renderSetup() {
 
 function renderModal() {
   if (!modal) return '';
+  if (modal.type === 'sync-name' && typeof renderSyncNameModal === 'function') return renderSyncNameModal();
   if (modal.type === 'confirm') {
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet" data-stop="1">
@@ -7197,6 +7203,12 @@ function bind() {
     if (act === 'sync-join-input' || id === 'sync-join-code') {
       e.preventDefault();
       if (typeof joinSyncRoom === 'function') joinSyncRoom(e.target.value);
+      return;
+    }
+    if (act === 'sync-name-input' || id === 'sync-name-input' || id === 'sync-settings-name') {
+      e.preventDefault();
+      if (typeof submitSyncNamePrompt === 'function' && modal && modal.type === 'sync-name') submitSyncNamePrompt();
+      else if (typeof handleSyncAction === 'function') handleSyncAction('sync-name-save');
     }
   });
   window.addEventListener('beforeinstallprompt', (e) => {

@@ -2857,6 +2857,45 @@ button.lot-cell {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+.sync-name-label {
+  display: block;
+  font-size: 16px;
+  font-weight: 800;
+  margin: 4px 0 8px;
+  color: var(--text);
+}
+.sync-name-input {
+  width: 100%;
+  min-height: 64px;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 2px solid var(--yellow);
+  background: #111;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.sync-name-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 12px;
+}
+.sync-name-row .sync-name-input { flex: 1; min-width: 0; }
+.sync-name-save {
+  flex: 0 0 auto;
+  min-width: 72px;
+  font-size: 18px;
+  font-weight: 800;
+}
+.sync-name-sheet h3 { font-size: 24px; }
+.sync-name-sheet p { font-size: 16px; }
+.sync-device, .sync-pending { font-size: 16px; font-weight: 700; }
+@media (max-width: 360px) {
+  .sync-name-input { font-size: 24px; min-height: 56px; }
+}
 .sync-join-input {
   width: 100%;
   min-height: 56px;
