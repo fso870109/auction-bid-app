@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v84';
+const APP_VERSION = 'v85';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -57,7 +57,25 @@ function catalogNameSet(half) {
   return set;
 }
 
+const ITEM_CANON_V85 = {
+  '碗豆': '豌豆',
+  '碗豆苗': '豌豆苗',
+  '豌豆-豌豆苗': '豌豆苗',
+  '豌豆 豌豆苗': '豌豆苗',
+  '碗豆-豌豆苗': '豌豆苗',
+  '碗豆 豌豆苗': '豌豆苗',
+  '豌豆-進口豌豆苗': '進口豌豆苗',
+  '碗豆-進口豌豆苗': '進口豌豆苗'
+};
+
+function canonicalItemName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  return ITEM_CANON_V85[raw] || raw;
+}
+
 function findCrop(name, half) {
+  name = canonicalItemName(name);
   if (!name) return null;
   const pools = half ? catalogCrops(half) : (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : []);
   const exacts = pools.filter((c) => c.n === name || c.l === name);
@@ -99,6 +117,7 @@ function everydayItemLabel(name) {
 
 function itemDisplayName(name) {
   if (!name) return '';
+  name = canonicalItemName(name);
   if (LEGACY_ITEM_DISPLAY[name]) return LEGACY_ITEM_DISPLAY[name];
   const everyday = everydayItemLabel(name);
   if (everyday) return everyday;
@@ -126,6 +145,7 @@ function itemDisplayName(name) {
 
 function itemCellName(name) {
   if (!name) return '';
+  name = canonicalItemName(name);
   if (LEGACY_ITEM_DISPLAY[name]) return LEGACY_ITEM_DISPLAY[name];
   const everyday = everydayItemLabel(name);
   if (everyday) return everyday;
@@ -719,6 +739,7 @@ function renderItemPicker(half, opts) {
     if (q) {
       for (const v of (crop.s || [])) {
         if (!usefulVariant(v, crop) || !variantMatchesQuery(v, q)) continue;
+        if (GRID_PROMOTIONS.some((p) => p.cropN === crop.n && (p.varN === v.n || p.l === v.l || (v.a || []).includes(p.l)))) continue;
         const von = active === v.n || active === v.l || (v.a || []).includes(active) ? ' on' : '';
         const vlabel = (v.imp ? '進口 ' : '') + (v.l || v.n);
         const vneed = needBadgeHtml([v.n, v.l, vlabel]);
@@ -1121,6 +1142,7 @@ const GOURD_PEEL_CROP = {
   '美人腿': 'cream',
   '辣椒': 'chili',
   '豌豆': 'green',
+  '豌豆苗': 'green',
   '甜豆': 'green',
   '荷蘭豆': 'green',
   '四季豆': 'green',
@@ -1714,7 +1736,7 @@ function peelClass(name) {
 }
 
 function resolveLotItem(item) {
-  const name = String(item || '').trim();
+  const name = canonicalItemName(item);
   if (!name) return { crop: null, variety: null };
   const crop = findCrop(name);
   if (crop) {
@@ -3189,6 +3211,7 @@ function defaultState() {
     itemsMigratedV21: true,
     itemsMigratedV46: true,
     itemsMigratedV67: true,
+    itemsMigratedV85: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
     lotsPerMin: DEFAULT_LOTS_PER_MIN,
     skipAutoDay: '',
@@ -3296,6 +3319,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV67) {
       migrateItemsV67(merged);
+    }
+    if (!saved.itemsMigratedV85) {
+      migrateItemsV85(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -4498,6 +4524,108 @@ function migrateItemsV46(merged) {
     }
   }
   merged.itemsMigratedV46 = true;
+}
+
+
+function migrateItemsV85(merged) {
+  const rename = (raw) => {
+    const n = String(raw || '').trim();
+    if (!n) return n;
+    if (ITEM_CANON_V85[n]) return ITEM_CANON_V85[n];
+    if (typeof renameDisplayText === 'function') {
+      const next = renameDisplayText(n);
+      return ITEM_CANON_V85[next] || next;
+    }
+    return n;
+  };
+  const renameKeys = (map, merger) => {
+    if (!map || typeof map !== 'object') return;
+    for (const from of Object.keys(map)) {
+      const to = rename(from);
+      if (!to || to === from) continue;
+      merger(map, from, to);
+    }
+  };
+  if (merged.itemCounts && typeof merged.itemCounts === 'object') {
+    renameKeys(merged.itemCounts, mergeCountKey);
+  }
+  if (merged.itemCountsByHalf && typeof merged.itemCountsByHalf === 'object') {
+    for (const half of Object.keys(merged.itemCountsByHalf)) {
+      const map = merged.itemCountsByHalf[half];
+      if (!map || typeof map !== 'object') continue;
+      renameKeys(map, mergeCountKey);
+    }
+  }
+  if (merged.itemUseLogByHalf && typeof merged.itemUseLogByHalf === 'object') {
+    for (const half of Object.keys(merged.itemUseLogByHalf)) {
+      const log = merged.itemUseLogByHalf[half];
+      if (!log || typeof log !== 'object') continue;
+      renameKeys(log, mergeUseLogKey);
+    }
+  }
+  for (const lot of merged.lots || []) {
+    if (!lot || !lot.item) continue;
+    lot.item = rename(lot.item);
+  }
+  for (const p of merged.planItems || []) {
+    if (!p || !p.text) continue;
+    p.text = rename(p.text);
+  }
+  for (const h of merged.boughtHistory || []) {
+    for (const it of (h && h.items) || []) {
+      if (!it || !it.text) continue;
+      it.text = rename(it.text);
+    }
+  }
+  const officialOf = (half) => {
+    try { return catalogNameSet(half); } catch { return new Set(); }
+  };
+  const foldList = (arr, half) => {
+    if (!Array.isArray(arr)) return arr;
+    const official = officialOf(half);
+    const out = [];
+    const have = new Set();
+    for (const raw of arr) {
+      let n = rename(raw);
+      if (!n || have.has(n)) continue;
+      if (official.has(n)) continue;
+      have.add(n);
+      out.push(n);
+    }
+    return out;
+  };
+  if (Array.isArray(merged.customItems)) {
+    const half = (merged.currentHalf) || 'afternoon';
+    merged.customItems = foldList(merged.customItems, half);
+  }
+  if (merged.customItemsByHalf && typeof merged.customItemsByHalf === 'object') {
+    for (const half of Object.keys(merged.customItemsByHalf)) {
+      merged.customItemsByHalf[half] = foldList(merged.customItemsByHalf[half], half);
+    }
+  }
+  if (merged.itemOrderByHalf && typeof merged.itemOrderByHalf === 'object') {
+    for (const half of Object.keys(merged.itemOrderByHalf)) {
+      const groups = merged.itemOrderByHalf[half];
+      if (!groups || typeof groups !== 'object') continue;
+      for (const group of Object.keys(groups)) {
+        const arr = groups[group];
+        if (!Array.isArray(arr)) continue;
+        const out = [];
+        const have = new Set();
+        for (const raw of arr) {
+          const n = rename(raw);
+          if (!n || have.has(n)) continue;
+          have.add(n);
+          out.push(n);
+        }
+        groups[group] = out;
+      }
+    }
+    if (typeof normalizeItemOrderMap === 'function') {
+      merged.itemOrderByHalf = normalizeItemOrderMap(merged.itemOrderByHalf);
+    }
+  }
+  merged.itemsMigratedV85 = true;
 }
 
 function defaultItems(half) {
