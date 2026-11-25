@@ -381,6 +381,7 @@
     // (setProgress, writeAnchor, machine lists) must still diff and emit kv ops.
     kv.machines = clone(state.machines);
     kv.customItemsByHalf = clone(state.customItemsByHalf);
+    kv.itemOrderByHalf = clone(state.itemOrderByHalf);
     kv.boughtHistory = clone(state.boughtHistory);
     kv.currentNumbers = clone(state.currentNumbers);
     kv.progressAnchors = clone(state.progressAnchors);
@@ -412,6 +413,12 @@
     if (machines && typeof machines === 'object') state.machines = machines;
     const customs = val('customItemsByHalf');
     if (customs && typeof customs === 'object') state.customItemsByHalf = customs;
+    const itemOrder = val('itemOrderByHalf');
+    if (itemOrder && typeof itemOrder === 'object') {
+      state.itemOrderByHalf = (typeof normalizeItemOrderMap === 'function')
+        ? normalizeItemOrderMap(itemOrder)
+        : itemOrder;
+    }
     const hist = val('boughtHistory');
     if (Array.isArray(hist)) {
       if (typeof mergeBoughtHistory === 'function') state.boughtHistory = mergeBoughtHistory(state.boughtHistory, hist);

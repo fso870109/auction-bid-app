@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v83';
+const APP_VERSION = 'v84';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -266,6 +266,211 @@ function itemSortTie(crop) {
   return 0;
 }
 
+
+function emptyItemOrderMap() {
+  return { fruit: {}, morning: {}, afternoon: {} };
+}
+
+function normalizeItemOrderMap(raw) {
+  const out = emptyItemOrderMap();
+  if (!raw || typeof raw !== 'object') return out;
+  for (const half of HALVES) {
+    const src = raw[half];
+    out[half] = {};
+    if (!src || typeof src !== 'object') continue;
+    for (const [group, arr] of Object.entries(src)) {
+      if (!group || !Array.isArray(arr)) continue;
+      const seen = new Set();
+      const list = [];
+      for (const name of arr) {
+        const n = String(name || '').trim();
+        if (!n || seen.has(n)) continue;
+        seen.add(n);
+        list.push(n);
+      }
+      if (list.length) out[half][group] = list;
+    }
+  }
+  return out;
+}
+
+function ensureItemOrderMap() {
+  if (!state.itemOrderByHalf) state.itemOrderByHalf = emptyItemOrderMap();
+  for (const half of HALVES) {
+    if (!state.itemOrderByHalf[half] || typeof state.itemOrderByHalf[half] !== 'object') {
+      state.itemOrderByHalf[half] = {};
+    }
+  }
+  return state.itemOrderByHalf;
+}
+
+function itemOrderOf(half, group) {
+  const map = ensureItemOrderMap();
+  const h = half || (state && state.currentHalf) || 'morning';
+  const list = map[h] && map[h][group];
+  return Array.isArray(list) ? list : [];
+}
+
+function mergeSavedNameOrder(defaultNames, saved) {
+  if (!saved || !saved.length) return defaultNames.slice();
+  const current = defaultNames.map((n) => String(n));
+  const currentSet = new Set(current);
+  const kept = saved.filter((n) => currentSet.has(n));
+  if (!kept.length) return current;
+  const keptSet = new Set(kept);
+  const result = kept.slice();
+  for (const name of current) {
+    if (keptSet.has(name)) continue;
+    const volIdx = current.indexOf(name);
+    let insertAt = result.length;
+    for (let i = 0; i < result.length; i++) {
+      if (current.indexOf(result[i]) > volIdx) {
+        insertAt = i;
+        break;
+      }
+    }
+    result.splice(insertAt, 0, name);
+  }
+  return result;
+}
+
+function applySavedItemOrder(list, half) {
+  if (!list || !list.length) return list;
+  const groups = [];
+  const buckets = new Map();
+  for (const crop of list) {
+    const g = crop.g || '';
+    if (!buckets.has(g)) {
+      buckets.set(g, []);
+      groups.push(g);
+    }
+    buckets.get(g).push(crop);
+  }
+  const out = [];
+  for (const g of groups) {
+    const bucket = buckets.get(g);
+    const byLabel = new Map();
+    for (const crop of bucket) {
+      if (!byLabel.has(crop.l)) byLabel.set(crop.l, crop);
+    }
+    const defaultNames = bucket.map((c) => c.l);
+    const ordered = mergeSavedNameOrder(defaultNames, itemOrderOf(half, g));
+    const used = new Set();
+    for (const name of ordered) {
+      const crop = byLabel.get(name);
+      if (!crop || used.has(crop)) continue;
+      used.add(crop);
+      out.push(crop);
+    }
+    for (const crop of bucket) {
+      if (!used.has(crop)) out.push(crop);
+    }
+  }
+  return out;
+}
+
+function applySavedNameList(names, half, group, cmp) {
+  const def = names.slice();
+  if (typeof cmp === 'function') def.sort(cmp);
+  return mergeSavedNameOrder(def, itemOrderOf(half, group));
+}
+
+function setItemOrder(half, group, names) {
+  const map = ensureItemOrderMap();
+  const h = half || state.currentHalf;
+  if (!map[h]) map[h] = {};
+  const seen = new Set();
+  const list = [];
+  for (const name of names || []) {
+    const n = String(name || '').trim();
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    list.push(n);
+  }
+  if (list.length) map[h][group] = list;
+  else delete map[h][group];
+}
+
+function renameItemOrderKey(half, oldName, newName) {
+  const map = ensureItemOrderMap();
+  const groups = map[half || state.currentHalf];
+  if (!groups) return;
+  for (const arr of Object.values(groups)) {
+    if (!Array.isArray(arr)) continue;
+    const i = arr.indexOf(oldName);
+    if (i >= 0) arr[i] = newName;
+  }
+}
+
+function removeItemOrderKey(half, name) {
+  const map = ensureItemOrderMap();
+  const groups = map[half || state.currentHalf];
+  if (!groups) return;
+  for (const group of Object.keys(groups)) {
+    const arr = groups[group];
+    if (!Array.isArray(arr)) continue;
+    groups[group] = arr.filter((n) => n !== name);
+    if (!groups[group].length) delete groups[group];
+  }
+}
+
+function itemOrderHasCustom(half, group) {
+  const map = ensureItemOrderMap();
+  if (!half) {
+    return HALVES.some((h) => Object.keys(map[h] || {}).length);
+  }
+  if (!group) return Object.keys(map[half] || {}).length > 0;
+  return !!(map[half] && Array.isArray(map[half][group]) && map[half][group].length);
+}
+
+const ITEM_ORDER_SECTIONS = [
+  { half: 'fruit', group: '水果', label: '水果場・水果' },
+  { half: 'fruit', group: '自己輸入', label: '水果場・自己輸入' },
+  { half: 'morning', group: '大宗', label: '上半場・大宗' },
+  { half: 'morning', group: '水菜', label: '上半場・水菜' },
+  { half: 'morning', group: '自己輸入', label: '上半場・自己輸入' },
+  { half: 'afternoon', group: '瓜果', label: '下半場・瓜果' },
+  { half: 'afternoon', group: '醃製', label: '下半場・醃製' },
+  { half: 'afternoon', group: '自己輸入', label: '下半場・自己輸入' }
+];
+
+function resetItemOrder(half, group) {
+  const map = ensureItemOrderMap();
+  if (!half) {
+    state.itemOrderByHalf = emptyItemOrderMap();
+    saveState();
+    toast('已恢復全部交易量排序');
+    return;
+  }
+  if (!map[half]) map[half] = {};
+  if (group) {
+    delete map[half][group];
+    saveState();
+    toast('已恢復' + group + '交易量排序');
+    return;
+  }
+  map[half] = {};
+  saveState();
+  toast('已恢復交易量排序');
+}
+
+function renderItemOrderSettings() {
+  const rows = ITEM_ORDER_SECTIONS.map((s) => {
+    const on = itemOrderHasCustom(s.half, s.group);
+    return `<div class="item-order-row">
+      <div class="lbl">${escapeHtml(s.label)}${on ? '<span class="item-order-flag">已調整</span>' : ''}</div>
+      <button type="button" class="btn" data-act="reset-item-order" data-half="${s.half}" data-group="${escapeHtml(s.group)}" ${on ? '' : 'disabled'}>恢復</button>
+    </div>`;
+  }).join('');
+  const any = itemOrderHasCustom();
+  return `<div class="setting-block item-order-block">
+    <h2>品項按鈕順序</h2>
+    <p class="sub">在抄號長按約 0.4 秒後拖曳，可改同一個分類裡的按鈕位置。會同步到另一支手機。還沒拖過的新品項會依交易量插入。</p>
+    <button type="button" class="btn item-order-reset-all" data-act="reset-item-order" ${any ? '' : 'disabled'}>全部恢復交易量排序</button>
+    ${rows}
+  </div>`;
+}
+
 function visibleCrops(half, q) {
   const h = half || (state && state.currentHalf) || 'morning';
   const counts = itemCountsOf(h);
@@ -280,13 +485,12 @@ function visibleCrops(half, q) {
     list = list.filter((c) => cropShownOnGrid(c, counts));
   }
   list = list.concat(promotionCrops(h, q, counts));
+  /* Official buttons are one merged list per section, strictly by 桃農
+     12-month volume (high first). Usage counts must not change this order. */
   list.sort((a, b) => {
     const ga = ranks[a.g] ?? 9;
     const gb = ranks[b.g] ?? 9;
     if (ga !== gb) return ga - gb;
-    const sa = itemSessionScore(a.l, h) || itemSessionScore(a.n, h);
-    const sb = itemSessionScore(b.l, h) || itemSessionScore(b.n, h);
-    if (sb !== sa) return sb - sa;
     const va = itemSortVolume(a);
     const vb = itemSortVolume(b);
     const za = va > 0 ? 0 : 1;
@@ -298,6 +502,7 @@ function visibleCrops(half, q) {
     if (ta !== tb) return ta - tb;
     return String(a.l).localeCompare(String(b.l), 'zh-Hant');
   });
+  if (!String(q || '').trim()) list = applySavedItemOrder(list, h);
   return list;
 }
 
@@ -461,7 +666,7 @@ function renderItemPicker(half, opts) {
   const counts = itemCountsOf(h);
 
   const builtSet = catalogNameSet(h);
-  const customs = customItemsOf(h)
+  let customs = customItemsOf(h)
     .map((n) => String(n || '').trim())
     .filter((n) => n && !builtSet.has(n))
     .filter((n) => {
@@ -469,7 +674,11 @@ function renderItemPicker(half, opts) {
       if (q.length >= 2) return n.includes(q);
       return n === q || n.startsWith(q);
     });
-  customs.sort((a, b) => (itemSessionScore(b, h) - itemSessionScore(a, h)) || a.localeCompare(b, 'zh-Hant'));
+  if (!String(q || '').trim()) {
+    customs = applySavedNameList(customs, h, '自己輸入', (a, b) => (itemSessionScore(b, h) - itemSessionScore(a, h)) || a.localeCompare(b, 'zh-Hant'));
+  } else {
+    customs.sort((a, b) => (itemSessionScore(b, h) - itemSessionScore(a, h)) || a.localeCompare(b, 'zh-Hant'));
+  }
 
   const crops = visibleCrops(h, q);
   const parts = [];
@@ -480,7 +689,7 @@ function renderItemPicker(half, opts) {
       const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
       const need = needBadgeHtml([name]);
       parts.push(
-        `<button type="button" class="item-btn custom${on}${need.cls}" data-act="pick-item" data-name="${escapeHtml(name)}"${lotAttr}>${escapeHtml(name)}${need.html}</button>`
+        `<button type="button" class="item-btn custom${on}${need.cls}" data-act="pick-item" data-name="${escapeHtml(name)}" data-group="自己輸入"${lotAttr}>${escapeHtml(name)}${need.html}</button>`
       );
     }
   }
@@ -496,7 +705,7 @@ function renderItemPicker(half, opts) {
       const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
       const need = needBadgeHtml([crop.l, crop.n, crop.promoVar]);
       parts.push(
-        `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.l)}" data-act="pick-item" data-name="${escapeHtml(crop.l)}"${lotAttr}>${escapeHtml(crop.l)}${need.html}</button>`
+        `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.l)}" data-act="pick-item" data-name="${escapeHtml(crop.l)}" data-group="${escapeHtml(crop.g || '')}"${lotAttr}>${escapeHtml(crop.l)}${need.html}</button>`
       );
       continue;
     }
@@ -505,7 +714,7 @@ function renderItemPicker(half, opts) {
     const lotAttr = lotId ? ` data-id="${escapeHtml(lotId)}"` : '';
     const need = needBadgeHtml([crop.l, crop.n]);
     parts.push(
-      `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}"${lotAttr}>${escapeHtml(crop.l)}${badge}${need.html}</button>`
+      `<button type="button" class="item-btn${on}${need.cls}${peelClass(crop.n)}" data-act="pick-crop" data-crop="${escapeHtml(crop.n)}" data-name="${escapeHtml(crop.l)}" data-group="${escapeHtml(crop.g || '')}"${lotAttr}>${escapeHtml(crop.l)}${badge}${need.html}</button>`
     );
     if (q) {
       for (const v of (crop.s || [])) {
@@ -2967,6 +3176,7 @@ function defaultState() {
     customItems: [],
     itemCounts: {},
     customItemsByHalf: { fruit: [], morning: [], afternoon: [] },
+    itemOrderByHalf: { fruit: {}, morning: {}, afternoon: {} },
     itemCountsByHalf: { fruit: {}, morning: {}, afternoon: {} },
     itemUseLogByHalf: { fruit: {}, morning: {}, afternoon: {} },
     itemUseLogMigrated: true,
@@ -3067,6 +3277,7 @@ function loadState() {
     if (!Array.isArray(merged.customItems)) merged.customItems = [];
     if (!merged.itemCounts || typeof merged.itemCounts !== 'object') merged.itemCounts = {};
     migrateItemLists(merged);
+    merged.itemOrderByHalf = normalizeItemOrderMap(merged.itemOrderByHalf);
     if (!Array.isArray(merged.dayRules)) merged.dayRules = [];
     if (!['must', 'watch', 'skip'].includes(merged.lastPriority)) merged.lastPriority = 'watch';
     if (merged.thumbHand !== 'right') merged.thumbHand = 'left';
@@ -4864,6 +5075,7 @@ function renameCustomItem(oldName, newName, half) {
     if (lot.item === oldName && (!lot.half || lot.half === h)) lot.item = newName;
   }
   if (draftItem === oldName) draftItem = newName;
+  if (oldName !== newName) renameItemOrderKey(h, oldName, newName);
   saveState();
   toast(`已改成「${newName}」`);
   return true;
@@ -4872,6 +5084,7 @@ function renameCustomItem(oldName, newName, half) {
 function deleteCustomItem(name, half) {
   const h = half || (modal && modal.half) || state.currentHalf;
   state.customItemsByHalf[h] = customItemsOf(h).filter((n) => n !== name);
+  removeItemOrderKey(h, name);
   saveState();
   toast(`已刪「${name}」`);
 }
@@ -7411,6 +7624,7 @@ function renderSettings() {
       </div>
     </div>
     ${halfBlocks}
+    ${renderItemOrderSettings()}
     ${HALVES.map((half) => {
       const title = half === 'fruit' ? '水果場品項（水果）'
         : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、花椰菜、竹筍等屬瓜果）'
@@ -7941,6 +8155,10 @@ function onClick(e) {
       }
       break;
     }
+    case 'reset-item-order':
+      resetItemOrder(btn.dataset.half || '', btn.dataset.group || '');
+      render();
+      break;
     case 'edit-item':
       openItemEditor(btn.dataset.name, btn.dataset.half || state.currentHalf);
       break;
@@ -8616,7 +8834,7 @@ function syncViewportHeight() {
 
 
 const HOLD_MS = 350;
-const ITEM_HOLD_MS = 520;
+const ITEM_HOLD_MS = 400;
 const DRAG_SLOP = 12;
 
 function eventPoint(e) {
@@ -8642,21 +8860,25 @@ function cancelPress() {
 
 function lockLists() {
   document.documentElement.classList.add('is-dragging');
-  document.querySelectorAll('.live-col-list').forEach((el) => {
+  document.querySelectorAll('.live-col-list, .item-pick').forEach((el) => {
     el.style.overflow = 'hidden';
   });
 }
 
 function cleanupDrag() {
   document.documentElement.classList.remove('is-dragging');
-  document.querySelectorAll('.live-col-list').forEach((el) => {
+  document.querySelectorAll('.live-col-list, .item-pick').forEach((el) => {
     el.style.overflow = '';
   });
   if (dragState?.ghost) dragState.ghost.remove();
-  document.querySelectorAll('.lot-cell.dragging, .lot-cell.armed, .live-col.drop-target, .live-col.dragging, .live-col.drop-before, .live-col.drop-after, .live-cols.drop-end').forEach((el) => {
+  document.querySelectorAll('.lot-cell.dragging, .lot-cell.armed, .live-col.drop-target, .live-col.dragging, .live-col.drop-before, .live-col.drop-after, .live-cols.drop-end, .item-btn.dragging').forEach((el) => {
     el.classList.remove('dragging', 'armed', 'drop-target', 'drop-before', 'drop-after', 'drop-end');
   });
-  const capEl = dragState?.cell || dragState?.colEl;
+  document.querySelectorAll('.item-pick .item-btn, .item-pick .item-group-h').forEach((el) => {
+    el.style.transform = '';
+    el.style.transition = '';
+  });
+  const capEl = dragState?.cell || dragState?.colEl || dragState?.btn;
   if (capEl && dragState?.pointerId != null && capEl.releasePointerCapture) {
     try { capEl.releasePointerCapture(dragState.pointerId); } catch { /* ignore */ }
   }
@@ -8692,6 +8914,173 @@ function maybeCapture(el) {
     try { el.setPointerCapture(pressOrigin.pointerCap); return pressOrigin.pointerCap; } catch { /* ignore */ }
   }
   return null;
+}
+
+
+function isNoteItemDragBtn(btn) {
+  if (!btn || !state || state.tab !== 'note' || showSettings || modal || paddleOpen) return false;
+  if (variantPick) return false;
+  if (String(itemQuery || '').trim()) return false;
+  const act = btn.getAttribute('data-act');
+  if (act !== 'pick-item' && act !== 'pick-crop') return false;
+  if (btn.classList.contains('item-add')) return false;
+  if (!btn.dataset.group) return false;
+  const pick = btn.closest('.item-pick');
+  if (!pick || pick.classList.contains('sheet-items') || pick.classList.contains('plan-grid-list')) return false;
+  if (pick.closest('.in-sheet, .overlay, .plan-screen, .sheet')) return false;
+  return true;
+}
+
+function itemSectionButtons(btn) {
+  const pick = btn && btn.closest('.item-pick');
+  const group = btn && btn.dataset.group;
+  if (!pick || !group) return [];
+  return [...pick.querySelectorAll('button.item-btn')].filter((el) => el.dataset.group === group);
+}
+
+function flipItemPick(pick, mutate) {
+  if (!pick) {
+    mutate();
+    return;
+  }
+  if (typeof reducedMotion === 'function' && reducedMotion()) {
+    mutate();
+    return;
+  }
+  const els = [...pick.querySelectorAll('.item-btn, .item-group-h')];
+  const first = new Map(els.map((el) => [el, el.getBoundingClientRect()]));
+  mutate();
+  els.forEach((el) => {
+    const prev = first.get(el);
+    if (!prev || !el.isConnected) return;
+    const last = el.getBoundingClientRect();
+    const dx = prev.left - last.left;
+    const dy = prev.top - last.top;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    requestAnimationFrame(() => {
+      el.style.transition = 'transform 180ms cubic-bezier(.22, 1, .36, 1)';
+      el.style.transform = '';
+    });
+  });
+}
+
+function startItemDrag(pt, btn) {
+  if (dragState || !btn || !btn.isConnected) return;
+  clearPressTimers();
+  ignoreItemClick = true;
+  const rect = btn.getBoundingClientRect();
+  const ghost = makeGhost(btn, rect, 'item-drag-ghost');
+  btn.classList.add('dragging');
+  lockLists();
+  const cap = maybeCapture(btn);
+  const pick = btn.closest('.item-pick');
+  if (pick) pick.dataset.scrollLock = String(pick.scrollTop || 0);
+  dragState = {
+    kind: 'item',
+    btn,
+    ghost,
+    pick,
+    group: btn.dataset.group || '',
+    name: btn.dataset.name || (btn.textContent || '').trim(),
+    half: state.currentHalf,
+    pointerId: cap,
+    grabX: pt.x - rect.left,
+    grabY: pt.y - rect.top,
+    startX: pt.x,
+    startY: pt.y,
+    lastX: pt.x,
+    lastY: pt.y,
+    moved: false,
+    fromIndex: itemSectionButtons(btn).indexOf(btn)
+  };
+  buzz(14);
+  moveItemDrag(pt);
+}
+
+function autoScrollItemPick(pick, pt) {
+  if (!pick) return;
+  const r = pick.getBoundingClientRect();
+  const edge = 36;
+  let delta = 0;
+  if (pt.y < r.top + edge) delta = -Math.max(8, Math.round((r.top + edge - pt.y) / 2));
+  else if (pt.y > r.bottom - edge) delta = Math.max(8, Math.round((pt.y - (r.bottom - edge)) / 2));
+  if (delta) pick.scrollTop += delta;
+}
+
+function moveItemDrag(pt) {
+  if (!dragState || dragState.kind !== 'item') return;
+  dragState.lastX = pt.x;
+  dragState.lastY = pt.y;
+  const dx = pt.x - dragState.startX;
+  const dy = pt.y - dragState.startY;
+  if (dx * dx + dy * dy > DRAG_SLOP * DRAG_SLOP) dragState.moved = true;
+  const g = dragState.ghost;
+  if (g) {
+    g.style.left = (pt.x - dragState.grabX) + 'px';
+    g.style.top = (pt.y - dragState.grabY) + 'px';
+  }
+  const btn = dragState.btn;
+  const pick = dragState.pick;
+  autoScrollItemPick(pick, pt);
+  const buttons = itemSectionButtons(btn);
+  if (buttons.length < 2) return;
+  const from = buttons.indexOf(btn);
+  if (from < 0) return;
+  let best = from;
+  let bestDist = Infinity;
+  for (let i = 0; i < buttons.length; i++) {
+    const r = buttons[i].getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const d = (pt.x - cx) * (pt.x - cx) + (pt.y - cy) * (pt.y - cy);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  const r = buttons[best].getBoundingClientRect();
+  const midY = r.top + r.height / 2;
+  const midX = r.left + r.width / 2;
+  const after = Math.abs(pt.y - midY) > r.height * 0.35 ? pt.y > midY : pt.x > midX;
+  let to = after ? best + 1 : best;
+  if (from < to) to -= 1;
+  if (to < 0) to = 0;
+  if (to >= buttons.length) to = buttons.length - 1;
+  if (to === from) return;
+  const target = buttons[to];
+  flipItemPick(pick, () => {
+    if (to < from) target.parentNode.insertBefore(btn, target);
+    else target.parentNode.insertBefore(btn, target.nextSibling);
+  });
+}
+
+function endItemDrag(pt) {
+  if (!dragState || dragState.kind !== 'item') return;
+  const btn = dragState.btn;
+  const moved = dragState.moved || (itemSectionButtons(btn).indexOf(btn) !== dragState.fromIndex);
+  const group = dragState.group;
+  const half = dragState.half;
+  const pick = dragState.pick;
+  const scroll = pick ? pick.scrollTop : 0;
+  const name = dragState.name;
+  cleanupDrag();
+  if (!moved) {
+    if (isCustomItem(name, half)) openItemEditor(name, half);
+    return;
+  }
+  const orderBtn = btn && btn.isConnected ? btn : document.querySelector('.item-pick button.item-btn[data-group="' + CSS.escape(group) + '"]');
+  const names = itemSectionButtons(orderBtn || btn).map((el) => el.dataset.name || (el.textContent || '').trim()).filter(Boolean);
+  if (names.length && group) {
+    setItemOrder(half, group, names);
+    saveState();
+  }
+  render();
+  if (pick) {
+    const next = document.querySelector('.item-pick');
+    if (next) next.scrollTop = scroll;
+  }
 }
 
 function startLotDrag(pt, cell, id) {
@@ -8896,9 +9285,19 @@ function onPressStart(e, pt) {
     recent.classList.add('armed');
     return;
   }
-  const itemBtn = target && target.closest && target.closest('[data-act="pick-item"]');
+  const itemBtn = target && target.closest && target.closest('.item-btn[data-act="pick-item"], .item-btn[data-act="pick-crop"]');
   const cell = target && target.closest && target.closest('[data-act="cycle-lot"]');
   const colHead = target && target.closest && target.closest('.live-col-head');
+  if (itemBtn && isNoteItemDragBtn(itemBtn)) {
+    pressOrigin.itemBtn = itemBtn;
+    pressOrigin.itemName = itemBtn.dataset.name || '';
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      if (!pressOrigin || pressOrigin.itemBtn !== itemBtn || !itemBtn.isConnected || dragState) return;
+      startItemDrag({ x: pressOrigin.x, y: pressOrigin.y, id: pt.id }, itemBtn);
+    }, ITEM_HOLD_MS);
+    return;
+  }
   if (itemBtn) {
     const name = itemBtn.dataset.name;
     const half = state.currentHalf;
@@ -8940,6 +9339,7 @@ function onPressMove(e, pt) {
   if (dragState) {
     if (e.cancelable) e.preventDefault();
     if (dragState.kind === 'col') moveColDrag(pt);
+    else if (dragState.kind === 'item') moveItemDrag(pt);
     else moveLotDrag(pt);
     return;
   }
@@ -8963,6 +9363,14 @@ function onPressMove(e, pt) {
     }
     return;
   }
+  if (pressOrigin.itemBtn) {
+    // Finger moved before the hold: cancel lift and let the item list scroll.
+    if (dist2 > DRAG_SLOP * DRAG_SLOP) {
+      clearPressTimers();
+      pressOrigin = { x: pressOrigin.x, y: pressOrigin.y };
+    }
+    return;
+  }
   if (!longPressTimer) return;
   if (dist2 > 64) clearPressTimers();
 }
@@ -8971,6 +9379,7 @@ function onPressEnd(e, pt) {
   if (dragState) {
     if (e.cancelable) e.preventDefault();
     if (dragState.kind === 'col') endColDrag(pt);
+    else if (dragState.kind === 'item') endItemDrag(pt);
     else endLotDrag(pt);
     pressOrigin = null;
     return;
@@ -9015,6 +9424,7 @@ function onTouchCancel(e) {
   if (dragState) {
     const pt = { x: dragState.lastX, y: dragState.lastY };
     if (dragState.kind === 'col') endColDrag(pt);
+    else if (dragState.kind === 'item') endItemDrag(pt);
     else endLotDrag(pt);
     pressOrigin = null;
     return;
@@ -9093,7 +9503,7 @@ function bind() {
     }, 30000);
   }
   document.addEventListener('selectstart', (e) => {
-    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list')) e.preventDefault();
+    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list, .item-btn, .item-pick')) e.preventDefault();
   });
   document.addEventListener('touchstart', onTouchStart, { passive: true });
   document.addEventListener('touchmove', onTouchMove, { passive: false });
