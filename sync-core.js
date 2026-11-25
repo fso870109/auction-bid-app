@@ -334,11 +334,13 @@
     kv.day = state.day;
     kv.dayCutoffHour = state.dayCutoffHour;
     kv.lotsPerMin = state.lotsPerMin;
-    kv.machines = state.machines;
-    kv.customItemsByHalf = state.customItemsByHalf;
-    kv.boughtHistory = state.boughtHistory;
-    kv.currentNumbers = state.currentNumbers;
-    kv.progressAnchors = state.progressAnchors;
+    // Clone object values so lastShared is a true snapshot. In-place edits
+    // (setProgress, writeAnchor, machine lists) must still diff and emit kv ops.
+    kv.machines = clone(state.machines);
+    kv.customItemsByHalf = clone(state.customItemsByHalf);
+    kv.boughtHistory = clone(state.boughtHistory);
+    kv.currentNumbers = clone(state.currentNumbers);
+    kv.progressAnchors = clone(state.progressAnchors);
     kv.autoAdvance = state.autoAdvance !== false;
     return kv;
   }
