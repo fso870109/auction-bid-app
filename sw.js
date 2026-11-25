@@ -1,4 +1,4 @@
-const CACHE = 'auction-bid-v88';
+const CACHE = 'auction-bid-v89';
 const NETWORK_TIMEOUT_MS = 3000;
 const ASSETS = [
   './',
@@ -9,6 +9,7 @@ const ASSETS = [
   './sync-core.js',
   './qrcode.js',
   './sync.js',
+  './global-progress.js',
   './manifest.json',
   './manifest.webmanifest',
   './icons/icon-192.png',
@@ -28,6 +29,7 @@ const NETWORK_FIRST_PATHS = new Set([
   '/items-catalog.js',
   '/sync-core.js',
   '/sync.js',
+  '/global-progress.js',
   '/qrcode.js',
   '/sw.js',
   '/manifest.json',

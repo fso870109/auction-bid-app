@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v88';
+const APP_VERSION = 'v89';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -3554,6 +3554,7 @@ function saveState() {
     toast('儲存失敗，空間可能不足');
   }
   if (typeof onLocalStateSaved === 'function') onLocalStateSaved();
+  if (typeof onGlobalProgressSaved === 'function') onGlobalProgressSaved();
 }
 
 function halfLabel(half) {
@@ -7986,6 +7987,10 @@ function renderSettings() {
         <div><div class="lbl">自動前跳</div><div class="sub">用「現在」或加減設定後，會依拍賣速度自動往前跳。只會移動現在進度，不會自動把貨標成標到或沒標到。不想自動跳時可在這裡關掉。</div></div>
         <button type="button" class="toggle${autoAdvanceOn() ? ' on' : ''}" data-act="toggle-auto-advance"><i></i></button>
       </div>
+      <div class="switch-row gp-row">
+        <div><div class="lbl">全市場共用拍賣進度</div><div class="sub">「現在拍到幾號」大家一起用：不管哪一組，誰更新都會一起顯示。只分享號碼，抄號、標到、備註不會分享出去。</div><div class="sub gp-status" id="gp-status">${escapeHtml(typeof gpStatusLabel === 'function' ? gpStatusLabel() : '')}</div></div>
+        <button type="button" class="toggle${state.globalProgress !== false ? ' on' : ''}" data-act="toggle-global-progress"><i></i></button>
+      </div>
       <div class="switch-row">
         <div><div class="lbl">拍賣速度</div><div class="sub">每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。預設每分鐘 4 號。</div></div>
         <select id="lots-per-min" class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
@@ -8555,6 +8560,12 @@ function onClick(e) {
     }
     case 'toggle-autosave':
       state.autoSave4 = !state.autoSave4;
+      saveState();
+      render();
+      break;
+    case 'toggle-global-progress':
+      if (typeof setGlobalProgressOn === 'function') setGlobalProgressOn(state.globalProgress === false);
+      else state.globalProgress = state.globalProgress === false;
       saveState();
       render();
       break;
@@ -10081,6 +10092,7 @@ function init() {
   bind();
   registerSW();
   if (typeof initSync === 'function') initSync();
+  if (typeof initGlobalProgress === 'function') initGlobalProgress();
   ensureAutoAnchors();
   render();
   syncProgressTimer();

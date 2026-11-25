@@ -33,6 +33,176 @@ if (!process.env.SYNC_SECRET) {
 const rooms = new Map();
 let redis = null;
 
+/* ---------- Global auction progress (shared by every room) ----------
+   Only lot numbers per market day + 場次 + 台. No names, lots, notes, or
+   room data. Last write wins by the anchor time (converted to server time). */
+const GP_TTL_SEC = 60 * 60 * 24 * 2;
+const GP_HALVES = { fruit: 'f', morning: 'm', afternoon: 'a' };
+const GP_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const GP_DEV_PER_MIN = 40;
+const GP_IP_PER_MIN = 120;
+const gpDays = new Map(); // day -> Map(key -> entry)
+const gpClients = new Set();
+const gpBuckets = new Map();
+
+function taipeiDayStr(ms) {
+  const d = new Date((ms || Date.now()) + 8 * 3600 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+function gpDayOk(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) return false;
+  const now = Date.now();
+  const allowed = [taipeiDayStr(now - 86400000), taipeiDayStr(now), taipeiDayStr(now + 86400000)];
+  return allowed.includes(day);
+}
+
+function gpKeyOk(half, mid) {
+  const p = GP_HALVES[half];
+  return !!p && typeof mid === 'string' && new RegExp('^' + p + '[1-9]$').test(mid);
+}
+
+function gpRateOk(ip, dev) {
+  const now = Date.now();
+  const hit = (key, limit) => {
+    let rec = gpBuckets.get(key);
+    if (!rec || now - rec.start > 60000) rec = { start: now, n: 0 };
+    rec.n += 1;
+    gpBuckets.set(key, rec);
+    return rec.n <= limit;
+  };
+  const a = hit('ip:' + ip, GP_IP_PER_MIN);
+  const b = hit('dev:' + String(dev || '').slice(0, 64), GP_DEV_PER_MIN);
+  return a && b;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, rec] of gpBuckets) if (now - rec.start > 120000) gpBuckets.delete(k);
+  for (const day of gpDays.keys()) if (!gpDayOk(day)) gpDays.delete(day);
+}, 60000);
+
+async function gpLoadDay(day) {
+  if (gpDays.has(day)) return gpDays.get(day);
+  const map = new Map();
+  if (redis) {
+    try {
+      const raw = await redis.hGetAll('gp:' + day);
+      for (const [k, v] of Object.entries(raw || {})) {
+        try { map.set(k, JSON.parse(v)); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      console.error('redis gp get', err.message);
+    }
+  }
+  if (!gpDays.has(day)) gpDays.set(day, map);
+  return gpDays.get(day);
+}
+
+async function gpPersist(day, key, entry) {
+  if (!redis) return;
+  try {
+    await redis.hSet('gp:' + day, key, JSON.stringify(entry));
+    await redis.expire('gp:' + day, GP_TTL_SEC);
+  } catch (err) {
+    console.error('redis gp set', err.message);
+  }
+}
+
+function gpEntries(map) {
+  const out = [];
+  for (const [key, e] of map) {
+    const [half, mid] = key.split('|');
+    out.push({ half, mid, entry: e });
+  }
+  return out;
+}
+
+/* Validate and normalize one update. Returns entry or an error string. */
+function gpNormalize(msg) {
+  const a = msg && msg.anchor;
+  if (!a || typeof a !== 'object') return 'bad';
+  const now = Date.now();
+  const clientNow = Number(msg.clientNow);
+  const at = Number(a.at);
+  if (!Number.isFinite(at) || !Number.isFinite(clientNow)) return 'bad';
+  let skew = now - clientNow;
+  if (!Number.isFinite(skew)) skew = 0;
+  let atS = Math.round(at + skew);
+  if (atS > now) atS = now;
+  if (atS < now - GP_MAX_AGE_MS) return 'stale';
+  const cleared = !!a.cleared || a.number == null || a.number === '';
+  let number = null;
+  if (!cleared) {
+    number = Number(a.number);
+    if (!Number.isInteger(number) || number < 1 || number > 9999) return 'bad';
+  }
+  // Edit time decides who wins (last write wins). Clamp to server now.
+  let tsS = Number.isFinite(Number(msg.ts)) ? Math.round(Number(msg.ts) + skew) : now;
+  if (tsS > now) tsS = now;
+  if (tsS < now - GP_MAX_AGE_MS) return 'stale';
+  return {
+    number,
+    cleared,
+    paused: !!a.paused,
+    ended: !!a.ended,
+    at: atS,
+    ts: tsS
+  };
+}
+
+/* Same content (auto-advance anchor within a few seconds): ignore, avoids echo loops. */
+function gpSame(a, b) {
+  return !!a && !!b && a.number === b.number && !!a.cleared === !!b.cleared
+    && !!a.paused === !!b.paused && !!a.ended === !!b.ended && Math.abs(Number(a.at) - Number(b.at)) < 5000;
+}
+
+function gpBroadcast(day, msg) {
+  const data = JSON.stringify(msg);
+  for (const c of gpClients) {
+    if (c.readyState === 1 && c.gpDay === day) {
+      try { c.send(data); } catch { /* ignore */ }
+    }
+  }
+}
+
+async function gpHandle(ws, ip, msg) {
+  if (!ws.originOk) { send(ws, { type: 'gp-error', error: 'origin' }); return; }
+  if (msg.type === 'gp-sub') {
+    const day = String(msg.day || '');
+    if (!gpDayOk(day)) { send(ws, { type: 'gp-error', error: 'day' }); return; }
+    ws.gpDay = day;
+    ws.gpId = String(msg.gpId || '').slice(0, 64);
+    gpClients.add(ws);
+    const map = await gpLoadDay(day);
+    send(ws, { type: 'gp-snap', day, entries: gpEntries(map), serverNow: Date.now() });
+    return;
+  }
+  if (msg.type === 'gp-set') {
+    const day = String(msg.day || '');
+    const half = String(msg.half || '');
+    const mid = String(msg.mid || '');
+    if (!gpDayOk(day) || !gpKeyOk(half, mid)) { send(ws, { type: 'gp-error', error: 'key' }); return; }
+    if (!gpRateOk(ip, msg.gpId || ws.gpId)) { send(ws, { type: 'gp-error', error: 'rate' }); return; }
+    const entry = gpNormalize(msg);
+    const key = half + '|' + mid;
+    const map = await gpLoadDay(day);
+    const cur = map.get(key);
+    if (typeof entry === 'string') {
+      send(ws, { type: 'gp-error', error: entry, day, half, mid, entry: cur || null, serverNow: Date.now() });
+      return;
+    }
+    if (cur && (gpSame(cur, entry) || Number(cur.ts) > entry.ts)) {
+      // Older or duplicate: tell the sender what is current so it converges.
+      send(ws, { type: 'gp', day, half, mid, entry: cur || null, serverNow: Date.now() });
+      return;
+    }
+    map.set(key, entry);
+    await gpPersist(day, key, entry);
+    gpBroadcast(day, { type: 'gp', day, half, mid, entry, serverNow: Date.now() });
+  }
+}
+
 function originAllowed(origin) {
   if (!origin) return false;
   if (ALLOW_ORIGINS.includes(origin)) return true;
@@ -362,6 +532,13 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { ok: true, redis: !!redis });
       return;
     }
+    if (req.method === 'GET' && url.pathname === '/gp') {
+      const day = String(url.searchParams.get('day') || taipeiDayStr());
+      if (!gpDayOk(day)) { json(res, 400, { error: 'day' }); return; }
+      const map = await gpLoadDay(day);
+      json(res, 200, { day, entries: gpEntries(map), serverNow: Date.now() });
+      return;
+    }
 
     if (req.method === 'POST' && url.pathname === '/api/rooms') {
       if (isLocked(ip, '')) { json(res, 429, { error: RETRY_ERROR }); return; }
@@ -624,12 +801,20 @@ wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.roomCode = '';
   ws.deviceId = '';
+  ws.originOk = originAllowed(req.headers.origin || '');
+  ws.gpDay = '';
 
   ws.on('message', async (buf) => {
     if (buf && buf.length > WS_MSG_LIMIT) { try { ws.close(1009, 'too large'); } catch { /* ignore */ } return; }
     let msg;
     try { msg = JSON.parse(String(buf)); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
+
+    if (msg.type === 'gp-sub' || msg.type === 'gp-set') {
+      try { await gpHandle(ws, ip, msg); } catch (err) { console.error('gp', err && err.message); }
+      return;
+    }
+    if (msg.type === 'gp-ping') { send(ws, { type: 'gp-pong' }); return; }
 
     if (msg.type === 'auth') {
       const code = String(msg.code || '');
@@ -704,6 +889,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('close', () => {
+    gpClients.delete(ws);
     if (ws.roomCode && rooms.has(ws.roomCode)) rooms.get(ws.roomCode).clients.delete(ws);
   });
 });
