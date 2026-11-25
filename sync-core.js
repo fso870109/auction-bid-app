@@ -105,6 +105,37 @@
     return out;
   }
 
+  function mergeByMachineTs(local, remote) {
+    if (!remote || typeof remote !== 'object') return local && typeof local === 'object' ? clone(local) : remote;
+    if (!local || typeof local !== 'object') return clone(remote);
+    const out = {};
+    const halves = new Set([].concat(Object.keys(local), Object.keys(remote)));
+    halves.forEach(function (h) {
+      out[h] = {};
+      const l = local[h] && typeof local[h] === 'object' ? local[h] : {};
+      const r = remote[h] && typeof remote[h] === 'object' ? remote[h] : {};
+      const ids = new Set([].concat(Object.keys(l), Object.keys(r)));
+      ids.forEach(function (id) {
+        const a = l[id];
+        const b = r[id];
+        if (a == null && b == null) {
+          out[h][id] = null;
+          return;
+        }
+        if (a == null) { out[h][id] = (b && typeof b === 'object') ? clone(b) : b; return; }
+        if (b == null) { out[h][id] = (a && typeof a === 'object') ? clone(a) : a; return; }
+        const atA = (typeof a === 'object' && a) ? (Number(a.ts) || 0) : 0;
+        const atB = (typeof b === 'object' && b) ? (Number(b.ts) || 0) : 0;
+        out[h][id] = atB > atA
+          ? ((typeof b === 'object') ? clone(b) : b)
+          : ((typeof a === 'object') ? clone(a) : a);
+      });
+    });
+    return out;
+  }
+
+  const MACHINE_TS_KEYS = { seriesPath: 1, seriesPlans: 1, machineMerges: 1 };
+
   function mergeCurrentNumbers(local, remote, anchors) {
     const out = {};
     const halves = new Set();
@@ -190,12 +221,22 @@
         if (key === 'progressAnchors' && cur && cur.v && typeof cur.v === 'object' && value && typeof value === 'object') {
           value = mergeProgressAnchors(cur.v, value);
         }
+        if (MACHINE_TS_KEYS[key] && cur && cur.v && typeof cur.v === 'object' && value && typeof value === 'object') {
+          value = mergeByMachineTs(cur.v, value);
+        }
         snap.kv[key] = { v: value, ts: ts, peer: op.peer || '' };
         return { applied: true, flash: null };
       }
       // Even a stale-ts blob can carry a newer per-machine anchor; merge those in.
       if (key === 'progressAnchors' && cur && cur.v && typeof cur.v === 'object' && op.value && typeof op.value === 'object') {
         const merged = mergeProgressAnchors(cur.v, op.value);
+        if (JSON.stringify(merged) !== JSON.stringify(cur.v)) {
+          snap.kv[key] = { v: merged, ts: curTs, peer: cur.peer || op.peer || '' };
+          return { applied: true, flash: null };
+        }
+      }
+      if (MACHINE_TS_KEYS[key] && cur && cur.v && typeof cur.v === 'object' && op.value && typeof op.value === 'object') {
+        const merged = mergeByMachineTs(cur.v, op.value);
         if (JSON.stringify(merged) !== JSON.stringify(cur.v)) {
           snap.kv[key] = { v: merged, ts: curTs, peer: cur.peer || op.peer || '' };
           return { applied: true, flash: null };
@@ -343,6 +384,9 @@
     kv.boughtHistory = clone(state.boughtHistory);
     kv.currentNumbers = clone(state.currentNumbers);
     kv.progressAnchors = clone(state.progressAnchors);
+    kv.seriesPath = clone(state.seriesPath);
+    kv.seriesPlans = clone(state.seriesPlans);
+    kv.machineMerges = clone(state.machineMerges);
     kv.autoAdvance = state.autoAdvance !== false;
     return kv;
   }
@@ -383,6 +427,18 @@
     }
     const autoAdv = val('autoAdvance');
     if (typeof autoAdv === 'boolean') state.autoAdvance = autoAdv;
+    const path = val('seriesPath');
+    if (path && typeof path === 'object') {
+      state.seriesPath = mergeByMachineTs(state.seriesPath, path);
+    }
+    const plans = val('seriesPlans');
+    if (plans && typeof plans === 'object') {
+      state.seriesPlans = mergeByMachineTs(state.seriesPlans, plans);
+    }
+    const merges = val('machineMerges');
+    if (merges && typeof merges === 'object') {
+      state.machineMerges = mergeByMachineTs(state.machineMerges, merges);
+    }
   }
 
   function snapshotToOps(snap) {
@@ -445,6 +501,7 @@
     pickNewerAnchor,
     mergeProgressAnchors,
     mergeCurrentNumbers,
+    mergeByMachineTs,
     stateSliceFromSnapshot,
     fieldsChanged,
     lotsToMap,

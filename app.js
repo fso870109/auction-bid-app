@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v74';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -624,6 +624,8 @@ let dupFlash = false;
 let resultFilter = 'all';
 let deferredInstall = null;
 let editCurrent = null; // { half, machineId, value }
+let editStart = null; // { half, machineId, value }
+let seqEdit = null; // { half, machineId, entries, draft }
 let draftItem = '';
 let itemLocked = false;
 let rangeMode = false;
@@ -2564,6 +2566,317 @@ function defaultAnchors(machines) {
   return out;
 }
 
+function defaultSeriesPath(machines) {
+  const out = { fruit: {}, morning: {}, afternoon: {} };
+  for (const half of HALVES) {
+    out[half] = {};
+    for (const m of (machines && machines[half]) || []) out[half][m.id] = { segs: [], ts: 0 };
+  }
+  return out;
+}
+
+function defaultMachineMerges(machines) {
+  const out = { fruit: {}, morning: {}, afternoon: {} };
+  for (const half of HALVES) {
+    out[half] = {};
+    for (const m of (machines && machines[half]) || []) out[half][m.id] = null;
+  }
+  return out;
+}
+
+function defaultSeriesPlans(machines) {
+  const out = { fruit: {}, morning: {}, afternoon: {} };
+  for (const half of HALVES) {
+    out[half] = {};
+    for (const m of (machines && machines[half]) || []) out[half][m.id] = { entries: [], ts: 0 };
+  }
+  return out;
+}
+
+function ensurePathStore(half) {
+  const h = half || (state && state.currentHalf) || 'afternoon';
+  if (!state.seriesPath) state.seriesPath = defaultSeriesPath(state.machines);
+  if (!state.seriesPath[h]) state.seriesPath[h] = {};
+  if (!state.machineMerges) state.machineMerges = defaultMachineMerges(state.machines);
+  if (!state.machineMerges[h]) state.machineMerges[h] = {};
+  if (!state.seriesPlans) state.seriesPlans = defaultSeriesPlans(state.machines);
+  if (!state.seriesPlans[h]) state.seriesPlans[h] = {};
+  return h;
+}
+
+function seriesOf(n, half) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return null;
+  const h = half || (state && state.currentHalf) || '';
+  if (h === 'morning') {
+    if (num >= 1000 && num <= 1999) return { lo: 1001, hi: 1999, key: '1xxx' };
+    if (num >= 3000 && num <= 3499) return { lo: 3001, hi: 3499, key: '30xx' };
+    if (num >= 3500 && num <= 3999) return { lo: 3500, hi: 3999, key: '35xx' };
+  }
+  if (num >= 2000 && num <= 2499) return { lo: 2000, hi: 2499, key: '2xxx' };
+  if (num >= 2500 && num <= 4999) return { lo: 2500, hi: 4999, key: '25xx' };
+  if (num >= 5000 && num <= 5999) return { lo: 5001, hi: 5999, key: '5xxx' };
+  if (num >= 6000 && num <= 6999) return { lo: 6001, hi: 6999, key: '6xxx' };
+  const base = Math.floor(num / 1000) * 1000;
+  return { lo: base + 1, hi: base + 999, key: 's' + base };
+}
+
+function inSeries(n, ser) {
+  if (!ser) return false;
+  const num = Number(n);
+  if (!Number.isFinite(num)) return false;
+  if (num >= ser.lo && num <= ser.hi) return true;
+  if (ser.key === '5xxx' && num === 5000) return true;
+  if (ser.key === '6xxx' && num === 6000) return true;
+  return false;
+}
+
+function seriesEffLo(ser) {
+  if (!ser) return 0;
+  if (ser.key === '5xxx') return 5000;
+  if (ser.key === '6xxx') return 6000;
+  return ser.lo;
+}
+
+function seriesLabel(ser) {
+  if (!ser) return '';
+  return String(ser.lo);
+}
+
+function seriesPos(n, start, ser) {
+  if (!ser || !inSeries(n, ser) || start == null || !inSeries(start, ser)) return null;
+  const lo = seriesEffLo(ser);
+  const hi = ser.hi;
+  const num = Number(n);
+  const s = Number(start);
+  if (num >= s && num <= hi) return num - s;
+  return (hi - s + 1) + (num - lo);
+}
+
+function seriesNumAt(pos, start, ser) {
+  const lo = seriesEffLo(ser);
+  const hi = ser.hi;
+  const s = Number(start);
+  const head = hi - s + 1;
+  const len = hi - lo + 1;
+  if (len <= 0) return s;
+  let p = pos % len;
+  if (p < 0) p += len;
+  if (p < head) return s + p;
+  return lo + (p - head);
+}
+
+function seriesCycleLen(ser) {
+  if (!ser) return 0;
+  return ser.hi - seriesEffLo(ser) + 1;
+}
+
+function pathEntry(machineId, half) {
+  const h = ensurePathStore(half);
+  if (!state.seriesPath[h][machineId] || typeof state.seriesPath[h][machineId] !== 'object') {
+    state.seriesPath[h][machineId] = { segs: [], ts: 0 };
+  }
+  if (!Array.isArray(state.seriesPath[h][machineId].segs)) state.seriesPath[h][machineId].segs = [];
+  return state.seriesPath[h][machineId];
+}
+
+function planEntry(machineId, half) {
+  const h = ensurePathStore(half);
+  if (!state.seriesPlans[h][machineId] || typeof state.seriesPlans[h][machineId] !== 'object') {
+    state.seriesPlans[h][machineId] = { entries: [], ts: 0 };
+  }
+  if (!Array.isArray(state.seriesPlans[h][machineId].entries)) state.seriesPlans[h][machineId].entries = [];
+  return state.seriesPlans[h][machineId];
+}
+
+function plannedEntries(machineId, half) {
+  return (planEntry(machineId, half).entries || []).map(Number).filter((n) => Number.isFinite(n));
+}
+
+function seriesStart(machineId, half, ser) {
+  if (!ser) return null;
+  const segs = pathEntry(machineId, half).segs;
+  const hit = segs.filter((s) => s && s.key === ser.key).pop();
+  if (hit && hit.start != null && Number.isFinite(Number(hit.start))) return Number(hit.start);
+  const planned = plannedEntries(machineId, half);
+  for (const n of planned) {
+    const p = seriesOf(n, half);
+    if (p && p.key === ser.key) return n;
+  }
+  return null;
+}
+
+function wrapIsBehind(n, cur, start, ser) {
+  const a = seriesPos(n, start, ser);
+  const b = seriesPos(cur, start, ser);
+  if (a == null || b == null) return Number(n) < Number(cur);
+  return a < b;
+}
+
+function wrapDist(from, to, start, ser) {
+  const a = seriesPos(from, start, ser);
+  const b = seriesPos(to, start, ser);
+  if (a == null || b == null) return Number(to) - Number(from);
+  return b - a;
+}
+
+function walkSeries(from, steps, start, ser) {
+  const fromN = Number(from);
+  if (!ser || start == null) {
+    return { n: clampProgress(fromN + steps), capped: false, wrapped: false };
+  }
+  const pos = seriesPos(fromN, start, ser);
+  if (pos == null) return { n: clampProgress(fromN + steps), capped: false, wrapped: false };
+  const endPos = seriesCycleLen(ser) - 1;
+  const nextPos = pos + steps;
+  if (steps > 0 && pos >= endPos) return { n: fromN, capped: true, wrapped: false };
+  if (steps > 0 && nextPos > endPos) return { n: seriesNumAt(endPos, start, ser), capped: true, wrapped: false };
+  if (steps < 0 && nextPos < 0) return { n: seriesNumAt(0, start, ser), capped: true, wrapped: false };
+  const n = seriesNumAt(nextPos, start, ser);
+  return { n, capped: false, wrapped: steps > 0 && n < fromN };
+}
+
+function seriesAtEnd(machineId, half, cur) {
+  const h = half || state.currentHalf;
+  const now = cur != null ? Number(cur) : currentOf(machineId, h);
+  if (now == null) return false;
+  const ser = seriesOf(now, h);
+  if (!ser) return false;
+  const start = seriesStart(machineId, h, ser);
+  if (start == null) return false;
+  const pos = seriesPos(now, start, ser);
+  return pos != null && pos >= seriesCycleLen(ser) - 1;
+}
+
+function nextPlannedEntry(machineId, half, cur) {
+  const h = half || state.currentHalf;
+  const now = cur != null ? Number(cur) : currentOf(machineId, h);
+  const entries = plannedEntries(machineId, h);
+  if (!entries.length || now == null) return null;
+  const curSer = seriesOf(now, h);
+  if (!curSer) return entries[0];
+  let seen = false;
+  for (const n of entries) {
+    const s = seriesOf(n, h);
+    if (!s) continue;
+    if (s.key === curSer.key) {
+      seen = true;
+      continue;
+    }
+    if (seen) return n;
+  }
+  return null;
+}
+
+function ensureSeriesPath(machineId, n, half, opts) {
+  opts = opts || {};
+  const h = half || state.currentHalf;
+  const ser = seriesOf(n, h);
+  if (!ser) return { changedSeries: false, started: false, ser: null, start: null };
+  const entry = pathEntry(machineId, h);
+  const prevCur = opts.prevCur;
+  const last = entry.segs.length ? entry.segs[entry.segs.length - 1] : null;
+  if (last && last.key === ser.key) {
+    return { changedSeries: false, started: false, ser, start: last.start };
+  }
+  const existing = entry.segs.find((s) => s.key === ser.key);
+  if (last && last !== existing && prevCur != null && Number.isFinite(Number(prevCur))) {
+    last.lastCur = Number(prevCur);
+  }
+  if (existing) {
+    existing.lastCur = null;
+    entry.segs = entry.segs.filter((s) => s !== existing).concat([existing]);
+    entry.ts = nowDate().getTime();
+    return { changedSeries: true, started: false, resumed: true, ser, start: existing.start };
+  }
+  const planned = plannedEntries(machineId, h).find((x) => {
+    const p = seriesOf(x, h);
+    return p && p.key === ser.key;
+  });
+  const start = opts.start != null ? Number(opts.start)
+    : (planned != null ? planned : Number(n));
+  entry.segs.push({
+    key: ser.key, lo: ser.lo, hi: ser.hi, start, at: nowDate().getTime(), lastCur: null
+  });
+  entry.ts = nowDate().getTime();
+  return { changedSeries: !!last, started: true, first: !last, ser, start };
+}
+
+function setSeriesStart(machineId, start, half) {
+  const h = half || state.currentHalf;
+  const n = parseInt(start, 10);
+  if (!Number.isFinite(n)) return false;
+  const ser = seriesOf(n, h);
+  if (!ser) return false;
+  const entry = pathEntry(machineId, h);
+  let seg = entry.segs.find((s) => s.key === ser.key);
+  if (!seg) {
+    entry.segs.push({ key: ser.key, lo: ser.lo, hi: ser.hi, start: n, at: nowDate().getTime(), lastCur: null });
+  } else {
+    seg.start = n;
+    seg.lo = ser.lo;
+    seg.hi = ser.hi;
+  }
+  entry.ts = nowDate().getTime();
+  return true;
+}
+
+function machineIsRunningSeries(machineId, half, ser) {
+  if (!ser) return false;
+  const cur = currentOf(machineId, half);
+  if (cur == null) return false;
+  const s = seriesOf(cur, half);
+  return !!(s && s.key === ser.key);
+}
+
+function lotsInSeriesOnOtherMachines(machineId, half, ser) {
+  const h = half || state.currentHalf;
+  const day = state.day;
+  const out = [];
+  for (const lot of state.lots || []) {
+    if (lot.day !== day || (lot.half || h) !== h) continue;
+    if (lot.secondMarket) continue;
+    if (lot.machineId === machineId) continue;
+    if (lot.status !== 'pending') continue;
+    if (!inSeries(lot.number, ser)) continue;
+    if (machineIsRunningSeries(lot.machineId, h, ser)) continue;
+    out.push(lot);
+  }
+  return out;
+}
+
+function lotsInSeriesOnOthersForPlan(machineId, half, entries) {
+  const seen = new Set();
+  const out = [];
+  const h = half || state.currentHalf;
+  for (const n of entries || []) {
+    const ser = seriesOf(n, h);
+    if (!ser || seen.has(ser.key)) continue;
+    seen.add(ser.key);
+    for (const lot of lotsInSeriesOnOtherMachines(machineId, h, ser)) out.push(lot);
+  }
+  return out;
+}
+
+function moveLotsToMachine(lots, destId, half) {
+  const moved = [];
+  for (const lot of lots || []) {
+    if (!lot || lot.machineId === destId) continue;
+    moved.push({ id: lot.id, machineId: lot.machineId });
+    lot.machineId = destId;
+    if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
+      BidSyncCore.stamp(lot, BidSyncCore.LOT_FIELDS, Date.now(), state.peerId || '');
+    }
+  }
+  return moved;
+}
+
+function columnTitleOf(machineId, half) {
+  const m = machineById(machineId, half);
+  return (m && columnTitle(m, half)) || (m && m.name) || '另一台';
+}
+
+
 function defaultState() {
   const machines = structuredClone(DEFAULT_MACHINES);
   return {
@@ -2579,6 +2892,9 @@ function defaultState() {
     machines,
     currentNumbers: defaultCurrents(machines),
     progressAnchors: defaultAnchors(machines),
+    seriesPath: defaultSeriesPath(machines),
+    seriesPlans: defaultSeriesPlans(machines),
+    machineMerges: defaultMachineMerges(machines),
     autoAdvance: true,
     lots: [],
     day: todayStr(),
@@ -2631,6 +2947,9 @@ function loadState() {
     merged.machines = {};
     merged.currentNumbers = {};
     merged.progressAnchors = {};
+    merged.seriesPath = {};
+    merged.seriesPlans = {};
+    merged.machineMerges = {};
     for (const half of HALVES) {
       const savedMachines = saved.machines && Array.isArray(saved.machines[half]) ? saved.machines[half] : null;
       merged.machines[half] = savedMachines && savedMachines.length
@@ -2649,6 +2968,18 @@ function loadState() {
       merged.progressAnchors[half] = {
         ...(base.progressAnchors[half] || {}),
         ...((saved.progressAnchors && saved.progressAnchors[half]) || {})
+      };
+      merged.seriesPath[half] = {
+        ...(base.seriesPath[half] || {}),
+        ...((saved.seriesPath && saved.seriesPath[half]) || {})
+      };
+      merged.seriesPlans[half] = {
+        ...(base.seriesPlans[half] || {}),
+        ...((saved.seriesPlans && saved.seriesPlans[half]) || {})
+      };
+      merged.machineMerges[half] = {
+        ...(base.machineMerges[half] || {}),
+        ...((saved.machineMerges && saved.machineMerges[half]) || {})
       };
     }
     merged.autoAdvance = merged.autoAdvance !== false;
@@ -2838,6 +3169,10 @@ function addSessionMachine(half) {
   if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
   if (!state.progressAnchors[h]) state.progressAnchors[h] = {};
   state.progressAnchors[h][id] = null;
+  ensurePathStore(h);
+  state.seriesPath[h][id] = { segs: [], ts: 0 };
+  state.seriesPlans[h][id] = { entries: [], ts: 0 };
+  state.machineMerges[h][id] = null;
   saveState();
   toast(`已加上${name}`);
   render();
@@ -2859,6 +3194,9 @@ function removeSessionMachine(half, machineId) {
   }
   if (state.currentNumbers[h]) delete state.currentNumbers[h][gone.id];
   if (state.progressAnchors && state.progressAnchors[h]) delete state.progressAnchors[h][gone.id];
+  if (state.seriesPath && state.seriesPath[h]) delete state.seriesPath[h][gone.id];
+  if (state.seriesPlans && state.seriesPlans[h]) delete state.seriesPlans[h][gone.id];
+  if (state.machineMerges && state.machineMerges[h]) delete state.machineMerges[h][gone.id];
   saveState();
   toast(`已移除${gone.name}`);
   render();
@@ -2949,7 +3287,28 @@ function secondLots() {
 }
 
 function isPassed(lot, cur) {
-  return !!(lot && lot.status === 'pending' && !lot.secondMarket && cur != null && lot.number < cur);
+  if (!lot || lot.status !== 'pending' || lot.secondMarket) return false;
+  const half = lot.half || (state && state.currentHalf);
+  const mid = lot.machineId;
+  const now = (cur != null && cur !== '') ? Number(cur) : currentOf(mid, half);
+  if (now == null || !Number.isFinite(Number(now))) return false;
+  const lotSer = seriesOf(lot.number, half);
+  if (!lotSer || !inSeries(lot.number, lotSer)) return Number(lot.number) < now;
+  const curSer = seriesOf(now, half);
+  if (curSer && curSer.key === lotSer.key) {
+    const start = seriesStart(mid, half, curSer);
+    const s = start != null ? start : now;
+    return wrapIsBehind(lot.number, now, s, lotSer);
+  }
+  // This 台 already left the series: only the portion it actually ran is passed.
+  // Wrap leftovers stay upcoming — they may still be auctioned, possibly on another 台.
+  const segs = pathEntry(mid, half).segs || [];
+  const seg = segs.find((s) => s.key === lotSer.key);
+  if (seg && seg.start != null && seg.lastCur != null) {
+    const last = Number(seg.lastCur);
+    return wrapIsBehind(lot.number, last, seg.start, lotSer) || Number(lot.number) === last;
+  }
+  return false;
 }
 
 function lotsPerMin() {
@@ -2959,7 +3318,15 @@ function lotsPerMin() {
 
 function lotEtaMinutes(lot, cur) {
   if (cur == null || !lot || lot.status !== 'pending' || lot.secondMarket) return null;
-  const d = Number(lot.number) - Number(cur);
+  const half = lot.half || (state && state.currentHalf);
+  const mid = lot.machineId;
+  const now = Number(cur);
+  const ser = seriesOf(now, half);
+  const lotSer = seriesOf(lot.number, half);
+  if (!ser || !lotSer || ser.key !== lotSer.key) return null;
+  const start = seriesStart(mid, half, ser);
+  if (start == null) return null;
+  const d = wrapDist(now, lot.number, start, ser);
   if (!Number.isFinite(d) || d <= 0) return null;
   const rate = lotsPerMin();
   if (!(rate > 0)) return null;
@@ -3044,10 +3411,50 @@ function columnInsertIndex(x) {
   return cols.length;
 }
 
+function lotOrderTuple(lot, machineId, half) {
+  const h = half || (lot && lot.half) || (state && state.currentHalf);
+  const cur = currentOf(machineId, h);
+  const curSer = cur != null ? seriesOf(cur, h) : null;
+  const lotSer = seriesOf(lot.number, h);
+  const segs = pathEntry(machineId, h).segs || [];
+  const plan = plannedEntries(machineId, h);
+  if (curSer && lotSer && lotSer.key === curSer.key) {
+    const start = seriesStart(machineId, h, curSer) ?? curSer.lo;
+    return [0, seriesPos(lot.number, start, lotSer) ?? 0, lot.createdAt || 0];
+  }
+  let planIdx = -1;
+  if (lotSer) {
+    planIdx = plan.findIndex((n) => {
+      const s = seriesOf(n, h);
+      return s && s.key === lotSer.key;
+    });
+  }
+  if (planIdx >= 0) {
+    const start = seriesStart(machineId, h, lotSer) ?? plan[planIdx];
+    return [1 + planIdx, seriesPos(lot.number, start, lotSer) ?? 0, lot.createdAt || 0];
+  }
+  const idx = lotSer ? segs.findIndex((s) => s.key === lotSer.key) : -1;
+  if (idx >= 0) {
+    const seg = segs[idx];
+    const start = seg.start != null ? seg.start : (lotSer && lotSer.lo);
+    return [100 + idx, seriesPos(lot.number, start, lotSer) ?? 0, lot.createdAt || 0];
+  }
+  return [1000, Number(lot.number) || 0, lot.createdAt || 0];
+}
+
+function compareLotOrder(a, b, machineId, half) {
+  const ta = lotOrderTuple(a, machineId, half);
+  const tb = lotOrderTuple(b, machineId, half);
+  for (let i = 0; i < ta.length; i++) {
+    if (ta[i] !== tb[i]) return ta[i] - tb[i];
+  }
+  return 0;
+}
+
 function columnLots(machineId, half) {
   return todayLots(half)
     .filter((l) => l.machineId === machineId)
-    .sort((a, b) => a.number - b.number || (a.createdAt || 0) - (b.createdAt || 0));
+    .sort((a, b) => compareLotOrder(a, b, machineId, half));
 }
 
 function captureLiveScroll() {
@@ -3059,7 +3466,14 @@ function captureLiveScroll() {
 
 function restoreLiveScroll() {
   document.querySelectorAll('.live-col-list').forEach((el) => {
-    if (liveScrolls[el.dataset.id] != null) el.scrollTop = liveScrolls[el.dataset.id];
+    const id = el.dataset.id;
+    if (typeof liveScrollFollow === 'object' && liveScrollFollow[id]) {
+      const next = el.querySelector('.lot-cell.next');
+      if (next) el.scrollTop = Math.max(0, next.offsetTop - 8);
+      delete liveScrollFollow[id];
+      return;
+    }
+    if (liveScrolls[id] != null) el.scrollTop = liveScrolls[id];
   });
 }
 
@@ -3097,6 +3511,9 @@ function restoreCurrent(snap) {
       paused: true
     };
   }
+  if (snap.seriesPath && typeof snap.seriesPath === 'object') state.seriesPath = structuredClone(snap.seriesPath);
+  if (snap.seriesPlans && typeof snap.seriesPlans === 'object') state.seriesPlans = structuredClone(snap.seriesPlans);
+  if (snap.machineMerges && typeof snap.machineMerges === 'object') state.machineMerges = structuredClone(snap.machineMerges);
   syncProgressTimer();
 }
 
@@ -3137,6 +3554,66 @@ function undoLast() {
     render();
     return;
   }
+  if (snap.kind === 'adopt-lots' && Array.isArray(snap.moved)) {
+    for (const row of snap.moved) {
+      const lot = (state.lots || []).find((l) => l.id === row.id);
+      if (lot) {
+        lot.machineId = row.machineId;
+        if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
+          BidSyncCore.stamp(lot, BidSyncCore.LOT_FIELDS, Date.now(), state.peerId || '');
+        }
+      }
+    }
+    saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
+  if (snap.kind === 'merge-machine') {
+    for (const row of snap.moved || []) {
+      const lot = (state.lots || []).find((l) => l.id === row.id);
+      if (lot) {
+        lot.machineId = row.machineId;
+        if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
+          BidSyncCore.stamp(lot, BidSyncCore.LOT_FIELDS, Date.now(), state.peerId || '');
+        }
+      }
+    }
+    const h = snap.half || state.currentHalf;
+    ensurePathStore(h);
+    if (snap.merge === undefined) state.machineMerges[h][snap.srcId] = null;
+    else state.machineMerges[h][snap.srcId] = snap.merge;
+    if (snap.seriesPath) state.seriesPath = structuredClone(snap.seriesPath);
+    saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
+  if (snap.kind === 'series-plan') {
+    const h = snap.half || state.currentHalf;
+    ensurePathStore(h);
+    if (snap.prevPlan) state.seriesPlans[h][snap.machineId] = structuredClone(snap.prevPlan);
+    else state.seriesPlans[h][snap.machineId] = { entries: [], ts: 0 };
+    if (Array.isArray(snap.moved)) {
+      for (const row of snap.moved) {
+        const lot = (state.lots || []).find((l) => l.id === row.id);
+        if (lot) {
+          lot.machineId = row.machineId;
+          if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
+            BidSyncCore.stamp(lot, BidSyncCore.LOT_FIELDS, Date.now(), state.peerId || '');
+          }
+        }
+      }
+    }
+    if (snap.seriesPath) state.seriesPath = structuredClone(snap.seriesPath);
+    saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
   if (snap.kind === 'new-day') {
     state.lots = Array.isArray(snap.lots) ? snap.lots.slice() : [];
     if (snap.day) state.day = snap.day;
@@ -3146,6 +3623,9 @@ function undoLast() {
     if (snap.progressAnchors && typeof snap.progressAnchors === 'object') {
       state.progressAnchors = snap.progressAnchors;
     }
+    if (snap.seriesPath && typeof snap.seriesPath === 'object') state.seriesPath = snap.seriesPath;
+    if (snap.seriesPlans && typeof snap.seriesPlans === 'object') state.seriesPlans = snap.seriesPlans;
+    if (snap.machineMerges && typeof snap.machineMerges === 'object') state.machineMerges = snap.machineMerges;
     if (typeof snap.autoAdvance === 'boolean') state.autoAdvance = snap.autoAdvance;
     state.alerted = snap.alerted && typeof snap.alerted === 'object' ? snap.alerted : {};
     if (Array.isArray(snap.boughtHistory)) state.boughtHistory = snap.boughtHistory;
@@ -4408,6 +4888,12 @@ function currentOf(machineId, half) {
     const elapsed = Math.max(0, nowDate().getTime() - a.at);
     const rate = lotsPerMin();
     const advanced = rate > 0 ? Math.floor((elapsed * rate) / 60000) : 0;
+    const ser = seriesOf(a.number, h);
+    const start = ser ? (seriesStart(machineId, h, ser) ?? a.number) : a.number;
+    if (ser && start != null) {
+      const walked = walkSeries(a.number, advanced, start, ser);
+      return walked.n;
+    }
     let n = a.number + advanced;
     if (n > PROGRESS_MAX) n = PROGRESS_MAX;
     if (n < PROGRESS_MIN) n = PROGRESS_MIN;
@@ -4425,9 +4911,11 @@ function isAutoRunning(machineId, half) {
   if (!autoAdvanceOn()) return false;
   const a = getAnchor(machineId, h);
   if (!a || a.paused || a.ended || a.number == null || a.at == null) return false;
-  const cap = progressCap(machineId, h);
   const cur = currentOf(machineId, h);
-  if (cap != null && a.number <= cap && cur != null && cur >= cap) return false;
+  if (seriesAtEnd(machineId, h, cur)) return false;
+  const cap = progressCap(machineId, h);
+  const ser = seriesOf(a.number, h);
+  if (!ser && cap != null && a.number <= cap && cur != null && cur >= cap) return false;
   return true;
 }
 
@@ -4439,15 +4927,24 @@ function snapshotProgress(machineId, half) {
     half: h,
     machineId,
     current: currentOf(machineId, h),
-    anchor: a ? { ...a } : null
+    anchor: a ? { ...a } : null,
+    seriesPath: state.seriesPath ? structuredClone(state.seriesPath) : null,
+    seriesPlans: state.seriesPlans ? structuredClone(state.seriesPlans) : null,
+    machineMerges: state.machineMerges ? structuredClone(state.machineMerges) : null
   };
 }
 
-function setProgress(machineId, next, half) {
+let liveScrollFollow = {};
+let pendingAdopt = null;
+
+function setProgress(machineId, next, half, opts) {
+  opts = opts || {};
   const h = half || state.currentHalf;
   if (!state.currentNumbers[h]) state.currentNumbers[h] = {};
   if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
   if (!state.progressAnchors[h]) state.progressAnchors[h] = {};
+  const prevCur = currentOf(machineId, h);
+  let pathInfo = null;
   if (next == null || next === '') {
     state.currentNumbers[h][machineId] = null;
     writeAnchor(machineId, h, null);
@@ -4458,6 +4955,7 @@ function setProgress(machineId, next, half) {
       writeAnchor(machineId, h, null);
     } else {
       n = clampProgress(n);
+      pathInfo = ensureSeriesPath(machineId, n, h, { prevCur });
       state.currentNumbers[h][machineId] = n;
       writeAnchor(machineId, h, {
         number: n,
@@ -4465,12 +4963,248 @@ function setProgress(machineId, next, half) {
         paused: !autoAdvanceOn(),
         ended: false
       });
+      liveScrollFollow[machineId] = true;
+      if (!opts.silentAdopt && pathInfo && pathInfo.ser && (pathInfo.started || pathInfo.changedSeries || pathInfo.first)) {
+        pendingAdopt = { machineId, half: h, ser: pathInfo.ser, start: pathInfo.start, first: !!pathInfo.first };
+      }
     }
   }
   saveState();
   checkAlerts();
   syncProgressTimer();
+  return pathInfo;
 }
+
+function offerAdoptIfNeeded() {
+  const job = pendingAdopt;
+  pendingAdopt = null;
+  if (!job || !job.ser) return;
+  if (modal) return;
+  const lots = lotsInSeriesOnOtherMachines(job.machineId, job.half, job.ser);
+  if (!lots.length) {
+    if (job.first && job.start != null && job.ser && job.start !== job.ser.lo) {
+      toast('這段起點是 ' + job.start + '。若起點不對，請長按「現在」改正。');
+    }
+    return;
+  }
+  const dest = columnTitleOf(job.machineId, job.half);
+  const label = seriesLabel(job.ser);
+  const count = lots.length;
+  modal = {
+    type: 'confirm',
+    title: '移到這台？',
+    body: label + ' 起的未拍號碼移到' + dest + '？（' + count + ' 筆）。已標過的留在原台。',
+    ok: '移過去',
+    cancel: '先不要',
+    onOk: () => {
+      modal = null;
+      const moved = moveLotsToMachine(lots, job.machineId, job.half);
+      saveState();
+      offerUndo({ kind: 'adopt-lots', moved, destId: job.machineId, half: job.half }, '已移入 ' + moved.length + ' 筆到' + dest);
+      render();
+    },
+    onCancel: () => { modal = null; render(); }
+  };
+  render();
+}
+
+
+function openSetStart(machineId) {
+  const half = state.currentHalf;
+  const cur = currentOf(machineId, half);
+  const ser = cur != null ? seriesOf(cur, half) : null;
+  const start = ser ? seriesStart(machineId, half, ser) : null;
+  editStart = {
+    machineId,
+    half,
+    value: start != null ? String(start) : (cur != null ? String(cur) : '')
+  };
+  modal = { type: 'set-start' };
+  render();
+}
+
+function commitSetStart() {
+  if (!editStart) return;
+  const n = parseInt(editStart.value, 10);
+  const mid = editStart.machineId;
+  const half = editStart.half || state.currentHalf;
+  editStart = null;
+  modal = null;
+  if (!Number.isFinite(n)) {
+    render();
+    return;
+  }
+  const snap = snapshotProgress(mid, half);
+  const cur = currentOf(mid, half);
+  setSeriesStart(mid, n, half);
+  if (cur == null) setProgress(mid, n, half, { silentAdopt: true });
+  saveState();
+  offerUndo(snap, '起點改為 ' + n);
+  render();
+  const ser = seriesOf(n, half);
+  if (ser) {
+    pendingAdopt = { machineId: mid, half, ser, start: n, first: false };
+    offerAdoptIfNeeded();
+  }
+}
+
+function openXfer(machineId) {
+  modal = { type: 'xfer', srcId: machineId, half: state.currentHalf };
+  render();
+}
+
+function confirmXfer(srcId, destId) {
+  const half = state.currentHalf;
+  if (!srcId || !destId || srcId === destId) return;
+  const pending = columnLots(srcId, half).filter((l) => l.status === 'pending' && !l.secondMarket);
+  const destName = columnTitleOf(destId, half);
+  const srcName = columnTitleOf(srcId, half);
+  modal = {
+    type: 'confirm',
+    title: '轉到' + destName + '？',
+    body: srcName + '還沒拍的 ' + pending.length + ' 筆會移過去，已標過的留在' + srcName + '。',
+    ok: '轉過去',
+    cancel: '取消',
+    onOk: () => doXfer(srcId, destId, half),
+    onCancel: () => { modal = null; render(); }
+  };
+  render();
+}
+
+function doXfer(srcId, destId, half) {
+  const h = half || state.currentHalf;
+  modal = null;
+  const pending = columnLots(srcId, h).filter((l) => l.status === 'pending' && !l.secondMarket);
+  const snapPath = structuredClone(state.seriesPath);
+  ensurePathStore(h);
+  const prevMerge = state.machineMerges[h][srcId] || null;
+  const moved = moveLotsToMachine(pending, destId, h);
+  state.machineMerges[h][srcId] = {
+    into: destId,
+    at: Date.now(),
+    day: state.day,
+    count: moved.length,
+    ts: Date.now(),
+    moved: moved.map((r) => ({ id: r.id, machineId: r.machineId }))
+  };
+  saveState();
+  offerUndo({
+    kind: 'merge-machine',
+    moved,
+    srcId,
+    destId,
+    half: h,
+    merge: prevMerge,
+    seriesPath: snapPath
+  }, '已轉到' + columnTitleOf(destId, h));
+  render();
+}
+
+function undoMergeFromBanner(srcId) {
+  const half = state.currentHalf;
+  ensurePathStore(half);
+  const info = state.machineMerges[half][srcId];
+  if (!info) return;
+  for (const row of info.moved || []) {
+    const lot = (state.lots || []).find((l) => l.id === row.id);
+    if (lot && lot.status === 'pending' && !lot.secondMarket) {
+      lot.machineId = row.machineId || srcId;
+      if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
+        BidSyncCore.stamp(lot, BidSyncCore.LOT_FIELDS, Date.now(), state.peerId || '');
+      }
+    }
+  }
+  state.machineMerges[half][srcId] = { into: null, ts: Date.now() };
+  saveState();
+  toast('已復原');
+  render();
+}
+
+function openSeq(machineId) {
+  const half = state.currentHalf;
+  seqEdit = { machineId, half, entries: plannedEntries(machineId, half).slice(), draft: '' };
+  modal = { type: 'seq' };
+  render();
+}
+
+function addSeqDraft() {
+  if (!seqEdit) return;
+  const n = parseInt(seqEdit.draft, 10);
+  if (!Number.isFinite(n) || n < 1) return;
+  if (!seqEdit.entries.includes(n)) seqEdit.entries.push(n);
+  seqEdit.draft = '';
+  render();
+}
+
+function commitSeq() {
+  if (!seqEdit) return;
+  const mid = seqEdit.machineId;
+  const half = seqEdit.half || state.currentHalf;
+  let entries = (seqEdit.entries || []).slice();
+  const draft = parseInt(seqEdit.draft, 10);
+  if (Number.isFinite(draft) && draft >= 1 && !entries.includes(draft)) entries.push(draft);
+  entries = entries.filter((n) => Number.isFinite(n) && n >= 1);
+  seqEdit = null;
+  modal = null;
+  const prevPlan = structuredClone(planEntry(mid, half));
+  const snapPath = structuredClone(state.seriesPath);
+  ensurePathStore(half);
+  state.seriesPlans[half][mid] = { entries, ts: Date.now() };
+  for (const n of entries) {
+    const ser = seriesOf(n, half);
+    if (ser && seriesStart(mid, half, ser) == null) setSeriesStart(mid, n, half);
+  }
+  const toMove = lotsInSeriesOnOthersForPlan(mid, half, entries);
+  if (!toMove.length) {
+    saveState();
+    offerUndo({
+      kind: 'series-plan',
+      machineId: mid,
+      half,
+      prevPlan,
+      moved: [],
+      seriesPath: snapPath
+    }, entries.length ? '已記住順序 ' + entries.join(' → ') : '已清除順序');
+    render();
+    return;
+  }
+  modal = {
+    type: 'confirm',
+    title: '依順序移過來？',
+    body: '把這份順序裡還沒拍的 ' + toMove.length + ' 筆移到' + columnTitleOf(mid, half) + '？已標過的留在原台。',
+    ok: '移過來',
+    cancel: '只要順序',
+    onOk: () => {
+      modal = null;
+      const moved = moveLotsToMachine(toMove, mid, half);
+      saveState();
+      offerUndo({
+        kind: 'series-plan',
+        machineId: mid,
+        half,
+        prevPlan,
+        moved,
+        seriesPath: snapPath
+      }, '已記住順序，並移入 ' + moved.length + ' 筆');
+      render();
+    },
+    onCancel: () => {
+      modal = null;
+      saveState();
+      offerUndo({
+        kind: 'series-plan',
+        machineId: mid,
+        half,
+        prevPlan,
+        moved: [],
+        seriesPath: snapPath
+      }, '已記住順序 ' + entries.join(' → '));
+      render();
+    }
+  };
+  render();
+}
+
 
 function ensureAutoAnchors() {
   if (!autoAdvanceOn() || !state) return false;
@@ -4479,8 +5213,10 @@ function ensureAutoAnchors() {
     for (const m of state.machines[half] || []) {
       const cur = currentOf(m.id, half);
       if (cur == null) continue;
+      if (seriesAtEnd(m.id, half, cur)) continue;
       const cap = progressCap(m.id, half);
-      if (cap != null && cur >= cap) continue;
+      const ser = seriesOf(cur, half);
+      if (!ser && cap != null && cur >= cap) continue;
       if (isAutoRunning(m.id, half)) continue;
       if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
       state.currentNumbers[half][m.id] = cur;
@@ -4513,9 +5249,14 @@ function resumeProgress(machineId, half) {
   const h = half || state.currentHalf;
   const cur = currentOf(machineId, h);
   if (cur == null) return;
+  if (seriesAtEnd(machineId, h, cur)) {
+    toast('這段已到尾，點「現在」輸入下一段號碼');
+    return;
+  }
   const cap = progressCap(machineId, h);
-  if (cap != null && cur >= cap) {
-    toast('已經到這台的最後一號');
+  const ser = seriesOf(cur, h);
+  if (!ser && cap != null && cur >= cap) {
+    toast('這段已到尾，點「現在」輸入下一段號碼');
     return;
   }
   const snap = snapshotProgress(machineId, h);
@@ -4572,10 +5313,17 @@ function tickAutoProgress() {
     for (const m of state.machines[half] || []) {
       if (!isAutoRunning(m.id, half)) continue;
       const cur = currentOf(m.id, half);
-      const cap = progressCap(m.id, half);
       const a = getAnchor(m.id, half);
+      if (seriesAtEnd(m.id, half, cur) && a && !a.ended) {
+        state.currentNumbers[half][m.id] = cur;
+        writeAnchor(m.id, half, { number: cur, at: nowDate().getTime(), paused: true, ended: true });
+        hitCap = true;
+        continue;
+      }
+      const cap = progressCap(m.id, half);
+      const ser = seriesOf(a && a.number, half);
       // Only auto-stop at 到尾 when this run started at or below the list/range cap.
-      if (cap != null && a && a.number != null && a.number <= cap && cur != null && cur >= cap) {
+      if (!ser && cap != null && a && a.number != null && a.number <= cap && cur != null && cur >= cap) {
         const rate = lotsPerMin();
         const ms = rate > 0 ? Math.ceil(((cap - a.number) * 60000) / rate) : 0;
         const reachedAt = (a.at != null ? a.at : nowDate().getTime()) + Math.max(0, ms);
@@ -4865,7 +5613,7 @@ function jumpToLot(lot, { force } = {}) {
   if (!lot) return;
   const half = lot.half || state.currentHalf;
   const cur = currentOf(lot.machineId, half);
-  if (!force && cur != null && lot.number < cur) return;
+  if (!force && cur != null && isPassed(lot, cur)) return;
   setProgress(lot.machineId, lot.number, half);
 }
 
@@ -4904,16 +5652,56 @@ function returnFromSecond(id) {
 function bumpCurrent(machineId, delta) {
   const half = state.currentHalf;
   let cur = currentOf(machineId, half);
-  if (cur == null) {
-    const m = machineById(machineId, half);
-    const start = (m?.ranges || []).find((r) => r.start != null)?.start;
-    cur = start ?? 0;
-  }
-  const next = clampProgress(cur + delta);
   const snap = snapshotProgress(machineId, half);
+  if (cur == null) {
+    const planned = plannedEntries(machineId, half);
+    const m = machineById(machineId, half);
+    const start = planned[0] ?? (m?.ranges || []).find((r) => r.start != null)?.start;
+    cur = start ?? 0;
+    const next = clampProgress(cur);
+    setProgress(machineId, next, half);
+    offerUndo(snap, `${next}　已設為現在進度`);
+    render();
+    offerAdoptIfNeeded();
+    return;
+  }
+  const ser = seriesOf(cur, half);
+  const start = ser ? (seriesStart(machineId, half, ser) ?? cur) : null;
+  if (ser && start != null && delta > 0 && seriesAtEnd(machineId, half, cur)) {
+    const nxt = nextPlannedEntry(machineId, half, cur);
+    if (nxt != null) {
+      setProgress(machineId, nxt, half);
+      offerUndo(snap, `下一段 ${nxt}`);
+      render();
+      offerAdoptIfNeeded();
+      return;
+    }
+    toast('這段已到尾，點「現在」輸入下一段號碼');
+    return;
+  }
+  let next;
+  if (ser && start != null) {
+    const walked = walkSeries(cur, delta, start, ser);
+    if (walked.capped && delta > 0) {
+      const nxt = nextPlannedEntry(machineId, half, cur);
+      if (nxt != null) {
+        setProgress(machineId, nxt, half);
+        offerUndo(snap, `下一段 ${nxt}`);
+        render();
+        offerAdoptIfNeeded();
+        return;
+      }
+      toast('這段已到尾，點「現在」輸入下一段號碼');
+      return;
+    }
+    next = walked.n;
+  } else {
+    next = clampProgress(cur + delta);
+  }
   setProgress(machineId, next, half);
   offerUndo(snap, `${next}　已設為現在進度`);
   render();
+  offerAdoptIfNeeded();
 }
 
 function setCurrent(machineId, value) {
@@ -4931,6 +5719,7 @@ function setCurrent(machineId, value) {
   setProgress(machineId, next, half);
   offerUndo(snap, next == null ? '已清除進度' : `${next}　已設為現在進度`);
   render();
+  offerAdoptIfNeeded();
 }
 
 function checkAlerts() {
@@ -4940,8 +5729,12 @@ function checkAlerts() {
     const cur = currentOf(m.id);
     if (cur == null) continue;
     for (const lot of lotsForMachine(m.id, half)) {
-      if (lot.status !== 'pending') continue;
-      const d = lot.number - cur;
+      if (lot.status !== 'pending' || lot.secondMarket) continue;
+      const ser = seriesOf(cur, half);
+      const lotSer = seriesOf(lot.number, half);
+      if (!ser || !lotSer || ser.key !== lotSer.key) continue;
+      const start = seriesStart(m.id, half, ser);
+      const d = start != null ? wrapDist(cur, lot.number, start, ser) : (lot.number - cur);
       if (d >= 0 && d <= gap) {
         const key = `${state.day}:${lot.id}:${d === 0 ? 'now' : 'near'}`;
         if (!state.alerted[key]) {
@@ -5242,6 +6035,9 @@ function startNewDay(confirmed, opts) {
     day: state.day,
     currentNumbers: structuredClone(state.currentNumbers),
     progressAnchors: structuredClone(state.progressAnchors),
+    seriesPath: structuredClone(state.seriesPath),
+    seriesPlans: structuredClone(state.seriesPlans),
+    machineMerges: structuredClone(state.machineMerges),
     autoAdvance: state.autoAdvance,
     alerted: { ...(state.alerted || {}) },
     boughtHistory: structuredClone(state.boughtHistory || []),
@@ -5254,6 +6050,9 @@ function startNewDay(confirmed, opts) {
   state.day = auctionDay;
   state.currentNumbers = defaultCurrents(state.machines);
   state.progressAnchors = defaultAnchors(state.machines);
+  state.seriesPath = defaultSeriesPath(state.machines);
+  state.seriesPlans = defaultSeriesPlans(state.machines);
+  state.machineMerges = defaultMachineMerges(state.machines);
   if (typeof syncProgressTimer === 'function') syncProgressTimer();
   state.tab = 'note';
   state.currentHalf = 'fruit';
@@ -5928,22 +6727,40 @@ function renderLive() {
   }
   const unmovedPieces = unmovedQty(allToday);
 
-  const cols = state.machines[half]
+  const merges = (state.machineMerges && state.machineMerges[half]) || {};
+  const activeMachines = (state.machines[half] || []).filter((m) => !merges[m.id] || !merges[m.id].into);
+  const mergedMachines = (state.machines[half] || []).filter((m) => merges[m.id] && merges[m.id].into);
+
+  const cols = activeMachines
     .map((m) => {
       const cur = currentOf(m.id);
       const lots = columnLots(m.id, half);
       const upcoming = lots.filter(
-        (l) => l.status === 'pending' && !l.secondMarket && (cur == null || l.number >= cur)
+        (l) => l.status === 'pending' && !l.secondMarket && (cur == null || !isPassed(l, cur))
       );
       const next = upcoming[0] || null;
       const title = columnTitle(m, half);
       const curLabel = cur == null ? '—' : String(cur);
+      const ser = cur != null ? seriesOf(cur, half) : null;
+      const startN = ser ? seriesStart(m.id, half, ser) : null;
+      const startHtml = startN != null
+        ? `<span class="live-start-lbl">起 ${startN}</span>`
+        : '';
+      const plan = plannedEntries(m.id, half);
+      const planHtml = plan.length
+        ? `<span class="live-plan-lbl">${plan.map(String).join(' → ')}</span>`
+        : '';
       const cells = lots.length
         ? lots
             .map((l) => {
-              const over = isPassed(l, cur) || (l.status === 'pending' && l.secondMarket && cur != null && l.number < cur);
+              const over = isPassed(l, cur) || (l.status === 'pending' && l.secondMarket && cur != null && isPassed({ ...l, secondMarket: false }, cur));
               const isNext = next && l.id === next.id;
-              const d = cur != null && l.status === 'pending' && !l.secondMarket ? l.number - cur : null;
+              const lotSer = seriesOf(l.number, half);
+              const d = (cur != null && l.status === 'pending' && !l.secondMarket && ser && lotSer && ser.key === lotSer.key && startN != null)
+                ? wrapDist(cur, l.number, startN, ser)
+                : (cur != null && l.status === 'pending' && !l.secondMarket && ser && lotSer && ser.key === lotSer.key)
+                  ? (l.number - cur)
+                  : null;
               const near = d != null && d >= 0 && d <= gapN;
               const prio = lotPriority(l);
               let cls = `lot-cell prio-${prio}${peelClass(l.item)}`;
@@ -5992,18 +6809,34 @@ function renderLive() {
         </div>
         <div class="live-col-list" data-id="${m.id}">${cells}</div>
         <div class="live-col-foot hand-${thumbHand()}" data-stop="1">
-          <button type="button" class="live-cur" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
+          <button type="button" class="live-cur hold-btn" data-act="edit-cur" data-hold="set-start" data-id="${m.id}" aria-label="輸入現在進度，長按設定這段起點">
             <span class="cur-now-lbl">現在</span>
             <span class="cur-now-num">${curLabel}</span>
+            ${startHtml}
           </button>
+          ${planHtml}
           <div class="live-cur-row">
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
+          </div>
+          <div class="live-foot-actions">
+            <button type="button" class="xfer-btn" data-act="open-xfer" data-id="${m.id}">轉台</button>
+            <button type="button" class="seq-btn" data-act="open-seq" data-id="${m.id}">順序</button>
           </div>
         </div>
       </section>`;
     })
     .join('');
+
+  const mergeBanners = mergedMachines.map((m) => {
+    const info = merges[m.id];
+    const dest = columnTitleOf(info.into, half);
+    const src = columnTitle(m, half);
+    return `<div class="merge-banner">
+      <span>${escapeHtml(src)}已轉到${escapeHtml(dest)}</span>
+      <button type="button" data-act="undo-merge" data-id="${escapeHtml(m.id)}">復原</button>
+    </div>`;
+  }).join('');
 
   const empty = allToday.length === 0
     ? '<div class="live-empty">到「抄號」把紙上的號碼存進來，各台會並排顯示。</div>'
@@ -6024,7 +6857,8 @@ function renderLive() {
           : ''}
         <button type="button" class="live-sheet-btn" data-act="open-second">清單</button>
       </div>
-      <div class="live-cols" data-n="${(state.machines[half] || []).length}">${cols || '<div class="empty-hint">請先在設定裡確認台別</div>'}</div>
+      ${mergeBanners ? `<div class="merge-banners">${mergeBanners}</div>` : ''}
+      <div class="live-cols" data-n="${activeMachines.length}">${cols || '<div class="empty-hint">請先在設定裡確認台別</div>'}</div>
       ${empty}
     </div>`;
 }
@@ -6284,13 +7118,88 @@ function renderModal() {
     return `<div class="overlay" data-act="ec-cancel">
       <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
         <h3>現在拍到哪一號？</h3>
-        <p>${escapeHtml(m?.name || '')}　自己設定進度，不會因為點貨而自動往前。</p>
+        <p>${escapeHtml(m?.name || '')}　直接輸入號碼。若這段已結束，輸入下一段第一號，例如 6080。長按「現在」可改這段起點。</p>
         <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
         <div class="keypad">${keypad}</div>
         <div class="sheet-actions">
           <button type="button" class="btn primary" data-act="ec-ok">確定</button>
           <button type="button" class="btn" data-act="ec-cancel">取消</button>
         </div>
+      </div>
+    </div>`;
+  }
+  if (modal.type === 'set-start' || editStart) {
+    const ed = editStart;
+    if (!ed) return '';
+    const m = machineById(ed.machineId, ed.half);
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
+    const keypad = keys
+      .map((k) => {
+        if (k === '⌫') return `<button type="button" class="key muted" data-act="ss-back">⌫</button>`;
+        if (k === 'C') return `<button type="button" class="key muted" data-act="ss-clear">清除</button>`;
+        return `<button type="button" class="key" data-act="ss-digit" data-v="${k}">${k}</button>`;
+      })
+      .join('');
+    return `<div class="overlay" data-act="ss-cancel">
+      <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
+        <h3>這段從幾號開始？</h3>
+        <p>${escapeHtml(m?.name || '')}　例如今天這台從 5180 起拍，低於 5180 的號碼會排在後面。</p>
+        <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
+        <div class="keypad">${keypad}</div>
+        <div class="sheet-actions">
+          <button type="button" class="btn primary" data-act="ss-ok">確定</button>
+          <button type="button" class="btn" data-act="ss-cancel">取消</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (modal.type === 'xfer') {
+    const half = modal.half || state.currentHalf;
+    const srcId = modal.srcId;
+    const pending = columnLots(srcId, half).filter((l) => l.status === 'pending' && !l.secondMarket);
+    const others = (state.machines[half] || []).filter((m) => m.id !== srcId);
+    const destBtns = others.length
+      ? others.map((m) => `<button type="button" class="btn primary xfer-dest" data-act="xfer-to" data-id="${escapeHtml(m.id)}">轉到${escapeHtml(columnTitle(m, half))}</button>`).join('')
+      : '<p>沒有其他台可以轉。</p>';
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet" data-stop="1">
+        <h3>轉台</h3>
+        <p>${escapeHtml(columnTitleOf(srcId, half))}還沒拍的 ${pending.length} 筆會移過去。已標過的留在原台。</p>
+        <div class="sheet-actions" style="flex-direction:column;gap:10px">${destBtns}
+          <button type="button" class="btn" data-act="modal-cancel">取消</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (modal.type === 'seq' || seqEdit) {
+    const ed = seqEdit;
+    if (!ed) return '';
+    const m = machineById(ed.machineId, ed.half);
+    const chips = (ed.entries || []).map((n, i) => {
+      const arrow = i ? '<span class="seq-arrow">→</span>' : '';
+      return `${arrow}<span class="seq-chip">${escapeHtml(String(n))}<button type="button" class="seq-chip-x" data-act="seq-del" data-i="${i}" aria-label="刪掉">×</button></span>`;
+    }).join('');
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
+    const keypad = keys
+      .map((k) => {
+        if (k === '⌫') return `<button type="button" class="key muted" data-act="seq-back">⌫</button>`;
+        if (k === 'C') return `<button type="button" class="key muted" data-act="seq-clear">清除</button>`;
+        return `<button type="button" class="key" data-act="seq-digit" data-v="${k}">${k}</button>`;
+      })
+      .join('');
+    return `<div class="overlay" data-act="seq-cancel">
+      <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
+        <h3>今天這台的順序</h3>
+        <p>${escapeHtml(m?.name || '')}　市場怎麼喊就怎麼填，例如 5060 → 6030。可改、可留空。</p>
+        <div class="seq-chips">${chips || '<span class="seq-empty">還沒填順序</span>'}</div>
+        <div class="lot-display"><div class="num${ed.draft ? '' : ' empty'}">${ed.draft ? escapeHtml(ed.draft) : '下一號'}</div></div>
+        <div class="keypad">${keypad}</div>
+        <div class="sheet-actions seq-actions">
+          <button type="button" class="btn" data-act="seq-add">加上</button>
+          <button type="button" class="btn primary" data-act="seq-ok">儲存</button>
+          <button type="button" class="btn" data-act="seq-cancel">取消</button>
+        </div>
+        ${(ed.entries || []).length ? '<button type="button" class="btn" style="width:100%;margin-top:8px" data-act="seq-wipe">清除全部</button>' : ''}
       </div>
     </div>`;
   }
@@ -6976,6 +7885,87 @@ function onClick(e) {
       modal = { type: 'edit-cur' };
       render();
       break;
+    case 'open-xfer':
+      openXfer(btn.dataset.id);
+      break;
+    case 'xfer-to':
+      confirmXfer(modal && modal.srcId, btn.dataset.id);
+      break;
+    case 'undo-merge':
+      undoMergeFromBanner(btn.dataset.id);
+      break;
+    case 'open-seq':
+      openSeq(btn.dataset.id);
+      break;
+    case 'seq-digit':
+      if (seqEdit && String(seqEdit.draft || '').length < 4) {
+        seqEdit.draft = String(seqEdit.draft || '') + v;
+        render();
+      }
+      break;
+    case 'seq-back':
+      if (seqEdit) {
+        seqEdit.draft = String(seqEdit.draft || '').slice(0, -1);
+        render();
+      }
+      break;
+    case 'seq-clear':
+      if (seqEdit) {
+        seqEdit.draft = '';
+        render();
+      }
+      break;
+    case 'seq-add':
+      addSeqDraft();
+      break;
+    case 'seq-del':
+      if (seqEdit) {
+        const i = Number(btn.dataset.i);
+        if (Number.isFinite(i)) seqEdit.entries.splice(i, 1);
+        render();
+      }
+      break;
+    case 'seq-wipe':
+      if (seqEdit) {
+        seqEdit.entries = [];
+        seqEdit.draft = '';
+        render();
+      }
+      break;
+    case 'seq-ok':
+      commitSeq();
+      break;
+    case 'seq-cancel':
+      seqEdit = null;
+      modal = null;
+      render();
+      break;
+    case 'ss-digit':
+      if (editStart && String(editStart.value || '').length < 4) {
+        editStart.value = String(editStart.value || '') + v;
+        render();
+      }
+      break;
+    case 'ss-back':
+      if (editStart) {
+        editStart.value = String(editStart.value || '').slice(0, -1);
+        render();
+      }
+      break;
+    case 'ss-clear':
+      if (editStart) {
+        editStart.value = '';
+        render();
+      }
+      break;
+    case 'ss-ok':
+      commitSetStart();
+      break;
+    case 'ss-cancel':
+      editStart = null;
+      modal = null;
+      render();
+      break;
     case 'ec-digit':
       if (editCurrent && editCurrent.value.length < 4) {
         editCurrent.value += v;
@@ -7466,6 +8456,11 @@ function performHoldAction(act, btn) {
     const id = btn && btn.dataset.id;
     modal = null;
     if (id) markFlow(id);
+    return;
+  }
+  if (act === 'set-start') {
+    const id = btn && btn.dataset.id;
+    if (id) openSetStart(id);
   }
 }
 
@@ -7832,6 +8827,32 @@ if (typeof window !== 'undefined') {
   window.__peelClass = peelClass;
   window.__peelToneOf = peelToneOf;
   window.__undoLast = undoLast;
+  window.__seriesOf = seriesOf;
+  window.__inSeries = inSeries;
+  window.__seriesStart = seriesStart;
+  window.__seriesPos = seriesPos;
+  window.__wrapIsBehind = wrapIsBehind;
+  window.__wrapDist = wrapDist;
+  window.__walkSeries = walkSeries;
+  window.__isPassed = isPassed;
+  window.__columnLots = columnLots;
+  window.__ensureSeriesPath = ensureSeriesPath;
+  window.__setSeriesStart = setSeriesStart;
+  window.__plannedEntries = plannedEntries;
+  window.__nextPlannedEntry = nextPlannedEntry;
+  window.__seriesAtEnd = seriesAtEnd;
+  window.__lotsInSeriesOnOtherMachines = lotsInSeriesOnOtherMachines;
+  window.__lotsInSeriesOnOthersForPlan = lotsInSeriesOnOthersForPlan;
+  window.__moveLotsToMachine = moveLotsToMachine;
+  window.__openSeq = openSeq;
+  window.__commitSeq = commitSeq;
+  window.__openXfer = openXfer;
+  window.__confirmXfer = confirmXfer;
+  window.__doXfer = doXfer;
+  window.__bumpCurrent = bumpCurrent;
+  window.__setCurrent = setCurrent;
+  window.__setProgress = setProgress;
+  window.__offerAdoptIfNeeded = offerAdoptIfNeeded;
   window.__setDraftNum = (v) => { draftNum = String(v || ''); };
   window.__getDraftNum = () => draftNum;
   window.__lockItem = lockItem;
