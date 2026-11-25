@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v57';
+const APP_VERSION = 'v58';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -5378,20 +5378,20 @@ function renderLive() {
             .join('')
         : '<div class="col-empty">還沒抄號</div>';
       return `<section class="live-col" data-id="${m.id}">
-        <div class="live-col-head hand-${thumbHand()}">
-          <div class="live-head-top">
-            <div class="col-name">${escapeHtml(title)}</div>
-            <button type="button" class="live-cur" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
-              <span class="cur-now-lbl">現在</span>
-              <span class="cur-now-num">${curLabel}</span>
-            </button>
-          </div>
+        <div class="live-col-head">
+          <div class="col-name">${escapeHtml(title)}</div>
+        </div>
+        <div class="live-col-list" data-id="${m.id}">${cells}</div>
+        <div class="live-col-foot hand-${thumbHand()}" data-stop="1">
+          <button type="button" class="live-cur" data-act="edit-cur" data-id="${m.id}" aria-label="輸入現在進度">
+            <span class="cur-now-lbl">現在</span>
+            <span class="cur-now-num">${curLabel}</span>
+          </button>
           <div class="live-cur-row">
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
           </div>
         </div>
-        <div class="live-col-list" data-id="${m.id}">${cells}</div>
       </section>`;
     })
     .join('');

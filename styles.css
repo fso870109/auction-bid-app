@@ -1800,11 +1800,11 @@ input:focus, textarea:focus {
   position: relative;
   flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 2px;
-  padding: 3px 3px 3px;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 5px 6px 4px;
   border-bottom: 1px solid var(--line);
   background: #141414;
   z-index: 2;
@@ -1849,41 +1849,45 @@ html.is-dragging .live-col-list {
   text-overflow: ellipsis;
   min-width: 0;
 }
-.live-head-top {
+.live-col-foot {
+  flex: 0 0 auto;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px;
-  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 3px 4px;
+  border-top: 1px solid var(--line);
+  background: #141414;
+  z-index: 2;
 }
 .live-cur-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   margin: 0;
 }
-.live-col-head.hand-left .live-cur-row { flex-direction: row-reverse; }
-.live-col-head.hand-right .live-cur-row { flex-direction: row; }
-.live-cur {
+.live-col-foot.hand-left .live-cur-row { flex-direction: row-reverse; }
+.live-col-foot.hand-right .live-cur-row { flex-direction: row; }
+.live-col-foot .live-cur {
   flex: 0 0 auto;
   display: flex;
   align-items: baseline;
-  justify-content: flex-end;
-  gap: 3px;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
   min-width: 0;
-  min-height: 22px;
-  padding: 0 2px;
+  min-height: 26px;
+  padding: 1px 2px;
   border-radius: 6px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   color: var(--yellow);
 }
-.live-cur:active { background: var(--bg-press); }
+.live-col-foot .live-cur:active { background: var(--bg-press); }
 .cur-now-lbl {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: var(--muted);
   letter-spacing: 0.02em;
@@ -1891,7 +1895,7 @@ html.is-dragging .live-col-list {
   white-space: nowrap;
 }
 .cur-now-num {
-  font-size: clamp(15px, 4vw, 17px);
+  font-size: clamp(22px, 6.2vw, 26px);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   color: var(--yellow);
@@ -1900,7 +1904,7 @@ html.is-dragging .live-col-list {
   white-space: nowrap;
 }
 .cur-step {
-  flex: 0 0 auto;
+  flex: 1 1 0;
   width: 36px;
   min-width: 36px;
   min-height: 36px;
@@ -3580,8 +3584,7 @@ button.lot-cell {
   .lot-cell .num-sub-wrap .cell-num { letter-spacing: 0.01em; }
   .eta-badge { font-size: 11px; }
   .moved-mark { font-size: 10px; padding: 1px 3px; }
-  .cur-now-lbl { display: none; }
-  .cur-now-num { font-size: 14px; letter-spacing: 0; }
+  .cur-now-num { letter-spacing: 0; }
   .subcode-sheet .key { min-height: 64px; }
 }
 @media (max-height: 640px) {
