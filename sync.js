@@ -296,6 +296,15 @@ function onLocalStateSaved() {
   next.kv = BidSyncCore.kvFromState(state);
   const ops = BidSyncCore.diffState(prev, next, ensurePeerId(), now);
   writeStampsToState(next);
+  if (!state.syncTombstones || typeof state.syncTombstones !== 'object') {
+    state.syncTombstones = { lots: {}, plan: {} };
+  }
+  if (!state.syncTombstones.lots || typeof state.syncTombstones.lots !== 'object') state.syncTombstones.lots = {};
+  if (!state.syncTombstones.plan || typeof state.syncTombstones.plan !== 'object') state.syncTombstones.plan = {};
+  for (const op of ops) {
+    if (op && op.kind === 'lot-delete' && op.id) state.syncTombstones.lots[op.id] = op.ts;
+    if (op && op.kind === 'plan-delete' && op.id) state.syncTombstones.plan[op.id] = op.ts;
+  }
   lastShared = sharedSlice();
   if (!ops.length) return;
   if (!Array.isArray(state.syncQueue)) state.syncQueue = [];

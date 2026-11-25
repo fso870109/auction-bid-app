@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v69';
+const APP_VERSION = 'v70';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -1871,7 +1871,24 @@ function undoPlanLast() {
   toastMsg = '';
   toastAction = null;
   if (!snap) return;
-  state.planItems = snap;
+  const now = Date.now();
+  const peer = typeof ensurePeerId === 'function' ? ensurePeerId() : (state && state.peerId) || '';
+  const restored = (snap || []).map((p) => Object.assign({}, p));
+  if (!state.syncTombstones || typeof state.syncTombstones !== 'object') {
+    state.syncTombstones = { lots: {}, plan: {} };
+  }
+  if (!state.syncTombstones.plan || typeof state.syncTombstones.plan !== 'object') state.syncTombstones.plan = {};
+  for (const item of restored) {
+    if (!item || !item.id) continue;
+    delete state.syncTombstones.plan[item.id];
+    if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
+      BidSyncCore.stamp(item, BidSyncCore.PLAN_FIELDS, now, peer);
+    } else {
+      item.updatedAt = now;
+      if (peer) item.updatedBy = peer;
+    }
+  }
+  state.planItems = restored;
   saveState();
   toast('已復原');
   buzz(24);
@@ -2316,6 +2333,62 @@ function planTodayCount() {
   return (state.planItems || []).filter((p) => !p.done && p.forDay <= today).length;
 }
 
+function planSectionItems(kind) {
+  const today = todayStr();
+  const items = state.planItems || [];
+  if (kind === 'today') return items.filter((p) => !p.done && p.forDay <= today);
+  if (kind === 'tomorrow') return items.filter((p) => !p.done && p.forDay > today);
+  if (kind === 'done') return items.filter((p) => p.done && p.doneOn === today);
+  return items.slice();
+}
+
+function confirmClearPlans(kind) {
+  kind = kind || 'all';
+  const list = planSectionItems(kind);
+  if (!list.length) {
+    toast('沒有可以清除的項目');
+    return;
+  }
+  const titles = {
+    today: '清除今日預計？',
+    tomorrow: '清除明日預計？',
+    done: '清除已完成？',
+    all: '全部清除？'
+  };
+  const bodies = {
+    today: '會刪掉今日預計 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。',
+    tomorrow: '會刪掉明日預計 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。',
+    done: '會刪掉今天的已完成 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。',
+    all: '會刪掉全部備註，共 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。'
+  };
+  modal = {
+    type: 'confirm',
+    title: titles[kind] || '清除備註？',
+    body: bodies[kind] || ('會刪掉 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。'),
+    ok: '清除 ' + list.length + ' 筆',
+    cancel: '取消',
+    danger: true,
+    onOk: () => clearPlanItems(kind),
+    onCancel: () => { modal = null; render(); }
+  };
+  render();
+}
+
+function clearPlanItems(kind) {
+  modal = null;
+  const dropIds = new Set(planSectionItems(kind).map((p) => p && p.id).filter(Boolean));
+  if (!dropIds.size) {
+    render();
+    return;
+  }
+  const snap = snapshotPlanItems();
+  state.planItems = (state.planItems || []).filter((p) => !dropIds.has(p.id));
+  saveState();
+  offerPlanUndo(snap, '已清除 ' + dropIds.size + ' 筆備註');
+  buzz(24);
+  render();
+}
+
 function renderSizeChips(current, opts) {
   opts = opts || {};
   const act = opts.lotId ? 'set-size' : 'set-draft-size';
@@ -2368,8 +2441,14 @@ function renderPlanScreen() {
     const target = kind === 'today' || kind === 'tomorrow';
     const on = target && planAddTarget === kind ? ' on' : '';
     const headAct = target ? ` data-act="plan-target" data-v="${kind}"` : '';
+    const clearBtn = list.length
+      ? `<button type="button" class="plan-clear-btn" data-act="plan-clear" data-v="${kind}">清除</button>`
+      : '';
     return `<section class="plan-sec${on}">
-      <h2${headAct} class="${target ? 'plan-target' : ''}${on}">${title}${list.length ? `<span>${list.length}</span>` : ''}</h2>
+      <div class="plan-sec-head">
+        <h2${headAct} class="${target ? 'plan-target' : ''}${on}">${title}${list.length ? `<span>${list.length}</span>` : ''}</h2>
+        ${clearBtn}
+      </div>
       ${hint ? `<p class="plan-hint">${hint}</p>` : ''}
       ${list.length ? list.map((p) => row(p, kind)).join('') : '<div class="plan-empty">還沒有項目</div>'}
     </section>`;
@@ -2396,9 +2475,10 @@ function renderPlanScreen() {
       <button type="button" class="plan-bar-link" data-act="open-summary">今日總結</button>
     </header>
     <div class="plan-body">
-      ${(todayItems.length || !planGridOpen) ? section('今日預計', planGridOpen ? '' : '昨天記下的會留在這裡，開始新的一天也不會清掉。', todayItems, 'today') : ''}
+      ${(todayItems.length || !planGridOpen) ? section('今日預計', planGridOpen ? '' : '昨天記下的會留在這裡，開始新的一天也不會清掉。要一次清掉請按清除。', todayItems, 'today') : ''}
       ${(tomorrowItems.length || !planGridOpen) ? section('明日預計', planGridOpen ? '' : '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow') : ''}
       ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
+      ${(!planGridOpen && items.length) ? '<button type="button" class="plan-clear-all" data-act="plan-clear" data-v="all">全部清除</button>' : ''}
     </div>
     ${planGridOpen ? `<div class="plan-add">
       ${targetRow}
@@ -6642,6 +6722,9 @@ function onClick(e) {
     case 'plan-del':
       deletePlanItem(btn.dataset.id);
       break;
+    case 'plan-clear':
+      confirmClearPlans(v || 'all');
+      break;
     case 'plan-qty-inc':
       bumpDraftQty(1);
       break;
@@ -7709,6 +7792,10 @@ if (typeof window !== 'undefined') {
   window.__unlockItem = unlockItem;
   window.__enterRangeMode = enterRangeMode;
   window.__getItemLock = () => ({ locked: itemLocked, item: draftItem, rangeMode, rangeStart, rangeEnd, rangeFocus });
+  window.__confirmClearPlans = confirmClearPlans;
+  window.__clearPlanItems = clearPlanItems;
+  window.__planSectionItems = planSectionItems;
+  window.__undoPlanLast = undoPlanLast;
 }
 
 function init() {

@@ -139,6 +139,7 @@
       const merged = mergeRecord(prev, lot, LOT_FIELDS);
       const changed = fieldsChanged(prev, merged, LOT_FIELDS);
       snap.lots[lot.id] = merged;
+      if (tomb && Math.max(ts, Number(merged.updatedAt) || 0) > tomb) delete snap.tombstones.lots[lot.id];
       return { applied: changed, flash: changed && op.peer ? lot.id : null };
     }
     if (op.kind === 'lot-delete') {
@@ -163,6 +164,7 @@
       const merged = mergeRecord(prev, item, PLAN_FIELDS);
       const changed = fieldsChanged(prev, merged, PLAN_FIELDS);
       snap.planItems[item.id] = merged;
+      if (tomb && Math.max(ts, Number(merged.updatedAt) || 0) > tomb) delete snap.tombstones.plan[item.id];
       return { applied: changed, flash: null };
     }
     if (op.kind === 'plan-delete') {
