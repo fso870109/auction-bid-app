@@ -2021,17 +2021,17 @@ html.is-dragging .live-col-list {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 3px 3px 4px;
+  gap: 8px;
+  padding: 8px 4px 10px;
   border-top: 1px solid var(--line);
   background: #141414;
   z-index: 2;
 }
 .live-cur-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 3px;
+  gap: 8px;
   min-width: 0;
   margin: 0;
 }
@@ -2045,8 +2045,8 @@ html.is-dragging .live-col-list {
   gap: 4px;
   width: 100%;
   min-width: 0;
-  min-height: 26px;
-  padding: 1px 2px;
+  min-height: 34px;
+  padding: 4px 2px 2px;
   border-radius: 6px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -2063,7 +2063,7 @@ html.is-dragging .live-col-list {
   white-space: nowrap;
 }
 .cur-now-num {
-  font-size: clamp(22px, 6.2vw, 26px);
+  font-size: clamp(24px, 6.6vw, 28px);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   color: var(--yellow);
@@ -2073,19 +2073,26 @@ html.is-dragging .live-col-list {
 }
 .cur-step {
   flex: 1 1 0;
-  width: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: auto;
+  min-width: 0;
+  min-height: 60px;
   padding: 0;
-  font-size: 20px;
+  font-size: 28px;
   font-weight: 900;
   line-height: 1;
-  border-radius: 7px;
+  border-radius: 10px;
   background: var(--bg-elev);
   border: 1px solid var(--line);
   color: var(--text);
 }
 .cur-step:active { background: var(--bg-press); }
+@media (max-height: 640px) {
+  .live-col-foot { gap: 6px; padding: 6px 3px 8px; }
+  .live-col-foot .live-cur { min-height: 30px; padding: 3px 2px 1px; }
+  .cur-now-num { font-size: clamp(22px, 6.2vw, 26px); }
+  .live-cur-row { gap: 6px; }
+  .cur-step { min-height: 56px; font-size: 26px; }
+}
 .prog-pop {
   position: absolute;
   top: calc(100% + 2px);
