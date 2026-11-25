@@ -25,6 +25,13 @@
 
 @font-face {
   font-family: "Paddle Inter";
+  src: url("fonts/inter-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Paddle Inter";
   src: url("fonts/inter-800.woff2") format("woff2");
   font-weight: 800;
   font-style: normal;
@@ -855,7 +862,7 @@ input:focus, textarea:focus {
 
 #paddle-code {
   font-family: var(--paddle-font);
-  font-weight: 800;
+  font-weight: 700;
   font-style: normal;
   font-synthesis: none;
   font-variant-numeric: tabular-nums;
@@ -1054,7 +1061,7 @@ input:focus, textarea:focus {
 }
 #paddle-code {
   font-family: var(--paddle-font);
-  font-weight: 800;
+  font-weight: 700;
   font-synthesis: none;
   text-rendering: geometricPrecision;
 }
@@ -1576,7 +1583,7 @@ input:focus, textarea:focus {
 }
 .custom-chip span { flex: 1; }
 
-/* 舉牌：自然比例、粗體加描邊，數字約佔畫面高度七成五 */
+/* 舉牌：自然比例、粗體 700 加較細描邊，數字約佔畫面高度七成五 */
 #paddle {
   display: block;
   overflow: hidden;
@@ -1629,7 +1636,7 @@ input:focus, textarea:focus {
   align-items: center;
   justify-content: center;
   font-family: var(--paddle-font);
-  font-weight: 800;
+  font-weight: 700;
   font-stretch: normal;
   font-style: normal;
   font-synthesis: none;
@@ -1646,7 +1653,7 @@ input:focus, textarea:focus {
 #paddle-code span {
   display: block;
   flex: 0 0 auto;
-  font-weight: 800;
+  font-weight: 700;
   font-stretch: normal;
   line-height: 1;
   transform: none;

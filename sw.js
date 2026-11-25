@@ -1,4 +1,4 @@
-const CACHE = 'auction-bid-v65';
+const CACHE = 'auction-bid-v66';
 const NETWORK_TIMEOUT_MS = 3000;
 const ASSETS = [
   './',
@@ -16,6 +16,7 @@ const ASSETS = [
   './icons/icon-512-maskable.png',
   './icons/apple-touch-icon.png',
   './icons/favicon-32.png',
+  './fonts/inter-700.woff2',
   './fonts/inter-800.woff2'
 ];
 

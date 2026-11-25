@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v65';
+const APP_VERSION = 'v66';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4627,7 +4627,7 @@ function cyclePaddleTheme() {
 function paddleInkMetrics(text, fontPx) {
   const canvas = paddleInkMetrics._c || (paddleInkMetrics._c = document.createElement('canvas'));
   const ctx = canvas.getContext('2d');
-  ctx.font = '800 ' + fontPx + 'px "Paddle Inter", Inter, sans-serif';
+  ctx.font = '700 ' + fontPx + 'px "Paddle Inter", Inter, sans-serif';
   let inkH = 0;
   const widths = [];
   for (const ch of String(text || '0000')) {
@@ -4650,7 +4650,7 @@ function fitPaddleDigits() {
   if (!el || !box) return;
   if (document.fonts && !fitPaddleDigits._armed) {
     fitPaddleDigits._armed = true;
-    Promise.resolve(document.fonts.load('800 200px "Paddle Inter"'))
+    Promise.resolve(document.fonts.load('700 200px "Paddle Inter"'))
       .then(() => document.fonts.ready)
       .then(() => { if (paddleOpen) fitPaddleDigits(); })
       .catch(() => {});
@@ -4662,7 +4662,7 @@ function fitPaddleDigits() {
   const text = String(el.innerText || '0000').replace(/\s+/g, '');
   const n = Math.max(1, text.length);
   const TARGET = 0.75;
-  const strokeRatio = 0.028;
+  const strokeRatio = 0.018;
   const probe = 200;
   const met = paddleInkMetrics(text, probe);
   const inkWem = met.widths.reduce((s, w) => s + w, 0) / probe;
@@ -4685,7 +4685,7 @@ function fitPaddleDigits() {
   el.style.whiteSpace = 'nowrap';
   el.style.lineHeight = '1';
   el.style.letterSpacing = '0';
-  el.style.fontWeight = '800';
+  el.style.fontWeight = '700';
   el.style.fontStretch = 'normal';
   el.style.fontFamily = '"Paddle Inter", Inter, sans-serif';
   el.style.width = 'max-content';
@@ -4700,7 +4700,7 @@ function fitPaddleDigits() {
     for (const d of el.querySelectorAll('span')) {
       d.style.fontSize = px + 'px';
       d.style.lineHeight = '1';
-      d.style.fontWeight = '800';
+      d.style.fontWeight = '700';
       d.style.fontStretch = 'normal';
       d.style.transform = 'none';
       d.style.webkitTextStroke = stroke + 'px currentColor';
