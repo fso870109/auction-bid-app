@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v86';
+const APP_VERSION = 'v87';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -107,12 +107,20 @@ const LEGACY_ITEM_DISPLAY = {
   '茭白筍-進口': '進口美人腿'
 };
 
+/* Everyday names for varieties that stay in a parent sheet (not grid promotions). */
+const EVERYDAY_VARIETY_LABELS = [
+  { l: '紅椒', cropN: '甜椒', varN: '甜椒-彩椒紅色', a: ['彩椒紅色'] },
+  { l: '黃椒', cropN: '甜椒', varN: '甜椒-彩椒黃色', a: ['彩椒黃色'] }
+];
+
 function everydayItemLabel(name) {
   const n = String(name || '').trim();
   if (!n) return '';
   if (n === '圓絲瓜') return n;
   const promo = GRID_PROMOTIONS.find((p) => p.l === n || p.varN === n);
-  return promo ? promo.l : '';
+  if (promo) return promo.l;
+  const named = EVERYDAY_VARIETY_LABELS.find((p) => p.l === n || p.varN === n || (p.a || []).includes(n));
+  return named ? named.l : '';
 }
 
 function itemDisplayName(name) {
@@ -657,6 +665,20 @@ function pinnedPickerVariants(crop) {
       }));
     }
   }
+  if (crop.n === '甜椒' || crop.l === '甜椒') {
+    for (const named of EVERYDAY_VARIETY_LABELS.filter((p) => p.cropN === '甜椒')) {
+      const src = (crop.s || []).find((v) => v.n === named.varN || v.l === named.l || (v.a || []).includes(named.l));
+      if (!src) continue;
+      out.push(Object.assign({}, src, {
+        n: named.l,
+        l: named.l,
+        srcN: src.n,
+        a: [...new Set([...(src.a || []), named.l, ...(named.a || [])])]
+      }));
+    }
+    const mixed = (crop.s || []).find((v) => v.n === '甜椒-彩色種' || v.l === '彩色種');
+    if (mixed) out.push(mixed);
+  }
   return out;
 }
 
@@ -1167,6 +1189,8 @@ const GOURD_PEEL_CROP = {
   '苦瓜': 'paleGreen',
   '茄子': 'purple',
   '甜椒': 'green',
+  '紅椒': 'red',
+  '黃椒': 'yellow',
   '扁蒲': 'paleGreen',
   '蒲仔': 'paleGreen',
   '胡瓜': 'green',
@@ -1251,7 +1275,11 @@ const GOURD_PEEL_VARIANT = {
   '甜椒-水果彩椒': 'orange',
   '甜椒-彩椒橘色': 'orange',
   '甜椒-彩椒紅色': 'red',
+  '紅椒': 'red',
+  '彩椒紅色': 'red',
   '甜椒-彩椒黃色': 'yellow',
+  '黃椒': 'yellow',
+  '彩椒黃色': 'yellow',
   '甜椒-彩椒其他': 'orange',
   '甜椒-新香': 'green',
   '冬瓜-白皮': 'white',
