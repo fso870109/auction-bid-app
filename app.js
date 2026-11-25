@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v87';
+const APP_VERSION = 'v88';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -899,6 +899,9 @@ let planGridScroll = 0;
 let planBodyScroll = 0;
 let sumBodyScroll = 0;
 let pageScrollY = 0;
+let mainScrollTop = 0;
+let mainScrollKey = '';
+let lastPaintHtml = { header: '', nav: '', main: '', paddle: '', modal: '', plan: '', sum: '' };
 let planUndo = null;
 let lastPlanWon = {};
 let lastPlanEvents = [];
@@ -2485,6 +2488,94 @@ function restorePlanListScroll() {
 function resetPlanListScroll() {
   planBodyScroll = 0;
   pageScrollY = 0;
+}
+
+function captureMainScroll() {
+  const el = document.getElementById('main');
+  if (!el) return;
+  mainScrollTop = el.scrollTop;
+  mainScrollKey = currentPageKey();
+}
+
+function restoreMainScroll() {
+  const el = document.getElementById('main');
+  if (!el) return;
+  if (currentPageKey() === mainScrollKey) el.scrollTop = mainScrollTop;
+  else {
+    el.scrollTop = 0;
+    mainScrollTop = 0;
+    mainScrollKey = currentPageKey();
+  }
+}
+
+function captureActiveField() {
+  const active = document.activeElement;
+  if (!active || !active.closest || !active.closest('#app')) return null;
+  if (!/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return null;
+  return {
+    id: active.id || '',
+    tag: active.tagName.toLowerCase(),
+    act: active.getAttribute('data-act') || '',
+    half: active.getAttribute('data-half') || '',
+    mid: active.getAttribute('data-id') || '',
+    index: active.getAttribute('data-i') || '',
+    field: active.getAttribute('data-field') || '',
+    start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+    end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+  };
+}
+
+function cssAttr(s) {
+  const v = String(s || '');
+  if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(v);
+  return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function restoreActiveField(info) {
+  if (!info) return;
+  let el = info.id ? document.getElementById(info.id) : null;
+  if (!el && info.act) {
+    let sel = `${info.tag}[data-act="${cssAttr(info.act)}"]`;
+    if (info.half) sel += `[data-half="${cssAttr(info.half)}"]`;
+    if (info.mid) sel += `[data-id="${cssAttr(info.mid)}"]`;
+    if (info.index) sel += `[data-i="${cssAttr(info.index)}"]`;
+    if (info.field) sel += `[data-field="${cssAttr(info.field)}"]`;
+    el = document.querySelector(sel);
+  }
+  if (!el || typeof el.focus !== 'function') return;
+  el.focus({ preventScroll: true });
+  if (info.start != null && typeof el.setSelectionRange === 'function') {
+    try { el.setSelectionRange(info.start, info.end); } catch { /* ignore */ }
+  }
+}
+
+function firstElFromHtml(html) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = String(html || '').trim();
+  return wrap.firstElementChild;
+}
+
+function replaceNode(el, html) {
+  if (!el) return null;
+  const node = firstElFromHtml(html);
+  if (!node) {
+    el.remove();
+    return null;
+  }
+  el.replaceWith(node);
+  return node;
+}
+
+function upsertAppSection(app, el, html, before) {
+  const trimmed = String(html || '').trim();
+  if (!trimmed) {
+    if (el) el.remove();
+    return null;
+  }
+  if (el) return replaceNode(el, trimmed);
+  const node = firstElFromHtml(trimmed);
+  if (node) app.insertBefore(node, before || null);
+  return node;
 }
 
 function openPlanQtyEdit(id) {
@@ -7270,10 +7361,7 @@ function render() {
     }
     if (dirty) saveState();
   }
-  const active = document.activeElement;
-  const focusId = active && active.id;
-  const start = active && active.selectionStart;
-  const end = active && active.selectionEnd;
+  const activeField = captureActiveField();
 
   if (isSetupNeeded()) {
     segAnimPending = false;
@@ -7281,7 +7369,7 @@ function render() {
     segAnimFrom = null;
     lotColorFrom = null;
     app.innerHTML = renderSetup();
-    restoreFocus(focusId, start, end);
+    restoreActiveField(activeField);
     return;
   }
 
@@ -7296,30 +7384,91 @@ function render() {
   captureItemPickScroll();
   capturePlanGridScroll();
   capturePlanListScroll();
+  captureMainScroll();
   const nextPageKey = currentPageKey();
   const shouldPageAnim = !!(lastPageKey && nextPageKey !== lastPageKey && !reducedMotion());
+  const samePage = !!(lastPageKey && lastPageKey === nextPageKey);
   lastPageKey = nextPageKey;
   const liveCls = state.tab === 'live' && !showSettings ? ' live-mode' : '';
   const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
 
   const paint = () => {
-    app.innerHTML =
-      renderHeader() +
-      `<main class="main${noteCls}${liveCls}" id="main">${renderTab()}</main>` +
-      renderNav() +
-      (paddleOpen ? renderPaddle() : '') +
-      (modal ? renderModal() : '') +
-      renderPlanScreen() +
-      renderDaySummary() +
-      `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
+    const headerHtml = renderHeader();
+    const mainInner = renderTab();
+    const mainCls = `main${noteCls}${liveCls}`;
+    const mainHtml = `<main class="${mainCls}" id="main">${mainInner}</main>`;
+    const navHtml = renderNav();
+    const paddleHtml = paddleOpen ? renderPaddle() : '';
+    const modalHtml = modal ? renderModal() : '';
+    const planHtml = renderPlanScreen();
+    const sumHtml = renderDaySummary();
+    const shell = document.querySelector('#app > .header') && document.getElementById('main') && document.querySelector('#app > .nav');
+
+    if (!shell || shouldPageAnim || !samePage) {
+      app.innerHTML =
+        headerHtml +
+        mainHtml +
+        navHtml +
+        paddleHtml +
+        modalHtml +
+        planHtml +
+        sumHtml +
+        `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
+      lastPaintHtml = {
+        header: headerHtml,
+        nav: navHtml,
+        main: mainInner,
+        paddle: paddleHtml,
+        modal: modalHtml,
+        plan: planHtml,
+        sum: sumHtml
+      };
+    } else {
+      if (lastPaintHtml.header !== headerHtml) {
+        const header = document.querySelector('#app > .header');
+        if (header) replaceNode(header, headerHtml);
+        lastPaintHtml.header = headerHtml;
+      }
+      if (lastPaintHtml.nav !== navHtml) {
+        const nav = document.querySelector('#app > .nav');
+        if (nav) replaceNode(nav, navHtml);
+        lastPaintHtml.nav = navHtml;
+      }
+      const main = document.getElementById('main');
+      if (main) {
+        if (main.className !== mainCls) main.className = mainCls;
+        if (lastPaintHtml.main !== mainInner) {
+          main.innerHTML = mainInner;
+          lastPaintHtml.main = mainInner;
+        }
+      }
+      if (lastPaintHtml.paddle !== paddleHtml) {
+        upsertAppSection(app, document.getElementById('paddle'), paddleHtml, document.getElementById('toast'));
+        lastPaintHtml.paddle = paddleHtml;
+      }
+      if (lastPaintHtml.modal !== modalHtml) {
+        upsertAppSection(app, document.querySelector('#app > .overlay'), modalHtml, document.getElementById('toast'));
+        lastPaintHtml.modal = modalHtml;
+      }
+      if (lastPaintHtml.plan !== planHtml) {
+        upsertAppSection(app, document.getElementById('plan-screen'), planHtml, document.getElementById('toast'));
+        lastPaintHtml.plan = planHtml;
+      }
+      if (lastPaintHtml.sum !== sumHtml) {
+        upsertAppSection(app, document.getElementById('sum-screen'), sumHtml, document.getElementById('toast'));
+        lastPaintHtml.sum = sumHtml;
+      }
+    }
 
     paintToast(document.getElementById('toast'));
     requestAnimationFrame(fitToastText);
-    restoreFocus(focusId, start, end);
+    restoreActiveField(activeField);
     restoreLiveScroll();
     restoreItemPickScroll();
     restorePlanGridScroll();
     restorePlanListScroll();
+    restoreMainScroll();
+    requestAnimationFrame(restoreMainScroll);
     afterRenderMotion(doSegAnim, doLotAnim);
     if (modal?.type === 'type-item') {
       const input = document.getElementById('type-item-input');
@@ -7826,7 +7975,7 @@ function renderSettings() {
       </div>
       <div class="switch-row">
         <div><div class="lbl">新的一天開始時間</div><div class="sub">過了這個時間就自動進入下一場拍賣日，預設下午 3 點</div></div>
-        <select class="cutoff-select" data-act="day-cutoff" aria-label="新的一天開始時間">
+        <select id="day-cutoff" class="cutoff-select" data-act="day-cutoff" aria-label="新的一天開始時間">
           ${Array.from({ length: 24 }, (_, h) => {
             const sel = dayCutoffHour() === h ? ' selected' : '';
             return `<option value="${h}"${sel}>${cutoffHourLabel(h)}</option>`;
@@ -7839,7 +7988,7 @@ function renderSettings() {
       </div>
       <div class="switch-row">
         <div><div class="lbl">拍賣速度</div><div class="sub">每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。預設每分鐘 4 號。</div></div>
-        <select class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
+        <select id="lots-per-min" class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
           ${[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => {
             const sel = lotsPerMin() === n ? ' selected' : '';
             return `<option value="${n}"${sel}>每分鐘 ${n} 號</option>`;
