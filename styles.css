@@ -1576,7 +1576,7 @@ input:focus, textarea:focus {
 }
 .custom-chip span { flex: 1; }
 
-/* 舉牌：數字拉高佔滿畫面，橫向鎖定或 CSS 旋轉 */
+/* 舉牌：自然比例、粗體加描邊，橫向鎖定或 CSS 旋轉 */
 #paddle {
   display: block;
   overflow: hidden;
@@ -1630,21 +1630,28 @@ input:focus, textarea:focus {
   justify-content: center;
   font-family: var(--paddle-font);
   font-weight: 800;
+  font-stretch: normal;
   font-style: normal;
   font-synthesis: none;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
-  line-height: 0.72;
-  -webkit-text-stroke: 0;
+  line-height: 1;
+  -webkit-text-stroke-color: currentColor;
+  paint-order: stroke fill;
   text-rendering: geometricPrecision;
   user-select: none;
   -webkit-user-select: none;
+  transform: none;
 }
 #paddle-code span {
   display: block;
   flex: 0 0 auto;
   font-weight: 800;
-  line-height: 0.72;
+  font-stretch: normal;
+  line-height: 1;
+  transform: none;
+  -webkit-text-stroke-color: currentColor;
+  paint-order: stroke fill;
 }
 #paddle.css-landscape #paddle-stage {
   position: absolute;

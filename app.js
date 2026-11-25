@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v61';
+const APP_VERSION = 'v62';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4661,46 +4661,53 @@ function fitPaddleDigits() {
   const padBottom = Math.max(28, bh * 0.07);
   const availW = Math.max(20, bw - padX * 2);
   const availH = Math.max(20, bh - padTop - padBottom);
-  const gap = Math.max(12, Math.min(availW * 0.055, availH * 0.14));
+  const gap = Math.max(18, Math.min(availW * 0.045, availH * 0.1));
   const probe = 200;
   const met = paddleInkMetrics(text, probe);
-  let size = probe * (availH / Math.max(met.inkH, 1));
+  const strokeRatio = 0.028;
+  const inkWem = met.widths.reduce((s, w) => s + w, 0) / probe;
+  const inkHem = met.inkH / probe;
+  const sizeW = (availW - gap * (n - 1)) / Math.max(0.1, inkWem + 2 * strokeRatio * n);
+  const sizeH = availH / Math.max(0.1, inkHem + 2 * strokeRatio);
+  let size = Math.min(sizeW, sizeH);
   el.style.display = 'flex';
   el.style.alignItems = 'center';
   el.style.justifyContent = 'center';
   el.style.whiteSpace = 'nowrap';
-  el.style.lineHeight = '0.72';
+  el.style.lineHeight = '1';
   el.style.letterSpacing = '0';
   el.style.fontWeight = '800';
+  el.style.fontStretch = 'normal';
   el.style.fontFamily = '"Paddle Inter", Inter, sans-serif';
-  el.style.webkitTextStroke = '0';
   el.style.gap = gap + 'px';
   el.style.width = 'max-content';
   el.style.maxWidth = 'none';
-  el.style.transformOrigin = 'center center';
   el.style.transform = 'none';
+  el.style.transformOrigin = 'center center';
   const applySize = (px) => {
+    const stroke = Math.max(3, Math.min(12, px * strokeRatio));
     el.style.fontSize = px + 'px';
+    el.style.webkitTextStroke = stroke + 'px currentColor';
+    el.style.paintOrder = 'stroke fill';
     for (const d of el.querySelectorAll('span')) {
       d.style.fontSize = px + 'px';
-      d.style.lineHeight = '0.72';
+      d.style.lineHeight = '1';
       d.style.fontWeight = '800';
+      d.style.fontStretch = 'normal';
       d.style.transform = 'none';
+      d.style.webkitTextStroke = stroke + 'px currentColor';
+      d.style.paintOrder = 'stroke fill';
     }
   };
   applySize(size);
   void el.offsetWidth;
-  const usedW = Math.max(el.scrollWidth, 1);
-  const minSx = 0.58;
-  let scaleX = usedW > availW ? availW / usedW : 1;
-  if (scaleX < minSx) {
-    size *= scaleX / minSx;
+  const usedW = Math.max(el.scrollWidth, 1) + 2 * Math.max(3, Math.min(12, size * strokeRatio));
+  const usedH = (inkHem + 2 * strokeRatio) * size;
+  const fit = Math.min(1, availW / usedW, availH / Math.max(usedH, 1));
+  if (fit < 0.995) {
+    size *= fit;
     applySize(size);
-    void el.offsetWidth;
-    const used2 = Math.max(el.scrollWidth, 1);
-    scaleX = used2 > availW ? Math.max(minSx, availW / used2) : 1;
   }
-  el.style.transform = scaleX < 0.995 ? 'scaleX(' + scaleX + ')' : 'none';
 }
 
 function themeLabel(theme) {
