@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v64';
+const APP_VERSION = 'v65';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -5461,7 +5461,7 @@ function renderLive() {
               if (d === 0) badge = '<span class="cell-badge now">到</span>';
               const eta = lotEtaLabel(l, cur);
               const etaHtml = eta ? `<span class="eta-badge">${escapeHtml(eta)}</span>` : '';
-              const movedMark = l.status === 'moved' ? '<span class="moved-mark">✓搬</span>' : '';
+              const movedMark = l.status === 'moved' ? '<span class="moved-mark">搬</span>' : '';
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
               const size = itemNeedsSize(l.item) && l.item
                 ? `<span class="size-badge${sizeLabel(l.size) ? ' on s-' + l.size : ' empty'}" data-act="cycle-size" data-id="${escapeHtml(l.id)}">${sizeLabel(l.size) || '規'}</span>`
@@ -5472,13 +5472,16 @@ function renderLive() {
               return `<button type="button" class="${cls}" data-act="cycle-lot" data-id="${escapeHtml(l.id)}">
                 <span class="prio-hit" data-act="cycle-prio" data-id="${escapeHtml(l.id)}">
                   <span class="prio-bar"></span>
-                  <span class="prio-tag">${prioShort(prio)}</span>
+                  <span class="prio-stack">
+                    <span class="prio-tag">${prioShort(prio)}</span>
+                    ${movedMark}
+                  </span>
                 </span>
                 <span class="cell-main">
                   <span class="cell-top">
                     ${lotNumHtml(l, { edit: true, numClass: 'cell-num' })}
                   </span>
-                  <span class="cell-item-row">${item}${etaHtml}<span class="cell-end">${size}<span class="cell-flags">${movedMark}${badge}${er}</span></span></span>
+                  <span class="cell-item-row">${item}${etaHtml}<span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span></span>
                 </span>
               </button>`;
             })

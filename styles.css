@@ -2058,6 +2058,15 @@ button.lot-cell {
   padding-right: 0;
   min-width: 20px;
 }
+.prio-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  min-width: 16px;
+  padding: 3px 0;
+}
 .prio-bar {
   width: 3px;
   align-self: stretch;
@@ -2220,13 +2229,19 @@ button.lot-cell {
 .lot-cell.moved .cell-item { color: #2a1c00; }
 .moved-mark {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
   font-size: 11px;
   font-weight: 900;
   color: #ffe500;
   background: #1a1200;
-  border-radius: 4px;
-  padding: 1px 4px;
-  line-height: 1.2;
+  border-radius: 3px;
+  padding: 2px 2px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 .unmoved-count b { color: #ffd24a; }
 .unmoved-count { color: #e8c056; }
@@ -3671,7 +3686,8 @@ button.lot-cell {
   .num-sub-wrap.has-sub .cell-num,
   .lot-cell .num-sub-wrap .cell-num { letter-spacing: 0.01em; }
   .eta-badge { font-size: 11px; }
-  .moved-mark { font-size: 10px; padding: 1px 3px; }
+  .moved-mark { font-size: 10px; padding: 1px 2px; min-width: 14px; }
+  .prio-stack { min-width: 14px; padding: 2px 0; gap: 1px; }
   .cur-now-num { letter-spacing: 0; }
   .subcode-sheet .key { min-height: 64px; }
 }
