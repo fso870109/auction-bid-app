@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v80';
+const APP_VERSION = 'v81';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -3724,6 +3724,7 @@ function undoLast() {
 function cycleLotStatus(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   let next;
   let label;
@@ -3760,6 +3761,7 @@ function cycleLotStatus(id) {
 function markFlow(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   lot.status = 'flow';
   lot.secondMarket = true;
@@ -3773,6 +3775,7 @@ function markFlow(id) {
 function cancelFlow(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || lot.status !== 'flow') return;
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   lot.status = 'pending';
   lot.secondMarket = false;
@@ -3797,6 +3800,7 @@ function setLotQty(id, delta) {
 function undoLotMark(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || lot.status === 'pending') return;
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   const label = lot.status === 'won' || lot.status === 'moved' ? '已取消標到' : lot.status === 'flow' ? '已取消流標' : '已改回未拍';
   lot.status = 'pending';
@@ -3811,6 +3815,7 @@ function undoLotMark(id) {
 function markLost(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || lot.status === 'lost') return;
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   lot.status = 'lost';
   rememberBoughtLots(state.lots);
@@ -3824,6 +3829,7 @@ function markLost(id) {
 function unmoveLot(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || lot.status !== 'moved') return;
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   lot.status = 'won';
   rememberBoughtLots(state.lots);
@@ -3860,6 +3866,8 @@ function setLotPriority(id, prio, { fromToggle } = {}) {
   if (!PRIORITIES.includes(prio)) return;
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) return;
+  requestSegAnim();
+  requestLotColorAnim();
   const snap = snapshotLot(lot);
   lot.priority = prio;
   if (fromToggle) {
@@ -3882,6 +3890,7 @@ function cycleLotPriority(id) {
 
 function setDraftPriority(prio) {
   if (!PRIORITIES.includes(prio)) return;
+  requestSegAnim();
   draftPriority = prio;
   state.lastPriority = prio;
   saveState();
@@ -6524,6 +6533,227 @@ function updateLiveListOverflow() {
   });
 }
 
+
+const SEG_TRACK_SEL = '.prio-toggle, .half-switch, .hand-seg';
+const SEG_EASE = 'transform 280ms cubic-bezier(.22,1,.36,1), width 280ms cubic-bezier(.22,1,.36,1)';
+let segAnimPending = false;
+let segAnimFrom = null;
+let lotColorPending = false;
+let lotColorFrom = null;
+let segAnimToken = 0;
+
+function reducedMotion() {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch {
+    return false;
+  }
+}
+
+function requestSegAnim() {
+  if (!reducedMotion()) segAnimPending = true;
+}
+
+function requestLotColorAnim() {
+  if (!reducedMotion()) lotColorPending = true;
+}
+
+function segTrackKey(track) {
+  if (track.classList.contains('sheet-prio')) return 'sheet-prio';
+  if (track.classList.contains('note-prio')) return 'note-prio';
+  if (track.classList.contains('half-switch')) return 'half-switch';
+  if (track.classList.contains('hand-seg')) return 'hand-seg';
+  return 'seg';
+}
+
+function measureSegTrack(track) {
+  const on = track.querySelector('button.on');
+  if (!on) return null;
+  const colors = {};
+  track.querySelectorAll('button').forEach((btn) => {
+    if (btn.dataset.v) colors[btn.dataset.v] = getComputedStyle(btn).color;
+  });
+  return {
+    x: on.offsetLeft,
+    y: on.offsetTop,
+    w: on.offsetWidth,
+    h: on.offsetHeight,
+    v: on.dataset.v || '',
+    colors,
+  };
+}
+
+function captureSegAnim() {
+  const map = {};
+  document.querySelectorAll(SEG_TRACK_SEL).forEach((track) => {
+    const m = measureSegTrack(track);
+    if (m) map[segTrackKey(track)] = m;
+  });
+  segAnimFrom = Object.keys(map).length ? map : null;
+}
+
+function captureLotColors() {
+  const map = {};
+  document.querySelectorAll('.lot-cell[data-id]').forEach((el) => {
+    const s = getComputedStyle(el);
+    const tag = el.querySelector('.prio-tag');
+    const ts = tag ? getComputedStyle(tag) : null;
+    map[el.dataset.id] = {
+      background: s.background,
+      color: s.color,
+      boxShadow: s.boxShadow,
+      filter: s.filter,
+      borderColor: s.borderColor,
+      tag: ts
+        ? { background: ts.background, color: ts.color, boxShadow: ts.boxShadow }
+        : null,
+    };
+  });
+  lotColorFrom = Object.keys(map).length ? map : null;
+}
+
+function applySegBox(ind, box) {
+  ind.style.top = `${box.y}px`;
+  ind.style.height = `${box.h}px`;
+  ind.style.width = `${box.w}px`;
+  ind.style.transform = `translate3d(${box.x}px,0,0)`;
+}
+
+function positionSegIndicator(track, from, animate) {
+  const ind = track.querySelector('.seg-indicator');
+  const to = measureSegTrack(track);
+  if (!ind || !to) return;
+  const canAnim = !!(animate && from && !reducedMotion());
+  if (canAnim) {
+    ind.style.transition = 'none';
+    applySegBox(ind, from);
+    track.querySelectorAll('button').forEach((btn) => {
+      const prev = from.colors && from.colors[btn.dataset.v];
+      if (!prev) return;
+      btn.style.transition = 'none';
+      btn.style.color = prev;
+    });
+    ind.classList.add('is-ready');
+    track.classList.add('seg-ready');
+    void ind.offsetWidth;
+    ind.style.transition = SEG_EASE;
+    applySegBox(ind, to);
+    track.querySelectorAll('button').forEach((btn) => {
+      btn.style.transition = '';
+      btn.style.color = '';
+    });
+  } else {
+    ind.style.transition = 'none';
+    applySegBox(ind, to);
+    ind.classList.add('is-ready');
+    track.classList.add('seg-ready');
+    void ind.offsetWidth;
+    ind.style.transition = '';
+  }
+}
+
+function syncSegIndicators(animate) {
+  document.querySelectorAll(SEG_TRACK_SEL).forEach((track) => {
+    const from = animate && segAnimFrom ? segAnimFrom[segTrackKey(track)] : null;
+    positionSegIndicator(track, from, animate);
+  });
+}
+
+function applyLotColorFrom(from) {
+  if (!from) return;
+  document.querySelectorAll('.lot-cell[data-id]').forEach((el) => {
+    const prev = from[el.dataset.id];
+    if (!prev) return;
+    el.style.transition = 'none';
+    el.style.background = prev.background;
+    el.style.color = prev.color;
+    el.style.boxShadow = prev.boxShadow;
+    el.style.filter = prev.filter;
+    el.style.borderColor = prev.borderColor;
+    const tag = el.querySelector('.prio-tag');
+    if (tag && prev.tag) {
+      tag.style.transition = 'none';
+      tag.style.background = prev.tag.background;
+      tag.style.color = prev.tag.color;
+      tag.style.boxShadow = prev.tag.boxShadow;
+    }
+  });
+}
+
+function clearLotColorInline() {
+  document.querySelectorAll('.lot-cell[data-id]').forEach((el) => {
+    el.style.transition = '';
+    el.style.background = '';
+    el.style.color = '';
+    el.style.boxShadow = '';
+    el.style.filter = '';
+    el.style.borderColor = '';
+    const tag = el.querySelector('.prio-tag');
+    if (tag) {
+      tag.style.transition = '';
+      tag.style.background = '';
+      tag.style.color = '';
+      tag.style.boxShadow = '';
+    }
+  });
+}
+
+function playLotColorAnim() {
+  const from = lotColorFrom;
+  lotColorFrom = null;
+  if (!from || reducedMotion()) return;
+  applyLotColorFrom(from);
+  document.querySelectorAll('.lot-cell[data-id]').forEach((el) => { void el.offsetWidth; });
+  clearLotColorInline();
+}
+
+function layoutSegIndicators() {
+  segAnimPending = false;
+  segAnimFrom = null;
+  syncSegIndicators(false);
+}
+
+function afterRenderMotion(doSeg, doLot) {
+  const token = ++segAnimToken;
+  if (doSeg && segAnimFrom && !reducedMotion()) {
+    document.querySelectorAll(SEG_TRACK_SEL).forEach((track) => {
+      const ind = track.querySelector('.seg-indicator');
+      const from = segAnimFrom[segTrackKey(track)];
+      if (!ind || !from) return;
+      ind.style.transition = 'none';
+      applySegBox(ind, from);
+      track.querySelectorAll('button').forEach((btn) => {
+        const prev = from.colors && from.colors[btn.dataset.v];
+        if (!prev) return;
+        btn.style.transition = 'none';
+        btn.style.color = prev;
+      });
+      ind.classList.add('is-ready');
+      track.classList.add('seg-ready');
+    });
+    if (doLot && lotColorFrom) applyLotColorFrom(lotColorFrom);
+    requestAnimationFrame(() => {
+      if (token !== segAnimToken) return;
+      syncSegIndicators(true);
+      if (doLot) playLotColorAnim();
+      else lotColorFrom = null;
+      segAnimFrom = null;
+    });
+  } else {
+    syncSegIndicators(false);
+    if (doLot && lotColorFrom && !reducedMotion()) {
+      applyLotColorFrom(lotColorFrom);
+      requestAnimationFrame(() => {
+        if (token !== segAnimToken) return;
+        playLotColorAnim();
+      });
+    } else {
+      lotColorFrom = null;
+    }
+    segAnimFrom = null;
+  }
+}
+
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -6544,10 +6774,21 @@ function render() {
   const end = active && active.selectionEnd;
 
   if (isSetupNeeded()) {
+    segAnimPending = false;
+    lotColorPending = false;
+    segAnimFrom = null;
+    lotColorFrom = null;
     app.innerHTML = renderSetup();
     restoreFocus(focusId, start, end);
     return;
   }
+
+  if (segAnimPending) captureSegAnim();
+  if (lotColorPending) captureLotColors();
+  const doSegAnim = segAnimPending && !!segAnimFrom;
+  const doLotAnim = lotColorPending && !!lotColorFrom;
+  segAnimPending = false;
+  lotColorPending = false;
 
   captureLiveScroll();
   captureItemPickScroll();
@@ -6572,6 +6813,7 @@ function render() {
   restoreItemPickScroll();
   restorePlanGridScroll();
   restorePlanListScroll();
+  afterRenderMotion(doSegAnim, doLotAnim);
   if (modal?.type === 'type-item') {
     const input = document.getElementById('type-item-input');
     if (input && document.activeElement !== input) {
@@ -6642,6 +6884,7 @@ function renderHeader() {
       </div>
       <div class="header-right">
         <div class="half-switch" role="tablist">
+          <span class="seg-indicator" aria-hidden="true"></span>
           ${HALVES.map((h) => `<button type="button" data-act="half" data-v="${h}" class="sess-${h}${half === h ? ' on' : ''}">${halfLabel(h)}</button>`).join('')}
         </div>
         ${typeof renderSyncPill === 'function' ? renderSyncPill() : ''}
@@ -6800,6 +7043,7 @@ function renderNote() {
       ${headHtml}
       ${lockBar}
       <div class="prio-toggle note-prio" role="group" aria-label="美普交貨">
+        <span class="seg-indicator" aria-hidden="true"></span>
         ${['must', 'watch', 'skip'].map((p) => {
           const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
           return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${prioLabel(p)}</button>`;
@@ -7043,6 +7287,7 @@ function renderSettings() {
       <div class="switch-row hand-row">
         <div><div class="lbl">備註按鈕位置</div><div class="sub">左手放左下，右手放右下，單手拇指比較好按</div></div>
         <div class="hand-seg" role="group" aria-label="備註按鈕位置">
+          <span class="seg-indicator" aria-hidden="true"></span>
           <button type="button" class="${thumbHand() === 'left' ? 'on' : ''}" data-act="set-hand" data-v="left">左手</button>
           <button type="button" class="${thumbHand() === 'right' ? 'on' : ''}" data-act="set-hand" data-v="right">右手</button>
         </div>
@@ -7338,6 +7583,7 @@ function renderModal() {
         </div>
         <button type="button" class="action-btn" data-act="edit-subcode" data-id="${escapeHtml(lot.id)}">${lotSubCode(lot) ? lotSubCode(lot) + '（改或清除）' : '註記小代碼'}</button>
         <div class="prio-toggle sheet-prio" role="group" aria-label="美普交貨">
+          <span class="seg-indicator" aria-hidden="true"></span>
           ${['must', 'watch', 'skip'].map((p) => {
             const on = lotPriority(lot) === p ? ' on' : '';
             return `<button type="button" class="prio-${p}${on}" data-act="set-prio" data-id="${escapeHtml(lot.id)}" data-v="${p}">${prioLabel(p)}</button>`;
@@ -7864,7 +8110,7 @@ function onClick(e) {
       break;
     case 'set-draft-prio':
       setDraftPriority(v);
-      buzz(8);
+      buzz(10);
       break;
     case 'set-prio':
       modal = null;
@@ -7948,6 +8194,8 @@ function onClick(e) {
       break;
     case 'half':
       if (!isHalf(v)) break;
+      requestSegAnim();
+      if (state.currentHalf !== v) buzz(10);
       state.currentHalf = v;
       draftMachineId = '';
       showMachinePicker = false;
@@ -8075,6 +8323,8 @@ function onClick(e) {
       render();
       break;
     case 'set-hand':
+      requestSegAnim();
+      if ((v === 'right' ? 'right' : 'left') !== thumbHand()) buzz(10);
       state.thumbHand = v === 'right' ? 'right' : 'left';
       saveState();
       render();
@@ -8716,16 +8966,25 @@ function bind() {
       applyCssLandscapeIfNeeded();
       fitPaddleDigits();
     }
-    requestAnimationFrame(fitItemBtnLabels);
+    requestAnimationFrame(() => {
+      fitItemBtnLabels();
+      layoutSegIndicators();
+    });
   });
   window.addEventListener('orientationchange', () => {
-    if (paddleOpen) {
-      setTimeout(() => {
+    setTimeout(() => {
+      if (paddleOpen) {
         applyCssLandscapeIfNeeded();
         fitPaddleDigits();
-      }, 250);
-    }
+      }
+      layoutSegIndicators();
+    }, 250);
   });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      requestAnimationFrame(layoutSegIndicators);
+    });
+  }
   document.addEventListener('contextmenu', (e) => {
     if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit')) {
       e.preventDefault();
