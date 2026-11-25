@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v68';
+const APP_VERSION = 'v69';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -596,6 +596,12 @@ let resultFilter = 'all';
 let deferredInstall = null;
 let editCurrent = null; // { half, machineId, value }
 let draftItem = '';
+let itemLocked = false;
+let rangeMode = false;
+let rangeStart = '';
+let rangeEnd = '';
+let rangeFocus = 'start';
+const RANGE_MAX = 50;
 let itemTargetId = null;
 let itemTargetAuto = false;
 let orientationLocked = false;
@@ -2989,6 +2995,15 @@ function undoLast() {
   toastMsg = '';
   toastAction = null;
   if (!snap) return;
+  if (snap.kind === 'range-add' && Array.isArray(snap.lots)) {
+    const ids = new Set(snap.lots.map((l) => l && l.id).filter(Boolean));
+    state.lots = (state.lots || []).filter((l) => !ids.has(l.id));
+    saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
   if (snap.kind === 'delete' && snap.lot) {
     if (!state.lots.some((l) => l.id === snap.lot.id)) state.lots.push(snap.lot);
     restoreCurrent(snap);
@@ -3884,18 +3899,234 @@ function assignItem(name) {
   if (!itemNeedsSize(name)) draftSize = '';
   if (draftNum) {
     draftItem = name;
+    itemLocked = true;
     saveLot();
     return;
   }
-  if (itemTargetId) {
+  if (itemTargetId && !itemTargetAuto) {
     const lot = state.lots.find((l) => l.id === itemTargetId);
     if (lot) {
       applyItemToLot(lot, name);
-      render();
+      lockItem(name, { silent: true });
       return;
     }
   }
-  toast('請先輸入或點選貨號');
+  if (itemTargetId && itemTargetAuto) {
+    const lot = state.lots.find((l) => l.id === itemTargetId);
+    if (lot && !lot.item) {
+      applyItemToLot(lot, name);
+      lockItem(name, { silent: true });
+      return;
+    }
+  }
+  lockItem(name);
+}
+
+function lockItem(name, opts) {
+  opts = opts || {};
+  name = String(name || '').trim();
+  if (!name) return;
+  if (!itemNeedsSize(name)) draftSize = '';
+  draftItem = name;
+  itemLocked = true;
+  itemTargetId = null;
+  itemTargetAuto = false;
+  variantPick = null;
+  if (!opts.silent) toast('已鎖定 ' + itemDisplayName(name) + '，接著輸入號碼');
+  render();
+}
+
+function unlockItem() {
+  itemLocked = false;
+  draftItem = '';
+  draftSize = '';
+  exitRangeMode({ keepDraft: true });
+  toast('已解除鎖定');
+  render();
+}
+
+function exitRangeMode(opts) {
+  opts = opts || {};
+  rangeMode = false;
+  if (!opts.keepDraft && !rangeMode) {
+    /* draftNum already separate */
+  }
+  if (!opts.keepStart) {
+    rangeStart = '';
+    rangeEnd = '';
+  }
+  rangeFocus = 'start';
+}
+
+function enterRangeMode() {
+  if (!itemLocked || !draftItem) {
+    toast('請先鎖定品項，再輸入連號');
+    return;
+  }
+  rangeMode = true;
+  rangeStart = draftNum || rangeStart || '';
+  rangeEnd = rangeEnd || '';
+  rangeFocus = rangeStart.length >= 4 ? 'end' : 'start';
+  draftNum = '';
+  showMachinePicker = false;
+  dupFlash = false;
+  render();
+}
+
+function rangeFieldValue() {
+  return rangeFocus === 'end' ? rangeEnd : rangeStart;
+}
+
+function setRangeFieldValue(v) {
+  if (rangeFocus === 'end') rangeEnd = v;
+  else rangeStart = v;
+}
+
+function parseLotRange(start, end) {
+  const a = parseInt(start, 10);
+  const b = parseInt(end, 10);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  if (a < 1 || b < 1) return null;
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  return { lo, hi, count: hi - lo + 1 };
+}
+
+function previewLotRange(start, end, half) {
+  const parsed = parseLotRange(start, end);
+  if (!parsed) return null;
+  half = half || state.currentHalf;
+  const dups = [];
+  const noMachine = [];
+  const add = [];
+  for (let n = parsed.lo; n <= parsed.hi; n++) {
+    const dup = state.lots.find((l) => l.day === state.day && l.number === n);
+    if (dup) {
+      dups.push(n);
+      continue;
+    }
+    const machineId = detectMachineId(n, half) || draftMachineId || '';
+    if (!machineId) {
+      noMachine.push(n);
+      continue;
+    }
+    add.push({ number: n, machineId, half });
+  }
+  return Object.assign({ dups, noMachine, add }, parsed);
+}
+
+function rangeReady() {
+  if (!rangeStart || !rangeEnd) return false;
+  return !!parseLotRange(rangeStart, rangeEnd);
+}
+
+function maybeAutoConfirmRange() {
+  if (!rangeStart || !rangeEnd) return false;
+  const auto = rangeEnd.length >= 4 || (rangeStart.length >= 3 && rangeEnd.length >= rangeStart.length);
+  if (!auto) return false;
+  return openRangeConfirm();
+}
+
+function openRangeConfirm() {
+  if (!itemLocked || !draftItem) {
+    toast('請先鎖定品項，再輸入連號');
+    return false;
+  }
+  const preview = previewLotRange(rangeStart, rangeEnd);
+  if (!preview) {
+    toast('請輸入起始和結束號碼');
+    return false;
+  }
+  if (preview.count > RANGE_MAX) {
+    modal = {
+      type: 'confirm',
+      title: '範圍太大',
+      body: '這段有 ' + preview.count + ' 筆，一次最多 ' + RANGE_MAX + ' 筆，請縮小範圍。',
+      ok: '知道了',
+      cancel: '返回',
+      onOk: () => { modal = null; render(); },
+      onCancel: () => { modal = null; render(); }
+    };
+    render();
+    return true;
+  }
+  if (!preview.add.length) {
+    const why = preview.dups.length && !preview.noMachine.length
+      ? '這段都已經抄過'
+      : preview.noMachine.length
+        ? '這段無法判斷台別，請確認現在的場次'
+        : '沒有可加入的號碼';
+    toast(why);
+    buzz(30);
+    render();
+    return false;
+  }
+  const itemLabel = itemDisplayName(draftItem);
+  const rangeLabel = preview.lo + '–' + preview.hi;
+  let body = itemLabel + '　' + rangeLabel + '。加入 ' + preview.add.length + ' 筆';
+  const skips = [];
+  if (preview.dups.length) skips.push('略過 ' + preview.dups.length + ' 筆已抄過');
+  if (preview.noMachine.length) skips.push(preview.noMachine.length + ' 筆無法判斷台別');
+  if (skips.length) body += '（' + skips.join('，') + '）';
+  const addedN = preview.add.length;
+  modal = {
+    type: 'confirm',
+    title: '加入連號',
+    body,
+    ok: '加入 ' + addedN + ' 筆',
+    cancel: '取消',
+    onOk: () => commitLotRange(preview),
+    onCancel: () => { modal = null; render(); }
+  };
+  render();
+  return true;
+}
+
+function commitLotRange(preview) {
+  modal = null;
+  if (!preview || !preview.add || !preview.add.length || !draftItem) {
+    render();
+    return;
+  }
+  const half = state.currentHalf;
+  const now = Date.now();
+  const added = [];
+  for (let i = 0; i < preview.add.length; i++) {
+    const row = preview.add[i];
+    const lot = {
+      id: uid(),
+      day: state.day,
+      half: row.half || half,
+      machineId: row.machineId,
+      number: row.number,
+      note: '',
+      item: draftItem,
+      size: itemNeedsSize(draftItem) ? sizeLabel(draftSize) : '',
+      status: 'pending',
+      priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
+      qty: 1,
+      createdAt: now + i
+    };
+    if (lot.item) bumpItemUse(lot.item);
+    state.lots.push(lot);
+    added.push(lot);
+  }
+  draftNum = '';
+  draftNote = '';
+  draftMachineId = '';
+  draftShowNote = false;
+  showMachinePicker = false;
+  dupFlash = false;
+  itemTargetId = added.length ? added[added.length - 1].id : null;
+  itemTargetAuto = true;
+  exitRangeMode();
+  saveState();
+  offerUndo(
+    { kind: 'range-add', lots: added.map((l) => ({ ...l })) },
+    '已加入 ' + added.length + ' 筆　' + itemDisplayName(draftItem)
+  );
+  buzz(26);
+  render();
 }
 
 function selectRecentForItem(id) {
@@ -4314,12 +4545,17 @@ function isSetupNeeded() {
 
 /* ---------- 抄號 ---------- */
 function typeDigit(d) {
+  d = String(d);
+  if (rangeMode) {
+    typeRangeDigit(d);
+    return;
+  }
   if (draftNum.length >= 4) return;
   const startingFresh = draftNum.length === 0;
-  draftNum += String(d);
+  draftNum += d;
   showMachinePicker = false;
   dupFlash = false;
-  if (startingFresh) {
+  if (startingFresh && !itemLocked) {
     draftItem = '';
     draftSize = '';
     if (itemTargetAuto) {
@@ -4334,7 +4570,25 @@ function typeDigit(d) {
   refreshNoteHead();
 }
 
+function typeRangeDigit(d) {
+  let cur = rangeFieldValue();
+  if (cur.length >= 4) return;
+  setRangeFieldValue(cur + String(d));
+  showMachinePicker = false;
+  dupFlash = false;
+  if (rangeFocus !== 'end' && rangeStart.length >= 4) rangeFocus = 'end';
+  else if (rangeFocus === 'end' && maybeAutoConfirmRange()) return;
+  render();
+}
+
 function backspace() {
+  if (rangeMode) {
+    const cur = rangeFieldValue();
+    if (cur) setRangeFieldValue(cur.slice(0, -1));
+    else if (rangeFocus === 'end') rangeFocus = 'start';
+    render();
+    return;
+  }
   draftNum = draftNum.slice(0, -1);
   showMachinePicker = false;
   dupFlash = false;
@@ -4343,13 +4597,22 @@ function backspace() {
 }
 
 function clearDraft() {
+  if (rangeMode) {
+    if (rangeFocus === 'end' && rangeEnd) rangeEnd = '';
+    else if (rangeStart) rangeStart = '';
+    else exitRangeMode();
+    render();
+    return;
+  }
   draftNum = '';
   draftNote = '';
-  draftItem = '';
-  draftSize = '';
   draftMachineId = '';
   showMachinePicker = false;
   dupFlash = false;
+  if (!itemLocked) {
+    draftItem = '';
+    draftSize = '';
+  }
   refreshNoteHead();
 }
 
@@ -4401,18 +4664,28 @@ function commitLot(num, machineId, half) {
   };
   if (lot.item) bumpItemUse(lot.item);
   state.lots.push(lot);
+  const keepItem = itemLocked && draftItem;
+  const lockedName = draftItem;
+  const lockedSize = draftSize;
   draftNum = '';
   draftNote = '';
-  draftItem = '';
-  draftSize = '';
   draftMachineId = '';
   draftShowNote = false;
   showMachinePicker = false;
   dupFlash = false;
+  if (keepItem) {
+    draftItem = lockedName;
+    draftSize = lockedSize;
+    itemLocked = true;
+  } else {
+    draftItem = '';
+    draftSize = '';
+  }
   itemTargetId = lot.id;
   itemTargetAuto = true;
   saveState();
-  toast(lot.item ? `已存 ${lot.number}　${lot.item}` : `已存 ${num}　${machineNameOf(lot)}`);
+  if (keepItem) toast(`已存 ${lot.number}`, 1400);
+  else toast(lot.item ? `已存 ${lot.number}　${lot.item}` : `已存 ${num}　${machineNameOf(lot)}`);
   buzz(26);
   render();
 }
@@ -4867,6 +5140,11 @@ function startNewDay(confirmed, opts) {
   draftItem = '';
   draftSize = '';
   draftMachineId = '';
+  itemLocked = false;
+  rangeMode = false;
+  rangeStart = '';
+  rangeEnd = '';
+  rangeFocus = 'start';
   itemTargetId = null;
   itemTargetAuto = false;
   pendingDayRollover = false;
@@ -5413,10 +5691,14 @@ function renderNote() {
     : '';
 
   const selectedLot = itemTargetId ? state.lots.find((l) => l.id === itemTargetId) : null;
-  const activeItem = draftNum ? draftItem : (selectedLot?.item || '');
-  const itemHint = draftNum
-    ? (draftItem ? `點品項就會把 ${draftNum} 存成「${draftItem}」` : '點品項就會把這號存下')
-    : (selectedLot ? `為 ${selectedLot.number} 選品項` : '輸入號碼後點品項就會存下');
+  const activeItem = itemLocked && draftItem
+    ? draftItem
+    : (draftNum ? draftItem : (selectedLot?.item || ''));
+  const itemHint = itemLocked && draftItem
+    ? (rangeMode ? '輸入起始和結束號碼' : '號碼會立刻存成這個品項，點上方可解除鎖定')
+    : draftNum
+      ? (draftItem ? `點品項就會把 ${draftNum} 存成「${draftItem}」` : '點品項就會把這號存下')
+      : (selectedLot && !itemTargetAuto ? `為 ${selectedLot.number} 選品項` : '先點品項鎖定，再連續輸入號碼');
   const itemPick = renderItemPicker(state.currentHalf, { active: activeItem, hint: itemHint });
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
@@ -5438,19 +5720,47 @@ function renderNote() {
       .join('')}</div>`;
   }
 
-  const sizeItem = (itemTargetId && state.lots.find((l) => l.id === itemTargetId)?.item) || draftItem;
-  const sizeLot = itemTargetId ? state.lots.find((l) => l.id === itemTargetId) : null;
+  const sizeItem = (itemLocked && draftItem)
+    ? draftItem
+    : ((itemTargetId && state.lots.find((l) => l.id === itemTargetId)?.item) || draftItem);
+  const sizeLot = (!itemLocked && itemTargetId) ? state.lots.find((l) => l.id === itemTargetId) : null;
   const sizeBlock = itemNeedsSize(sizeItem)
     ? renderSizeChips(sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.size : draftSize, { lotId: sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.id : '' })
     : '';
   const planN = planTodayCount();
-
-  return `
-    <div class="note-screen">
-      <div class="note-head">
+  const lockName = itemLocked && draftItem ? itemDisplayName(draftItem) : '';
+  const lockBar = itemLocked && draftItem
+    ? `<div class="item-lock">
+        <button type="button" class="item-lock-main" data-act="unlock-item" aria-label="解除鎖定 ${escapeHtml(lockName)}">
+          <span class="item-lock-lbl">鎖定</span>
+          <span class="item-lock-name">${escapeHtml(lockName)}</span>
+        </button>
+        ${rangeMode ? '' : '<button type="button" class="item-lock-range" data-act="range-start">連號</button>'}
+      </div>`
+    : '';
+  const preview = rangeMode ? previewLotRange(rangeStart, rangeEnd) : null;
+  const rangeOkLabel = preview && preview.add && preview.add.length && preview.count <= RANGE_MAX
+    ? ('加入 ' + preview.add.length + ' 筆')
+    : '加入連號';
+  const headHtml = rangeMode
+    ? `<div class="note-head range-head">
+        <button type="button" class="range-box${rangeFocus === 'start' ? ' on' : ''}${rangeStart ? '' : ' empty'}" data-act="range-focus" data-v="start">${rangeStart ? escapeHtml(rangeStart) : '起始'}</button>
+        <div class="range-dash" aria-hidden="true">–</div>
+        <button type="button" class="range-box${rangeFocus === 'end' ? ' on' : ''}${rangeEnd ? '' : ' empty'}" data-act="range-focus" data-v="end">${rangeEnd ? escapeHtml(rangeEnd) : '結束'}</button>
+      </div>
+      <div class="range-actions">
+        <button type="button" class="btn range-cancel" data-act="range-cancel">取消連號</button>
+        <button type="button" class="btn primary range-ok" data-act="range-ok"${rangeReady() ? '' : ' disabled'}>${escapeHtml(rangeOkLabel)}</button>
+      </div>`
+    : `<div class="note-head">
         <div class="num${num ? '' : ' empty'}${dupFlash ? ' dup-flash' : ''}">${num ? escapeHtml(num) : '----'}</div>
         <div class="${chipClass}">${escapeHtml(machineHint)}</div>
-      </div>
+      </div>`;
+
+  return `
+    <div class="note-screen${itemLocked ? ' item-locked' : ''}${rangeMode ? ' range-mode' : ''}">
+      ${headHtml}
+      ${lockBar}
       <div class="prio-toggle note-prio" role="group" aria-label="標貨優先">
         ${['must', 'watch', 'skip'].map((p) => {
           const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
@@ -6069,6 +6379,26 @@ function onClick(e) {
       if (ignoreHoldClick) { ignoreHoldClick = false; break; }
       toast('按住不放才會清除');
       break;
+    case 'unlock-item':
+      unlockItem();
+      break;
+    case 'range-start':
+      enterRangeMode();
+      buzz(8);
+      break;
+    case 'range-focus':
+      if (v === 'start' || v === 'end') {
+        rangeFocus = v;
+        render();
+      }
+      break;
+    case 'range-cancel':
+      exitRangeMode();
+      render();
+      break;
+    case 'range-ok':
+      openRangeConfirm();
+      break;
     case 'save':
       saveLot();
       break;
@@ -6491,6 +6821,11 @@ function onClick(e) {
       progressPopId = null;
       draftItem = '';
       draftSize = '';
+      itemLocked = false;
+      rangeMode = false;
+      rangeStart = '';
+      rangeEnd = '';
+      rangeFocus = 'start';
       itemQuery = '';
       variantPick = null;
       resetItemPickScroll = true;
@@ -7237,6 +7572,13 @@ function bind() {
     if (e.key !== 'Enter') return;
     const act = e.target?.dataset?.act;
     const id = e.target?.id || '';
+    const inField = e.target && /^(INPUT|TEXTAREA|SELECT)$/i.test(e.target.tagName);
+    if (!inField && state && state.tab === 'note' && !showSettings && !paddleOpen && !modal) {
+      e.preventDefault();
+      if (rangeMode) openRangeConfirm();
+      else if (draftNum) saveLot();
+      return;
+    }
     if (act === 'type-item-name' || id === 'type-item-input') {
       e.preventDefault();
       const half = modal?.half || state.currentHalf;
@@ -7289,6 +7631,7 @@ let pendingSWReload = false;
 function isMidAction() {
   if (typeof modal !== 'undefined' && modal) return true;
   if (typeof draftNum === 'string' && draftNum) return true;
+  if (typeof rangeMode !== 'undefined' && rangeMode) return true;
   if (typeof paddleOpen !== 'undefined' && paddleOpen) return true;
   const el = document.activeElement;
   if (el && /^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName)) return true;
@@ -7362,6 +7705,10 @@ if (typeof window !== 'undefined') {
   window.__undoLast = undoLast;
   window.__setDraftNum = (v) => { draftNum = String(v || ''); };
   window.__getDraftNum = () => draftNum;
+  window.__lockItem = lockItem;
+  window.__unlockItem = unlockItem;
+  window.__enterRangeMode = enterRangeMode;
+  window.__getItemLock = () => ({ locked: itemLocked, item: draftItem, rangeMode, rangeStart, rangeEnd, rangeFocus });
 }
 
 function init() {

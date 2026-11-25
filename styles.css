@@ -1157,6 +1157,118 @@ input:focus, textarea:focus {
   display: grid;
   place-items: center;
 }
+/* v69: locked item + consecutive range entry on 抄號 */
+.item-lock {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+  min-height: 52px;
+}
+.item-lock-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 5px 12px;
+  border-radius: 12px;
+  background: #221f00;
+  border: 2px solid var(--yellow);
+  text-align: left;
+  color: #fff;
+  box-shadow: none;
+}
+.item-lock-main:active { filter: brightness(1.08); }
+.item-lock-lbl {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--yellow);
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+.item-lock-name {
+  font-size: clamp(22px, 6.8vw, 32px);
+  font-weight: 900;
+  line-height: 1.12;
+  color: #fff;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item-lock-range {
+  min-width: 4.4em;
+  padding: 0 12px;
+  min-height: 52px;
+  border-radius: 12px;
+  font-size: clamp(18px, 5.2vw, 22px);
+  font-weight: 900;
+  background: var(--yellow);
+  color: #111;
+  border: 0;
+  box-shadow: none;
+}
+.item-lock-range:active { filter: brightness(0.95); }
+.range-head {
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr) !important;
+  align-items: stretch;
+}
+.range-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 52px;
+  font-size: clamp(26px, 8vw, 40px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 0 6px;
+  background: #111;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  color: #fff;
+  box-shadow: none;
+}
+.range-box.empty {
+  color: #5a5a5a;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.range-box.on { border-color: var(--yellow); }
+.range-dash {
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1;
+}
+.range-actions {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 6px;
+  min-height: 48px;
+}
+.range-actions .btn {
+  min-height: 48px;
+  margin: 0;
+  font-size: clamp(16px, 4.6vw, 20px);
+  font-weight: 800;
+  border-radius: 12px;
+}
+.range-actions .range-ok:disabled { opacity: 0.45; }
+.note-screen.item-locked .item-btn.on {
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
 .note-screen .machine-pick {
   flex: 0 0 auto;
   flex-wrap: nowrap;
@@ -3497,6 +3609,13 @@ button.lot-cell {
   .note-head .num,
   .note-head .machine-chip { min-height: 42px; }
   .note-head .num { font-size: clamp(30px, 9vw, 40px); }
+  .item-lock,
+  .item-lock-main,
+  .item-lock-range,
+  .range-box { min-height: 44px; }
+  .item-lock-name { font-size: clamp(20px, 6.2vw, 28px); }
+  .range-actions,
+  .range-actions .btn { min-height: 44px; }
   .note-prio,
   .prio-toggle { min-height: 40px; }
   .note-tools { min-height: 48px; }
