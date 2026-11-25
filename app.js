@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v82';
+const APP_VERSION = 'v83';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -7081,7 +7081,7 @@ function renderNote() {
   const keypad = keys
     .map((k) => {
       if (k === '⌫') return `<button type="button" class="key muted" data-act="back">⌫</button>`;
-      if (k === 'C') return `<button type="button" class="key muted hold-btn" data-act="clear" data-hold="clear">清除</button>`;
+      if (k === 'C') return `<button type="button" class="key muted" data-act="clear">清除</button>`;
       return `<button type="button" class="key" data-act="digit" data-v="${k}">${k}</button>`;
     })
     .join('');
@@ -7847,8 +7847,8 @@ function onClick(e) {
       backspace();
       break;
     case 'clear':
-      if (ignoreHoldClick) { ignoreHoldClick = false; break; }
-      toast('按住不放才會清除');
+      clearDraft();
+      buzz(10);
       break;
     case 'unlock-item':
       unlockItem();
@@ -8981,7 +8981,7 @@ function onPressEnd(e, pt) {
     pressOrigin.holdBtn.classList.remove('holding');
     if (!done) {
       ignoreHoldClick = true;
-      toast(act === 'clear' ? '按住不放才會清除' : '按住不放才會流標');
+      toast('按住不放才會流標');
     }
     cancelPress();
     return;

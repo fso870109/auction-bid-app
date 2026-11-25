@@ -4625,7 +4625,6 @@ html, body, #app {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  place-items: unset;
 }
 .note-head .machine-chip .ico-svg {
   width: 16px;
@@ -5142,4 +5141,38 @@ html, body, #app {
     transition: none !important;
     opacity: 0 !important;
   }
+}
+
+/* ===== v83 chip center =====
+   Vertically and horizontally center the 台別 icon + label in the chip.
+   place-items must not undo align-items (that left the text stuck to the top). */
+.note-head .machine-chip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  place-content: center;
+  place-items: center;
+  text-align: center;
+}
+.note-head .machine-chip .ico-svg,
+.note-head .machine-chip .machine-chip-txt {
+  align-self: center;
+  flex: 0 1 auto;
+  line-height: 1;
+  margin: 0;
+  padding: 0;
+}
+.note-head .machine-chip .ico-svg {
+  flex: 0 0 auto;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.note-head .machine-chip .machine-chip-txt {
+  display: flex;
+  align-items: center;
+  height: auto;
+  max-height: 100%;
 }
