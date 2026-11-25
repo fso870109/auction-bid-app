@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v81';
+const APP_VERSION = 'v82';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -6754,6 +6754,71 @@ function afterRenderMotion(doSeg, doLot) {
   }
 }
 
+
+let lastPageKey = '';
+
+function currentPageKey() {
+  return [
+    showSettings ? 'settings' : ((state && state.tab) || ''),
+    paddleOpen ? 'paddle' : '',
+    modal && modal.type ? 'm:' + modal.type : '',
+    planOpen ? 'plan' : '',
+    showDaySummary ? 'sum' : '',
+  ].join('|');
+}
+
+function applyPageEnterFallback() {
+  document.querySelectorAll('#main, #paddle, .overlay, .plan-screen').forEach((el) => {
+    el.classList.add('page-enter');
+  });
+}
+
+function pressFlashTarget(e) {
+  const t = e.target && e.target.closest && e.target.closest('button, .key, .toggle, .item-btn, .lot-cell, .recent-chip, .nav-btn, .gear-btn');
+  if (!t || t.disabled) return null;
+  if (t.closest('input, textarea, select')) return null;
+  return t;
+}
+
+function startPressFlash(e) {
+  if (reducedMotion()) return;
+  if (e.button != null && e.button !== 0) return;
+  const t = pressFlashTarget(e);
+  if (!t) return;
+  let layer = document.getElementById('press-flash-layer');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'press-flash-layer';
+    layer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(layer);
+  }
+  const r = t.getBoundingClientRect();
+  if (r.width < 4 || r.height < 4) return;
+  const el = document.createElement('span');
+  el.className = 'press-flash';
+  el.style.left = r.left + 'px';
+  el.style.top = r.top + 'px';
+  el.style.width = r.width + 'px';
+  el.style.height = r.height + 'px';
+  el.style.borderRadius = getComputedStyle(t).borderRadius;
+  layer.appendChild(el);
+  const fade = () => {
+    if (!el.isConnected || el.classList.contains('is-out')) return;
+    el.classList.add('is-out');
+    setTimeout(() => el.remove(), 260);
+  };
+  const up = () => {
+    window.removeEventListener('pointerup', up, true);
+    window.removeEventListener('pointercancel', up, true);
+    fade();
+  };
+  window.addEventListener('pointerup', up, true);
+  window.addEventListener('pointercancel', up, true);
+  setTimeout(() => {
+    if (el.isConnected && !el.classList.contains('is-out')) fade();
+  }, 2000);
+}
+
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -6794,53 +6859,72 @@ function render() {
   captureItemPickScroll();
   capturePlanGridScroll();
   capturePlanListScroll();
+  const nextPageKey = currentPageKey();
+  const shouldPageAnim = !!(lastPageKey && nextPageKey !== lastPageKey && !reducedMotion());
+  lastPageKey = nextPageKey;
   const liveCls = state.tab === 'live' && !showSettings ? ' live-mode' : '';
   const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
-  app.innerHTML =
-    renderHeader() +
-    `<main class="main${noteCls}${liveCls}" id="main">${renderTab()}</main>` +
-    renderNav() +
-    (paddleOpen ? renderPaddle() : '') +
-    (modal ? renderModal() : '') +
-    renderPlanScreen() +
-    renderDaySummary() +
-    `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
 
-  paintToast(document.getElementById('toast'));
-  requestAnimationFrame(fitToastText);
-  restoreFocus(focusId, start, end);
-  restoreLiveScroll();
-  restoreItemPickScroll();
-  restorePlanGridScroll();
-  restorePlanListScroll();
-  afterRenderMotion(doSegAnim, doLotAnim);
-  if (modal?.type === 'type-item') {
-    const input = document.getElementById('type-item-input');
-    if (input && document.activeElement !== input) {
-      input.focus({ preventScroll: true });
-      const len = input.value.length;
-      try { input.setSelectionRange(len, len); } catch { /* ignore */ }
+  const paint = () => {
+    app.innerHTML =
+      renderHeader() +
+      `<main class="main${noteCls}${liveCls}" id="main">${renderTab()}</main>` +
+      renderNav() +
+      (paddleOpen ? renderPaddle() : '') +
+      (modal ? renderModal() : '') +
+      renderPlanScreen() +
+      renderDaySummary() +
+      `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
+
+    paintToast(document.getElementById('toast'));
+    requestAnimationFrame(fitToastText);
+    restoreFocus(focusId, start, end);
+    restoreLiveScroll();
+    restoreItemPickScroll();
+    restorePlanGridScroll();
+    restorePlanListScroll();
+    afterRenderMotion(doSegAnim, doLotAnim);
+    if (modal?.type === 'type-item') {
+      const input = document.getElementById('type-item-input');
+      if (input && document.activeElement !== input) {
+        input.focus({ preventScroll: true });
+        const len = input.value.length;
+        try { input.setSelectionRange(len, len); } catch { /* ignore */ }
+      }
     }
-  }
-  if (modal?.type === 'plan-qty') {
-    const input = document.getElementById('plan-qty-input');
-    if (input && document.activeElement !== input) {
-      input.focus({ preventScroll: true });
-      const len = String(input.value || '').length;
-      try { input.setSelectionRange(len, len); } catch { /* ignore */ }
+    if (modal?.type === 'plan-qty') {
+      const input = document.getElementById('plan-qty-input');
+      if (input && document.activeElement !== input) {
+        input.focus({ preventScroll: true });
+        const len = String(input.value || '').length;
+        try { input.setSelectionRange(len, len); } catch { /* ignore */ }
+      }
     }
+    if (state.tab === 'live' && !showSettings) {
+      requestAnimationFrame(() => {
+        fitLotCellNames();
+        fitLotCellEtas();
+        updateLiveListOverflow();
+      });
+    }
+    if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
+    if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
+    requestAnimationFrame(fitItemBtnLabels);
+    maybeReloadForNewSW();
+  };
+
+  if (shouldPageAnim && document.startViewTransition) {
+    try {
+      const vt = document.startViewTransition(paint);
+      if (vt && vt.finished) vt.finished.catch(() => {});
+    } catch {
+      paint();
+      applyPageEnterFallback();
+    }
+  } else {
+    paint();
+    if (shouldPageAnim) applyPageEnterFallback();
   }
-  if (state.tab === 'live' && !showSettings) {
-    requestAnimationFrame(() => {
-      fitLotCellNames();
-      fitLotCellEtas();
-      updateLiveListOverflow();
-    });
-  }
-  if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
-  if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
-  requestAnimationFrame(fitItemBtnLabels);
-  maybeReloadForNewSW();
 }
 
 function restoreFocus(focusId, start, end) {
@@ -6919,23 +7003,31 @@ function renderNote() {
   const num = draftNum;
   const parsed = num ? parseInt(num, 10) : null;
   let machineHint = '';
+  let machineHintFull = '';
   let chipClass = 'machine-chip';
   if (parsed != null) {
     const hits = machinesMatching(parsed, state.currentHalf);
     if (draftMachineId) {
-      machineHint = machineNameOf(draftMachineId, state.currentHalf);
+      const full = machineNameOf(draftMachineId, state.currentHalf);
+      const found = machineById(draftMachineId, state.currentHalf);
+      machineHint = found ? columnTitle(found, state.currentHalf) : shortMachineName(full);
+      machineHintFull = full;
     } else if (hits.length === 1) {
-      machineHint = hits[0].name;
+      machineHint = columnTitle(hits[0], state.currentHalf);
+      machineHintFull = hits[0].name;
     } else if (hits.length > 1) {
-      machineHint = '有多台符合，請選台';
+      machineHint = '請選台';
+      machineHintFull = '有多台符合，請選台';
       chipClass += ' warn';
     } else {
       const other = HALVES.find((h) => h !== state.currentHalf && machinesMatching(parsed, h).length);
       if (other) {
-        machineHint = `像是${halfLabel(other)}，請選台`;
+        machineHint = `像是${halfLabel(other)}`;
+        machineHintFull = `像是${halfLabel(other)}，請選台`;
         chipClass += ' warn';
       } else {
-        machineHint = '無法判斷，請選台';
+        machineHint = '請選台';
+        machineHintFull = '無法判斷，請選台';
         chipClass += ' warn';
       }
     }
@@ -6943,12 +7035,15 @@ function renderNote() {
     const list = state.machines[state.currentHalf] || [];
     const hasRanges = list.some((m) => (m.ranges || []).some((r) => r.start != null));
     if (!hasRanges && list.length === 1) {
-      machineHint = `會存到${list[0].name}`;
+      machineHint = `會存到${columnTitle(list[0], state.currentHalf)}`;
+      machineHintFull = `會存到${list[0].name}`;
     } else if (!hasRanges) {
-      machineHint = '這場還沒設號碼區間，請選台';
+      machineHint = '請選台';
+      machineHintFull = '這場還沒設號碼區間，請選台';
       chipClass += ' warn';
     } else {
-      machineHint = '輸入後自動判斷台別';
+      machineHint = '自動判斷';
+      machineHintFull = '輸入後自動判斷台別';
       chipClass += ' idle';
     }
   }
@@ -7035,7 +7130,7 @@ function renderNote() {
       </div>`
     : `<div class="note-head">
         <div class="num${num ? '' : ' empty'}${dupFlash ? ' dup-flash' : ''}">${num ? escapeHtml(num) : '- - - -'}</div>
-        <div class="${chipClass}">${iconSvg('target')}<span class="machine-chip-txt">${escapeHtml(machineHint)}</span></div>
+        <div class="${chipClass}" title="${escapeHtml(machineHintFull || machineHint)}" aria-label="${escapeHtml(machineHintFull || machineHint)}">${iconSvg('target')}<span class="machine-chip-txt">${escapeHtml(machineHint)}</span></div>
       </div>`;
 
   return `
@@ -8951,6 +9046,7 @@ function bind() {
     window.visualViewport.addEventListener('scroll', syncViewportHeight);
   }
   document.addEventListener('click', (e) => { syncWakeLock(); onClick(e); maybeReloadForNewSW(); maybeRollAuctionDay(); });
+  document.addEventListener('pointerdown', startPressFlash, { capture: true, passive: true });
   document.addEventListener('scroll', (e) => {
     const t = e.target;
     if (t && t.classList && t.classList.contains('live-col-list')) updateLiveListOverflow();

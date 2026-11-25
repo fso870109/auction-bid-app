@@ -5013,3 +5013,133 @@ html, body, #app {
     filter: none;
   }
 }
+
+/* ===== v82 chip + motion =====
+   Keep the 台別 chip on one line and the same height as the number box.
+   Press flash and page transitions. Fonts and tap targets stay as they are. */
+
+.note-head .num,
+.note-head .machine-chip {
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  overflow: hidden;
+}
+.note-head .machine-chip {
+  white-space: nowrap;
+  text-wrap: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  line-height: 1.1;
+  padding: 0 6px;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.note-head .machine-chip .machine-chip-txt,
+.machine-chip-txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(13px, 3.6vw, 15px);
+  font-weight: 800;
+  line-height: 1.1;
+}
+@media (max-height: 640px) {
+  .note-head .num,
+  .note-head .machine-chip {
+    height: 42px;
+    min-height: 42px;
+    max-height: 42px;
+  }
+}
+
+/* Press highlight: a soft white/gold glow that fades in 250ms. */
+#press-flash-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10000;
+}
+.press-flash {
+  position: fixed;
+  pointer-events: none;
+  box-sizing: border-box;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.36) 0%, rgba(255, 243, 160, 0.18) 58%, rgba(255, 255, 255, 0.08) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+    0 0 14px rgba(245, 197, 24, 0.4);
+  opacity: 1;
+  transition: opacity 250ms ease-out;
+  will-change: opacity;
+  mix-blend-mode: screen;
+}
+.press-flash.is-out { opacity: 0; }
+
+/* Page transitions: header/nav stay put; main, paddle, sheets fade + slight slide. */
+.header { view-transition-name: app-header; }
+.nav { view-transition-name: app-nav; }
+.main { view-transition-name: app-main; }
+#paddle { view-transition-name: app-paddle; }
+.overlay { view-transition-name: app-overlay; }
+.plan-screen { view-transition-name: app-plan; }
+
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-old(app-header),
+::view-transition-new(app-header),
+::view-transition-old(app-nav),
+::view-transition-new(app-nav) {
+  animation: none;
+}
+
+@keyframes page-vt-out {
+  to { opacity: 0; transform: translateY(-6px) scale(0.985); }
+}
+@keyframes page-vt-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+}
+::view-transition-old(app-main),
+::view-transition-old(app-paddle),
+::view-transition-old(app-overlay),
+::view-transition-old(app-plan) {
+  animation: 220ms ease-out both page-vt-out;
+}
+::view-transition-new(app-main),
+::view-transition-new(app-paddle),
+::view-transition-new(app-overlay),
+::view-transition-new(app-plan) {
+  animation: 220ms ease-out both page-vt-in;
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.page-enter {
+  animation: 220ms ease-out both page-enter;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header,
+  .nav,
+  .main,
+  #paddle,
+  .overlay,
+  .plan-screen {
+    view-transition-name: none;
+  }
+  .page-enter {
+    animation: none !important;
+  }
+  .press-flash,
+  .press-flash.is-out {
+    transition: none !important;
+    opacity: 0 !important;
+  }
+}
