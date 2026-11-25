@@ -3454,7 +3454,7 @@ button.lot-cell {
   .plan-footer .plan-back-lg { min-height: 52px; }
 }
 
-/* v54: 3-digit subcode inline at the bottom-right of the lot number, never wraps */
+/* v57: 3-digit subcode in a same-size box at the bottom-right of the lot number; never wraps or grows the row */
 .num-sub-wrap {
   position: relative;
   display: inline-flex;
@@ -3479,36 +3479,56 @@ button.lot-cell {
   text-decoration: none;
   white-space: nowrap;
 }
-.lot-cell .num-sub.on {
-  position: static;
-  margin: 0 0 0 1px;
-  padding: 0;
-  z-index: 1;
+.lot-cell .num-sub {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: content-box;
+  min-width: 3ch;
+  margin: 0 0 1px 3px;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.1;
   pointer-events: auto;
+  z-index: 1;
   transform: none;
 }
-.num-sub-wrap.has-sub .cell-num { letter-spacing: 0.03em; }
-.lot-cell .cell-top:has(.has-sub) {
+.lot-cell .num-sub.empty {
+  color: #7eb8c4;
+  border: 1px dashed #6aa8b4;
+  background: rgba(40, 80, 90, 0.28);
+}
+.lot-cell .num-sub.on {
+  color: #7ee0f0;
+  border: 1px solid #5ec8d8;
+  background: rgba(20, 60, 70, 0.45);
+}
+/* Widen the tap area without adding layout height or covering the main number */
+.lot-cell .num-sub::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  right: -8px;
+  height: 24px;
+  pointer-events: auto;
+  transform: translateY(-50%);
+}
+.num-sub-wrap.has-sub .cell-num,
+.lot-cell .num-sub-wrap .cell-num { letter-spacing: 0.02em; }
+.lot-cell .cell-top {
   padding-bottom: 0;
   overflow: visible;
 }
 .lot-cell .cell-main { overflow: visible; }
-.num-sub.empty {
-  position: absolute;
-  right: -6px;
-  bottom: -2px;
-  width: 22px;
-  height: 18px;
-  margin: 0;
-  padding: 0;
-  min-width: 0;
-  color: transparent;
-  z-index: 1;
-}
-.lot-cell.won .num-sub { color: #9af0ff; }
-.lot-cell.moved .num-sub { color: #0d2a32; }
-.lot-cell.lost .num-sub { color: #8fd8e4; text-decoration: none; }
-.lot-cell.passed .num-sub { color: #6ec8d4; }
+.lot-cell.won .num-sub { color: #9af0ff; border-color: #6ed4e4; }
+.lot-cell.moved .num-sub { color: #0d2a32; border-color: #1a4a55; background: rgba(255,255,255,0.28); }
+.lot-cell.lost .num-sub { color: #8fd8e4; text-decoration: none; border-color: #6aa8b4; }
+.lot-cell.passed .num-sub { color: #6ec8d4; border-color: #4a8894; }
 .second-item .num-sub,
 .sum-name .num-sub { font-size: 13px; color: #7ee0f0; }
 .action-sheet h3 .num-sub-wrap { margin-right: 4px; }
@@ -3554,8 +3574,10 @@ button.lot-cell {
 .subcode-sheet .sheet-actions .btn { flex: 1 1 auto; min-height: 52px; font-weight: 800; font-size: 18px; }
 @media (max-width: 360px) {
   .num-sub { font-size: 11px; letter-spacing: 0; }
-  .lot-cell .num-sub.on { margin-left: 0; }
-  .num-sub-wrap.has-sub .cell-num { letter-spacing: 0.01em; }
+  .lot-cell .num-sub { font-size: 10px; min-width: 3ch; margin-left: 2px; margin-bottom: 0; padding: 0 1px; }
+  .lot-cell .num-sub::after { right: -4px; height: 22px; }
+  .num-sub-wrap.has-sub .cell-num,
+  .lot-cell .num-sub-wrap .cell-num { letter-spacing: 0.01em; }
   .eta-badge { font-size: 11px; }
   .moved-mark { font-size: 10px; padding: 1px 3px; }
   .cur-now-lbl { display: none; }

@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v56';
+const APP_VERSION = 'v57';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -3233,13 +3233,13 @@ function lotNumHtml(lot, opts) {
   const numClass = (opts && opts.numClass) || 'ln-num';
   const edit = !!(opts && opts.edit);
   const label = sub ? ('小代碼 ' + sub + '，點一下可改或清除') : '註記小代碼';
-  if (!sub && !edit) {
-    return `<span class="${numClass}">${num}</span>`;
+  if (!edit) {
+    if (!sub) return `<span class="${numClass}">${num}</span>`;
+    return `<span class="num-sub-wrap has-sub"><span class="${numClass}">${num}</span><span class="num-sub on">${escapeHtml(sub)}</span></span>`;
   }
-  const act = edit
-    ? ` data-act="edit-subcode" data-id="${escapeHtml(lot.id)}" aria-label="${escapeHtml(label)}"`
-    : '';
-  return `<span class="num-sub-wrap${sub ? ' has-sub' : ''}"><span class="${numClass}">${num}</span><span class="num-sub${sub ? ' on' : ' empty'}"${act}>${sub ? escapeHtml(sub) : ''}</span></span>`;
+  const act = ` data-act="edit-subcode" data-id="${escapeHtml(lot.id)}" aria-label="${escapeHtml(label)}"`;
+  const body = sub ? escapeHtml(sub) : '···';
+  return `<span class="num-sub-wrap${sub ? ' has-sub' : ''}"><span class="${numClass}">${num}</span><span class="num-sub${sub ? ' on' : ' empty'}"${act}>${body}</span></span>`;
 }
 
 function lotLabelHtml(lot, opts) {
