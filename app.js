@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v60';
+const APP_VERSION = 'v61';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4619,6 +4619,26 @@ function cyclePaddleTheme() {
   }
 }
 
+function paddleInkMetrics(text, fontPx) {
+  const canvas = paddleInkMetrics._c || (paddleInkMetrics._c = document.createElement('canvas'));
+  const ctx = canvas.getContext('2d');
+  ctx.font = '800 ' + fontPx + 'px "Paddle Inter", Inter, sans-serif';
+  let inkH = 0;
+  const widths = [];
+  for (const ch of String(text || '0000')) {
+    const m = ctx.measureText(ch);
+    const up = m.actualBoundingBoxAscent;
+    const down = m.actualBoundingBoxDescent;
+    if (Number.isFinite(up) && Number.isFinite(down)) inkH = Math.max(inkH, up + down);
+    const left = m.actualBoundingBoxLeft;
+    const right = m.actualBoundingBoxRight;
+    if (Number.isFinite(left) && Number.isFinite(right)) widths.push(Math.max(m.width, left + right));
+    else widths.push(m.width);
+  }
+  if (!(inkH > 0)) inkH = fontPx * 0.78;
+  return { inkH, widths };
+}
+
 function fitPaddleDigits() {
   const el = document.getElementById('paddle-code');
   const box = document.getElementById('paddle-box');
@@ -4631,24 +4651,56 @@ function fitPaddleDigits() {
       .catch(() => {});
   }
   applyCssLandscapeIfNeeded();
-  const w = box.clientWidth * 0.96;
-  const h = box.clientHeight * 0.94;
-  if (w < 20 || h < 20) return;
+  const bw = box.clientWidth;
+  const bh = box.clientHeight;
+  if (bw < 20 || bh < 20) return;
+  const text = String(el.innerText || '0000').replace(/\s+/g, '');
+  const n = Math.max(1, text.length);
+  const padX = Math.max(12, bw * 0.03);
+  const padTop = Math.max(10, bh * 0.03);
+  const padBottom = Math.max(28, bh * 0.07);
+  const availW = Math.max(20, bw - padX * 2);
+  const availH = Math.max(20, bh - padTop - padBottom);
+  const gap = Math.max(12, Math.min(availW * 0.055, availH * 0.14));
+  const probe = 200;
+  const met = paddleInkMetrics(text, probe);
+  let size = probe * (availH / Math.max(met.inkH, 1));
+  el.style.display = 'flex';
+  el.style.alignItems = 'center';
+  el.style.justifyContent = 'center';
   el.style.whiteSpace = 'nowrap';
-  el.style.lineHeight = '0.82';
-  el.style.letterSpacing = '0.04em';
+  el.style.lineHeight = '0.72';
+  el.style.letterSpacing = '0';
   el.style.fontWeight = '800';
   el.style.fontFamily = '"Paddle Inter", Inter, sans-serif';
   el.style.webkitTextStroke = '0';
-  let lo = 24;
-  let hi = Math.max(w * 1.35, h * 1.5);
-  for (let i = 0; i < 28; i++) {
-    const mid = (lo + hi) / 2;
-    el.style.fontSize = mid + 'px';
-    if (el.scrollWidth <= w && el.scrollHeight <= h) lo = mid;
-    else hi = mid;
+  el.style.gap = gap + 'px';
+  el.style.width = 'max-content';
+  el.style.maxWidth = 'none';
+  el.style.transformOrigin = 'center center';
+  el.style.transform = 'none';
+  const applySize = (px) => {
+    el.style.fontSize = px + 'px';
+    for (const d of el.querySelectorAll('span')) {
+      d.style.fontSize = px + 'px';
+      d.style.lineHeight = '0.72';
+      d.style.fontWeight = '800';
+      d.style.transform = 'none';
+    }
+  };
+  applySize(size);
+  void el.offsetWidth;
+  const usedW = Math.max(el.scrollWidth, 1);
+  const minSx = 0.58;
+  let scaleX = usedW > availW ? availW / usedW : 1;
+  if (scaleX < minSx) {
+    size *= scaleX / minSx;
+    applySize(size);
+    void el.offsetWidth;
+    const used2 = Math.max(el.scrollWidth, 1);
+    scaleX = used2 > availW ? Math.max(minSx, availW / used2) : 1;
   }
-  el.style.fontSize = Math.floor(lo) + 'px';
+  el.style.transform = scaleX < 0.995 ? 'scaleX(' + scaleX + ')' : 'none';
 }
 
 function themeLabel(theme) {
@@ -5592,7 +5644,7 @@ function renderPaddle() {
           <button type="button" data-act="cycle-theme">${themeLabel(theme)}</button>
         </div>
         <div id="paddle-box">
-          <div id="paddle-code">${escapeHtml(code)}</div>
+          <div id="paddle-code">${[...code].map((d) => `<span>${escapeHtml(d)}</span>`).join('')}</div>
         </div>
         <div id="paddle-hint">點一下螢幕返回　${themeLabel(theme)}</div>
       </div>

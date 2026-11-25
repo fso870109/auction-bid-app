@@ -1576,35 +1576,75 @@ input:focus, textarea:focus {
 }
 .custom-chip span { flex: 1; }
 
-/* 舉牌：更大更粗，橫向鎖定或 CSS 旋轉 */
+/* 舉牌：數字拉高佔滿畫面，橫向鎖定或 CSS 旋轉 */
 #paddle {
   display: block;
+  overflow: hidden;
 }
 #paddle-stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
-  min-height: 100%;
+  min-height: 0;
+}
+#paddle-bar,
+#paddle-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  pointer-events: none;
 }
 #paddle-bar {
-  position: relative;
-  z-index: 2;
+  top: 0;
+  padding: calc(6px + var(--safe-t)) 10px 4px;
+}
+#paddle-bar button {
+  pointer-events: auto;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+#paddle-hint {
+  bottom: 0;
+  padding: 4px 12px calc(8px + var(--safe-b));
+  font-size: 12px;
 }
 #paddle-box {
-  flex: 1 1 auto;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   min-height: 0;
-  padding: 0 1vw;
+  padding: 0;
+  overflow: hidden;
 }
 #paddle-code {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--paddle-font);
   font-weight: 800;
   font-style: normal;
   font-synthesis: none;
-  letter-spacing: 0.04em;
-  line-height: 0.82;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 0.72;
   -webkit-text-stroke: 0;
   text-rendering: geometricPrecision;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#paddle-code span {
+  display: block;
+  flex: 0 0 auto;
+  font-weight: 800;
+  line-height: 0.72;
 }
 #paddle.css-landscape #paddle-stage {
   position: absolute;
@@ -1612,6 +1652,8 @@ input:focus, textarea:focus {
   height: 100dvw;
   width: 100vh;
   height: 100vw;
+  min-width: 0;
+  min-height: 0;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%) rotate(90deg);
