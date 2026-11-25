@@ -2112,7 +2112,9 @@ html.is-dragging .live-col-list {
   flex: 1 1 0;
   width: auto;
   min-width: 0;
-  min-height: 60px;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
   padding: 0;
   font-size: 28px;
   font-weight: 900;
@@ -2132,7 +2134,9 @@ html.is-dragging .live-col-list {
 .start-btn {
   flex: 1 1 0;
   min-width: 0;
-  min-height: 48px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
   padding: 0;
   font-size: 20px;
   font-weight: 900;
@@ -2141,6 +2145,10 @@ html.is-dragging .live-col-list {
   background: var(--bg-elev);
   border: 1px solid var(--line);
   color: var(--text);
+  white-space: nowrap;
+}
+@media (max-width: 360px) {
+  .xfer-btn, .start-btn { font-size: 18px; }
 }
 .xfer-btn:active,
 .start-btn:active { background: var(--bg-press); }
@@ -2225,9 +2233,9 @@ html.is-dragging .live-col-list {
   .cur-now-num { font-size: clamp(22px, 6.2vw, 26px); }
   .live-info-lbl { height: 15px; min-height: 15px; flex-basis: 15px; line-height: 15px; font-size: 13px; }
   .live-cur-row { gap: 6px; }
-  .cur-step { min-height: 56px; font-size: 26px; }
+  .cur-step { height: 44px; min-height: 44px; max-height: 44px; font-size: 26px; }
   .live-foot-actions { gap: 6px; }
-  .xfer-btn, .start-btn { min-height: 44px; font-size: 18px; }
+  .xfer-btn, .start-btn { height: 38px; min-height: 38px; max-height: 38px; font-size: 18px; }
 }
 .prog-pop {
   position: absolute;
