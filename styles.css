@@ -711,15 +711,15 @@ input:focus, textarea:focus {
 }
 
 .btn-won.on, .btn-won:active {
-  background: #14351c;
-  border-color: var(--green);
-  color: var(--green);
+  background: #157a30;
+  border-color: #0d5a22;
+  color: #fff;
 }
 
 .btn-lost.on, .btn-lost:active {
-  background: #2a0d0d;
-  border-color: var(--red);
-  color: var(--red);
+  background: #c41616;
+  border-color: #8a0e0e;
+  color: #fff;
 }
 
 .status-pill {
@@ -729,8 +729,8 @@ input:focus, textarea:focus {
   padding: 3px 8px;
 }
 
-.status-pill.won { background: #14351c; color: var(--green); }
-.status-pill.lost { background: #2a0d0d; color: var(--red); }
+.status-pill.won { background: #157a30; color: #fff; }
+.status-pill.lost { background: #c41616; color: #fff; }
 .status-pill.pending { background: #222; color: var(--muted); }
 
 /* Settings */
@@ -1406,9 +1406,9 @@ input:focus, textarea:focus {
 .prio-toggle button.on {
   font-weight: 900;
 }
-.prio-toggle button.on.prio-must { background: #3a1608; color: #ff8a3d; box-shadow: inset 0 0 0 2px #ff8a3d; }
-.prio-toggle button.on.prio-watch { background: #3a2e08; color: #ffcc33; box-shadow: inset 0 0 0 2px #ffcc33; }
-.prio-toggle button.on.prio-skip { background: #2a2a2a; color: #f0f0f0; box-shadow: inset 0 0 0 2px #c8c8c8; }
+.prio-toggle button.on.prio-must { background: #ff5c1a; color: #1a0a00; box-shadow: none; }
+.prio-toggle button.on.prio-watch { background: #ffe500; color: #111; box-shadow: none; }
+.prio-toggle button.on.prio-skip { background: #2f62e8; color: #fff; box-shadow: none; }
 .sheet-prio { margin: 0 0 10px; min-height: 44px; }
 .move-lot-row {
   display: grid;
@@ -2183,8 +2183,8 @@ button.lot-cell {
   justify-content: center;
   align-items: center;
   gap: 2px;
-  min-width: 22px;
-  padding: 3px 0;
+  min-width: 26px;
+  padding: 2px 0;
 }
 .prio-bar {
   width: 3px;
@@ -2192,21 +2192,27 @@ button.lot-cell {
   border-radius: 0 2px 2px 0;
   background: transparent;
 }
-.lot-cell.prio-must .prio-bar { background: #ff6a1a; }
-.lot-cell.prio-watch .prio-bar { background: #d4a017; width: 2px; }
+.lot-cell.prio-must .prio-bar { background: #ff5c1a; }
+.lot-cell.prio-watch .prio-bar { background: #ffe500; }
+.lot-cell.prio-skip .prio-bar { background: #2f62e8; }
 .prio-tag {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  font-size: 14px;
   font-weight: 900;
   line-height: 1;
-  padding: 3px 3px;
-  border-radius: 4px;
+  padding: 3px 4px;
+  border-radius: 5px;
   letter-spacing: 0.02em;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
-.lot-cell.prio-must .prio-tag { background: #3a1608; color: #ff8a3d; }
-.lot-cell.prio-watch .prio-tag { background: #3a2e08; color: #ffcc33; }
-.lot-cell.prio-skip .prio-tag { background: #262626; color: #8a8a8a; }
+.lot-cell.prio-must .prio-tag { background: #ff5c1a; color: #1a0a00; }
+.lot-cell.prio-watch .prio-tag { background: #ffe500; color: #111; }
+.lot-cell.prio-skip .prio-tag { background: #2f62e8; color: #fff; }
 .lot-cell.prio-must .cell-num { font-weight: 800; }
-.lot-cell.prio-skip { opacity: 0.84; }
 .cell-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -2341,17 +2347,19 @@ button.lot-cell {
   background: #221f00;
 }
 .lot-cell.won {
-  background: #16351c;
-  border-color: #1e5a28;
+  background: #157a30;
+  border-color: #0d5a22;
 }
-.lot-cell.won .cell-num { color: var(--green); }
-.lot-cell.won .cell-item { color: #9ad6a8; }
+.lot-cell.won .cell-num { color: #fff; }
+.lot-cell.won .cell-item { color: #f3fff5; }
+.lot-cell.won .eta-badge { color: #fff3a0; }
 .lot-cell.moved {
-  background: #c48a00;
+  background: #d49600;
   border-color: #ffd24a;
 }
 .lot-cell.moved .cell-num { color: #1a1200; }
-.lot-cell.moved .cell-item { color: #2a1c00; }
+.lot-cell.moved .cell-item { color: #1a1200; }
+.lot-cell.moved .eta-badge { color: #1a1200; }
 .moved-mark {
   flex: 0 0 auto;
   display: inline-flex;
@@ -2371,17 +2379,18 @@ button.lot-cell {
 .unmoved-count b { color: #ffd24a; }
 .unmoved-count { color: #e8c056; }
 .lot-cell.lost {
-  background: #2a1414;
-  border-color: #4a2222;
+  background: #c41616;
+  border-color: #8a0e0e;
 }
 .lot-cell.lost .cell-num {
-  color: #d88;
+  color: #fff;
   text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  text-decoration-color: rgba(180, 100, 100, 0.62);
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(255, 255, 255, 0.9);
   text-decoration-skip-ink: auto;
 }
-.lot-cell.lost .cell-item { color: #a17777; }
+.lot-cell.lost .cell-item { color: #fff5f5; }
+.lot-cell.lost .eta-badge { color: #ffe08a; }
 .lot-cell.flow {
   background: #102a36;
   border-color: #1d5a70;
@@ -2389,14 +2398,12 @@ button.lot-cell {
 .lot-cell.flow .cell-num { color: var(--blue); }
 .lot-cell.flow .cell-item { color: #9ad4ea; }
 .lot-cell.passed {
-  background: #141414;
-  opacity: 0.62;
-  filter: grayscale(0.25);
+  background: #1a1a1a;
+  opacity: 1;
+  filter: none;
 }
-.lot-cell.passed .cell-num { color: #b0b0b0; }
-.lot-cell.passed .prio-tag,
-.lot-cell.passed .prio-bar { filter: none; opacity: 1; }
-.lot-cell.passed.prio-must { opacity: 0.78; }
+.lot-cell.passed .cell-num { color: #c4c4c4; }
+.lot-cell.passed .cell-item { color: #9a9a9a; }
 
 .lot-ghost {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
@@ -3870,10 +3877,13 @@ button.lot-cell {
   overflow: visible;
 }
 .lot-cell .cell-main { overflow: visible; }
-.lot-cell.won .num-sub { color: #9af0ff; border-color: #6ed4e4; }
-.lot-cell.moved .num-sub { color: #0d2a32; border-color: #1a4a55; background: rgba(255,255,255,0.28); }
-.lot-cell.lost .num-sub { color: #8fd8e4; text-decoration: none; border-color: #6aa8b4; }
+.lot-cell.won .num-sub { color: #fff; border-color: #fff; background: rgba(0,0,0,0.28); }
+.lot-cell.moved .num-sub { color: #0d2a32; border-color: #1a4a55; background: rgba(255,255,255,0.45); }
+.lot-cell.lost .num-sub { color: #fff; text-decoration: none; border-color: #fff; background: rgba(0,0,0,0.28); }
 .lot-cell.passed .num-sub { color: #6ec8d4; border-color: #4a8894; }
+.lot-cell.won .size-badge,
+.lot-cell.lost .size-badge,
+.lot-cell.moved .size-badge { box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
 .second-item .num-sub,
 .sum-name .num-sub { font-size: 13px; color: #7ee0f0; }
 .action-sheet h3 .num-sub-wrap { margin-right: 4px; }
@@ -3925,8 +3935,8 @@ button.lot-cell {
   .lot-cell .num-sub-wrap .cell-num { letter-spacing: 0.01em; }
   .eta-badge { font-size: 11px; }
   .moved-mark { font-size: 10px; padding: 1px 2px; min-width: 14px; }
-  .prio-stack { min-width: 20px; padding: 2px 0; gap: 1px; }
-  .prio-tag { font-size: 12px; padding: 2px 2px; }
+  .prio-stack { min-width: 24px; padding: 2px 0; gap: 1px; }
+  .prio-tag { font-size: 13px; min-width: 22px; min-height: 20px; padding: 2px 3px; }
   .cur-now-num { letter-spacing: 0; }
   .subcode-sheet .key { min-height: 64px; }
 }
