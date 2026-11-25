@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v66';
+const APP_VERSION = 'v67';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -18,7 +18,7 @@ const GROUP_RANK = {
 const VOLUME_GRID_MIN = 500;
 const ITEM_SIZES = ['大', '中', '小'];
 const MUSHROOM_CROPS = ['金絲菇', '杏鮑菇', '其他菇類', '鴻喜菇', '濕木耳', '濕香菇', '洋菇', '秀珍菇', '草菇', '珊瑚菇', '蠔菇', '巴西蘑菇', '松茸', '柳松菇', '猴頭菇'];
-const GOURD_FROM_BULK_CROPS = ['芋', '大蒜', '青花苔', '薑', '甘藷', '馬鈴薯', '薯蕷', '豆薯', '菊芋'];
+const GOURD_FROM_BULK_CROPS = ['芋', '大蒜', '青花苔', '薑', '甘藷', '薯蕷', '豆薯', '菊芋'];
 const GOURD_FROM_BULK_V21_CROPS = ['花椰菜', '球莖甘藍', '竹筍', '萵苣莖', '蓮藕', '蘆筍', '牛蒡'];
 let itemQuery = '';
 let variantPick = null; // crop official name when variant sheet is open
@@ -80,6 +80,13 @@ function isPromoVariety(crop, variety) {
   ));
 }
 
+const LEGACY_ITEM_DISPLAY = {
+  '茭白筍': '美人腿',
+  '茭白筍-帶殼': '美人腿 帶殼',
+  '茭白筍-去殼': '美人腿 去殼',
+  '茭白筍-進口': '進口美人腿'
+};
+
 function everydayItemLabel(name) {
   const n = String(name || '').trim();
   if (!n) return '';
@@ -90,6 +97,7 @@ function everydayItemLabel(name) {
 
 function itemDisplayName(name) {
   if (!name) return '';
+  if (LEGACY_ITEM_DISPLAY[name]) return LEGACY_ITEM_DISPLAY[name];
   const everyday = everydayItemLabel(name);
   if (everyday) return everyday;
   const crop = findCrop(name);
@@ -116,6 +124,7 @@ function itemDisplayName(name) {
 
 function itemCellName(name) {
   if (!name) return '';
+  if (LEGACY_ITEM_DISPLAY[name]) return LEGACY_ITEM_DISPLAY[name];
   const everyday = everydayItemLabel(name);
   if (everyday) return everyday;
   const crop = findCrop(name);
@@ -143,6 +152,7 @@ function cropMatchesQuery(crop, q) {
   for (const v of crop.s || []) {
     fields.push(v.n, v.l, ...(v.a || []));
   }
+  if (crop.n && String(crop.n).startsWith('敏豆-')) fields.push('敏豆');
   if (q.length >= 2) return fields.some((f) => f && String(f).includes(q));
   return fields.some((f) => f === q || (f && String(f).startsWith(q)));
 }
@@ -158,6 +168,7 @@ function dedupeCrops(list) {
 }
 
 function cropShownOnGrid(crop, counts) {
+  if (!crop || crop.legacy) return false;
   if ((crop.v || 0) >= VOLUME_GRID_MIN) return true;
   const used = (counts && (counts[crop.l] || counts[crop.n])) || 0;
   return used > 0;
@@ -177,8 +188,6 @@ function sizeLabel(size) {
 const GRID_PROMOTIONS = [
   { l: '甜豆', cropN: '豌豆', varN: '豌豆-甜豌豆' },
   { l: '荷蘭豆', cropN: '豌豆', varN: '豌豆-白花' },
-  { l: '四季豆', cropN: '敏豆', varN: '敏豆-白豆' },
-  { l: '醜豆', cropN: '敏豆', varN: '敏豆-醜豆' },
   { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' }
 ];
 
@@ -210,6 +219,24 @@ function promotionCrops(half, q, counts) {
   return out;
 }
 
+function isImportPotato(crop) {
+  return !!(crop && (crop.n === '馬鈴薯-進口' || crop.l === '進口馬鈴薯'));
+}
+
+function itemSortVolume(crop) {
+  if (isImportPotato(crop)) {
+    const potato = typeof findCrop === 'function' ? findCrop('馬鈴薯') : null;
+    return Number((potato && potato.v) || crop.v || 0);
+  }
+  return Number((crop && crop.v) || 0);
+}
+
+function itemSortTie(crop) {
+  if (isImportPotato(crop)) return 1;
+  if (crop && (crop.n === '馬鈴薯' || crop.l === '馬鈴薯')) return 0;
+  return 0;
+}
+
 function visibleCrops(half, q) {
   const h = half || (state && state.currentHalf) || 'morning';
   const counts = itemCountsOf(h);
@@ -219,7 +246,7 @@ function visibleCrops(half, q) {
     ranks['水菜'] = 0;
     ranks['大宗'] = 1;
   }
-  let list = dedupeCrops(catalogCrops(h).filter((c) => cropMatchesQuery(c, q)));
+  let list = dedupeCrops(catalogCrops(h).filter((c) => !c.legacy && cropMatchesQuery(c, q)));
   if (!String(q || '').trim()) {
     list = list.filter((c) => cropShownOnGrid(c, counts));
   }
@@ -231,10 +258,15 @@ function visibleCrops(half, q) {
     const sa = itemSessionScore(a.l, h) || itemSessionScore(a.n, h);
     const sb = itemSessionScore(b.l, h) || itemSessionScore(b.n, h);
     if (sb !== sa) return sb - sa;
-    const za = a.v > 0 ? 0 : 1;
-    const zb = b.v > 0 ? 0 : 1;
+    const va = itemSortVolume(a);
+    const vb = itemSortVolume(b);
+    const za = va > 0 ? 0 : 1;
+    const zb = vb > 0 ? 0 : 1;
     if (za !== zb) return za - zb;
-    if (b.v !== a.v) return b.v - a.v;
+    if (vb !== va) return vb - va;
+    const ta = itemSortTie(a);
+    const tb = itemSortTie(b);
+    if (ta !== tb) return ta - tb;
     return String(a.l).localeCompare(String(b.l), 'zh-Hant');
   });
   return list;
@@ -257,7 +289,7 @@ function catalogCounts() {
 
 function catalogSummary(half) {
   const counts = itemCountsOf(half);
-  const crops = dedupeCrops(catalogCrops(half));
+  const crops = dedupeCrops(catalogCrops(half)).filter((c) => !c.legacy);
   const groups = half === 'fruit' ? ['水果']
     : half === 'afternoon' ? ['瓜果', '醃製']
     : ['大宗', '水菜'];
@@ -339,26 +371,6 @@ function pinnedPickerVariants(crop) {
         l: '荷蘭豆',
         srcN: dutch.n,
         a: [...new Set([...(dutch.a || []), '荷蘭豆', '白花'])]
-      }));
-    }
-  }
-  if (crop.n === '敏豆') {
-    const season = (crop.s || []).find((v) => v.n === '敏豆-白豆' || v.l === '白豆');
-    if (season) {
-      out.push(Object.assign({}, season, {
-        n: '四季豆',
-        l: '四季豆',
-        srcN: season.n,
-        a: [...new Set([...(season.a || []), '四季豆', '白豆'])]
-      }));
-    }
-    const ugly = (crop.s || []).find((v) => v.n === '敏豆-醜豆' || v.l === '醜豆');
-    if (ugly) {
-      out.push(Object.assign({}, ugly, {
-        n: '醜豆',
-        l: '醜豆',
-        srcN: ugly.n,
-        a: [...new Set([...(ugly.a || []), '醜豆'])]
       }));
     }
   }
@@ -867,6 +879,11 @@ const GOURD_PEEL_CROP = {
   '荷蘭豆': 'green',
   '四季豆': 'green',
   '醜豆': 'green',
+  '翼豆': 'green',
+  '粉豆': 'pink',
+  '青豆': 'green',
+  '進口敏豆': 'green',
+  '蓮子': 'cream',
   '秋葵': 'green',
   '毛豆': 'green',
   '萊豆': 'green',
@@ -1287,6 +1304,9 @@ const BULK_PEEL_CROP = {
   '半天筍': 'paleYellow',
   '半天花': 'paleYellow',
   '慈菇': 'tan',
+  '馬鈴薯': 'tan',
+  '進口馬鈴薯': 'tan',
+  '馬鈴薯-進口': 'tan',
   '甘蔗筍': 'paleYellowGreen',
   '芽菜類': 'cream',
   '草石蠶': 'beige',
@@ -2458,6 +2478,7 @@ function defaultState() {
     itemsMigratedV17: true,
     itemsMigratedV21: true,
     itemsMigratedV46: true,
+    itemsMigratedV67: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
     lotsPerMin: DEFAULT_LOTS_PER_MIN,
     skipAutoDay: '',
@@ -2546,6 +2567,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV46) {
       migrateItemsV46(merged);
+    }
+    if (!saved.itemsMigratedV67) {
+      migrateItemsV67(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -3404,6 +3428,24 @@ function moveCustomsAndCounts(merged, fromHalf, toHalf, names) {
     toCounts[key] = (toCounts[key] || 0) + (Number(val) || 0);
     delete fromCounts[key];
   }
+  if (!merged.itemUseLogByHalf || typeof merged.itemUseLogByHalf !== 'object') {
+    merged.itemUseLogByHalf = { fruit: {}, morning: {}, afternoon: {} };
+  }
+  if (!merged.itemUseLogByHalf[fromHalf] || typeof merged.itemUseLogByHalf[fromHalf] !== 'object') {
+    merged.itemUseLogByHalf[fromHalf] = {};
+  }
+  if (!merged.itemUseLogByHalf[toHalf] || typeof merged.itemUseLogByHalf[toHalf] !== 'object') {
+    merged.itemUseLogByHalf[toHalf] = {};
+  }
+  const fromLog = merged.itemUseLogByHalf[fromHalf];
+  const toLog = merged.itemUseLogByHalf[toHalf];
+  for (const key of Object.keys(fromLog)) {
+    if (!names.has(key)) continue;
+    const src = Array.isArray(fromLog[key]) ? fromLog[key] : [];
+    const dest = Array.isArray(toLog[key]) ? toLog[key] : [];
+    toLog[key] = dest.concat(src);
+    delete fromLog[key];
+  }
 }
 
 function migrateItemsV17(merged) {
@@ -3415,6 +3457,27 @@ function migrateItemsV17(merged) {
 function migrateItemsV21(merged) {
   moveCustomsAndCounts(merged, 'morning', 'afternoon', officialNameSet(GOURD_FROM_BULK_V21_CROPS));
   merged.itemsMigratedV21 = true;
+}
+
+const POTATO_V67_NAMES = new Set(['馬鈴薯', '馬鈴薯-本產', '馬鈴薯-進口', '進口馬鈴薯']);
+const REMOVED_V67_NAMES = new Set([
+  '美人腿', '茭白筍', '茭白筍-帶殼', '茭白筍-去殼', '茭白筍-進口',
+  '豆薯', '掛薺',
+  '蓮藕', '蓮藕-進口',
+  '越瓜', '越瓜-青色', '越瓜-白色', '越瓜-其他', '越瓜-加工', '醃瓜',
+  '鵲豆', '鵠豆', '鵲豆-肉豆', '肉豆'
+]);
+
+function migrateItemsV67(merged) {
+  moveCustomsAndCounts(merged, 'afternoon', 'morning', POTATO_V67_NAMES);
+  const strip = (arr) => (Array.isArray(arr) ? arr.filter((n) => n && !REMOVED_V67_NAMES.has(String(n).trim())) : arr);
+  if (Array.isArray(merged.customItems)) merged.customItems = strip(merged.customItems);
+  if (merged.customItemsByHalf && typeof merged.customItemsByHalf === 'object') {
+    for (const half of Object.keys(merged.customItemsByHalf)) {
+      merged.customItemsByHalf[half] = strip(merged.customItemsByHalf[half]);
+    }
+  }
+  merged.itemsMigratedV67 = true;
 }
 
 const DISPLAY_RENAME_V46 = {
@@ -5643,7 +5706,7 @@ function renderSettings() {
     ${halfBlocks}
     ${HALVES.map((half) => {
       const title = half === 'fruit' ? '水果場品項（水果）'
-        : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、花椰菜、竹筍、蓮藕等屬瓜果）'
+        : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、花椰菜、竹筍等屬瓜果）'
         : '上半場品項（大宗、水菜；香菇類屬大宗第一台）';
       const built = catalogSummary(half);
       const customs = customItemsOf(half);
