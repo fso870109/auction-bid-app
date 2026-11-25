@@ -64,6 +64,68 @@
     return false;
   }
 
+  function anchorAt(a) {
+    if (!a || typeof a !== 'object') return -1;
+    const n = Number(a.at);
+    return Number.isFinite(n) ? n : -1;
+  }
+
+  function pickNewerAnchor(local, remote) {
+    const a = local && typeof local === 'object' ? local : null;
+    const b = remote && typeof remote === 'object' ? remote : null;
+    if (!a) return b;
+    if (!b) return a;
+    // A stale auto 到尾 freeze must not snap back a later manual ＋ past the cap.
+    const aN = a.number == null || a.number === '' ? null : Number(a.number);
+    const bN = b.number == null || b.number === '' ? null : Number(b.number);
+    if (a.ended && !b.ended && bN != null && aN != null && bN > aN) return b;
+    if (b.ended && !a.ended && aN != null && bN != null && aN > bN) return a;
+    const atA = anchorAt(a);
+    const atB = anchorAt(b);
+    if (atB > atA) return b;
+    if (atA > atB) return a;
+    if ((bN || 0) !== (aN || 0)) return (bN || 0) > (aN || 0) ? b : a;
+    return a;
+  }
+
+  function mergeProgressAnchors(local, remote) {
+    if (!remote || typeof remote !== 'object') return local && typeof local === 'object' ? local : remote;
+    if (!local || typeof local !== 'object') return remote;
+    const out = {};
+    const halves = new Set([].concat(Object.keys(local), Object.keys(remote)));
+    halves.forEach(function (h) {
+      out[h] = {};
+      const l = local[h] && typeof local[h] === 'object' ? local[h] : {};
+      const r = remote[h] && typeof remote[h] === 'object' ? remote[h] : {};
+      const ids = new Set([].concat(Object.keys(l), Object.keys(r)));
+      ids.forEach(function (id) {
+        out[h][id] = pickNewerAnchor(l[id], r[id]);
+      });
+    });
+    return out;
+  }
+
+  function mergeCurrentNumbers(local, remote, anchors) {
+    const out = {};
+    const halves = new Set();
+    if (local && typeof local === 'object') Object.keys(local).forEach(function (h) { halves.add(h); });
+    if (remote && typeof remote === 'object') Object.keys(remote).forEach(function (h) { halves.add(h); });
+    if (anchors && typeof anchors === 'object') Object.keys(anchors).forEach(function (h) { halves.add(h); });
+    halves.forEach(function (h) {
+      out[h] = Object.assign({}, (local && local[h]) || {}, (remote && remote[h]) || {});
+      const anch = anchors && anchors[h];
+      if (anch && typeof anch === 'object') {
+        Object.keys(anch).forEach(function (id) {
+          const a = anch[id];
+          if (!a || typeof a !== 'object') return;
+          if (a.cleared || a.number == null || a.number === '') out[h][id] = null;
+          else if (Number.isFinite(Number(a.number))) out[h][id] = Number(a.number);
+        });
+      }
+    });
+    return out;
+  }
+
   function applyOp(snap, op) {
     if (!op || !op.kind) return { applied: false, flash: null };
     const ts = Number(op.ts) || 0;
@@ -122,8 +184,20 @@
       const cur = snap.kv[key];
       const curTs = cur ? Number(cur.ts) || 0 : 0;
       if (ts > curTs) {
-        snap.kv[key] = { v: op.value, ts: ts, peer: op.peer || '' };
+        let value = op.value;
+        if (key === 'progressAnchors' && cur && cur.v && typeof cur.v === 'object' && value && typeof value === 'object') {
+          value = mergeProgressAnchors(cur.v, value);
+        }
+        snap.kv[key] = { v: value, ts: ts, peer: op.peer || '' };
         return { applied: true, flash: null };
+      }
+      // Even a stale-ts blob can carry a newer per-machine anchor; merge those in.
+      if (key === 'progressAnchors' && cur && cur.v && typeof cur.v === 'object' && op.value && typeof op.value === 'object') {
+        const merged = mergeProgressAnchors(cur.v, op.value);
+        if (JSON.stringify(merged) !== JSON.stringify(cur.v)) {
+          snap.kv[key] = { v: merged, ts: curTs, peer: cur.peer || op.peer || '' };
+          return { applied: true, flash: null };
+        }
       }
       return { applied: false, flash: null };
     }
@@ -295,10 +369,14 @@
       if (typeof mergeBoughtHistory === 'function') state.boughtHistory = mergeBoughtHistory(state.boughtHistory, hist);
       else state.boughtHistory = hist;
     }
-    const nums = val('currentNumbers');
-    if (nums && typeof nums === 'object') state.currentNumbers = nums;
     const anchors = val('progressAnchors');
-    if (anchors && typeof anchors === 'object') state.progressAnchors = anchors;
+    if (anchors && typeof anchors === 'object') {
+      state.progressAnchors = mergeProgressAnchors(state.progressAnchors, anchors);
+    }
+    const nums = val('currentNumbers');
+    if (nums && typeof nums === 'object' || state.progressAnchors) {
+      state.currentNumbers = mergeCurrentNumbers(state.currentNumbers, nums && typeof nums === 'object' ? nums : {}, state.progressAnchors);
+    }
     const autoAdv = val('autoAdvance');
     if (typeof autoAdv === 'boolean') state.autoAdvance = autoAdv;
   }
@@ -360,6 +438,9 @@
     applyKvToState,
     snapshotFromState,
     snapshotToOps,
+    pickNewerAnchor,
+    mergeProgressAnchors,
+    mergeCurrentNumbers,
     stateSliceFromSnapshot,
     fieldsChanged,
     lotsToMap,

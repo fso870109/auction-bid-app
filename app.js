@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v58';
+const APP_VERSION = 'v59';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -606,6 +606,8 @@ let dragState = null;
 
 const DEFAULT_DAY_CUTOFF_HOUR = 15;
 const DEFAULT_LOTS_PER_MIN = 4;
+const PROGRESS_MIN = 1;
+const PROGRESS_MAX = 9999;
 let clockNow = null;
 let pendingDayRollover = false;
 
@@ -3936,15 +3938,22 @@ function writeAnchor(machineId, half, anchor) {
   if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
   if (!state.progressAnchors[h]) state.progressAnchors[h] = {};
   if (!anchor) {
-    state.progressAnchors[h][machineId] = null;
+    state.progressAnchors[h][machineId] = { number: null, at: nowDate().getTime(), paused: true, ended: false, cleared: true };
     return;
   }
   state.progressAnchors[h][machineId] = {
     number: anchor.number,
     at: anchor.at,
     paused: !!anchor.paused,
-    ended: !!anchor.ended
+    ended: !!anchor.ended,
+    cleared: false
   };
+}
+
+function clampProgress(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.min(PROGRESS_MAX, Math.max(PROGRESS_MIN, Math.round(x)));
 }
 
 function progressCap(machineId, half) {
@@ -3976,8 +3985,11 @@ function currentOf(machineId, half) {
     const rate = lotsPerMin();
     const advanced = rate > 0 ? Math.floor((elapsed * rate) / 60000) : 0;
     let n = a.number + advanced;
+    if (n > PROGRESS_MAX) n = PROGRESS_MAX;
+    if (n < PROGRESS_MIN) n = PROGRESS_MIN;
     const cap = progressCap(machineId, h);
-    if (cap != null && n > cap) n = cap;
+    // 到尾 only stops automatic advance from at-or-below the list/range cap. A manual ＋ past the cap must not snap back.
+    if (cap != null && a.number <= cap && n > cap) n = cap;
     return n;
   }
   if (a && a.number != null) return a.number;
@@ -3991,7 +4003,7 @@ function isAutoRunning(machineId, half) {
   if (!a || a.paused || a.ended || a.number == null || a.at == null) return false;
   const cap = progressCap(machineId, h);
   const cur = currentOf(machineId, h);
-  if (cap != null && cur != null && cur >= cap) return false;
+  if (cap != null && a.number <= cap && cur != null && cur >= cap) return false;
   return true;
 }
 
@@ -4021,16 +4033,13 @@ function setProgress(machineId, next, half) {
       state.currentNumbers[h][machineId] = null;
       writeAnchor(machineId, h, null);
     } else {
-      n = Math.max(0, Math.round(n));
-      const cap = progressCap(machineId, h);
-      const atCap = cap != null && n >= cap;
-      if (atCap) n = cap;
+      n = clampProgress(n);
       state.currentNumbers[h][machineId] = n;
       writeAnchor(machineId, h, {
         number: n,
         at: nowDate().getTime(),
-        paused: !autoAdvanceOn() || atCap,
-        ended: atCap
+        paused: !autoAdvanceOn(),
+        ended: false
       });
     }
   }
@@ -4140,9 +4149,14 @@ function tickAutoProgress() {
       if (!isAutoRunning(m.id, half)) continue;
       const cur = currentOf(m.id, half);
       const cap = progressCap(m.id, half);
-      if (cap != null && cur != null && cur >= cap) {
+      const a = getAnchor(m.id, half);
+      // Only auto-stop at 到尾 when this run started at or below the list/range cap.
+      if (cap != null && a && a.number != null && a.number <= cap && cur != null && cur >= cap) {
+        const rate = lotsPerMin();
+        const ms = rate > 0 ? Math.ceil(((cap - a.number) * 60000) / rate) : 0;
+        const reachedAt = (a.at != null ? a.at : nowDate().getTime()) + Math.max(0, ms);
         state.currentNumbers[half][m.id] = cap;
-        writeAnchor(m.id, half, { number: cap, at: nowDate().getTime(), paused: true, ended: true });
+        writeAnchor(m.id, half, { number: cap, at: reachedAt, paused: true, ended: true });
         hitCap = true;
       }
     }
@@ -4429,7 +4443,7 @@ function bumpCurrent(machineId, delta) {
     const start = (m?.ranges || []).find((r) => r.start != null)?.start;
     cur = start ?? 0;
   }
-  const next = Math.max(0, cur + delta);
+  const next = clampProgress(cur + delta);
   const snap = snapshotProgress(machineId, half);
   setProgress(machineId, next, half);
   offerUndo(snap, `${next}　已設為現在進度`);
@@ -4439,7 +4453,7 @@ function bumpCurrent(machineId, delta) {
 function setCurrent(machineId, value) {
   const half = state.currentHalf;
   const n = parseInt(value, 10);
-  const next = Number.isFinite(n) ? n : null;
+  const next = Number.isFinite(n) ? clampProgress(n) : null;
   const prev = currentOf(machineId, half);
   editCurrent = null;
   modal = null;
