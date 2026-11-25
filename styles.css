@@ -1395,7 +1395,7 @@ input:focus, textarea:focus {
 .prio-toggle button {
   border-radius: 9px;
   font-weight: 800;
-  font-size: clamp(15px, 4.4vw, 18px);
+  font-size: clamp(17px, 5.2vw, 22px);
   line-height: 1.1;
   min-width: 0;
   padding: 0 4px;
@@ -2183,7 +2183,7 @@ button.lot-cell {
   justify-content: center;
   align-items: center;
   gap: 2px;
-  min-width: 16px;
+  min-width: 22px;
   padding: 3px 0;
 }
 .prio-bar {
@@ -2195,11 +2195,11 @@ button.lot-cell {
 .lot-cell.prio-must .prio-bar { background: #ff6a1a; }
 .lot-cell.prio-watch .prio-bar { background: #d4a017; width: 2px; }
 .prio-tag {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   line-height: 1;
-  padding: 2px 2px;
-  border-radius: 3px;
+  padding: 3px 3px;
+  border-radius: 4px;
   letter-spacing: 0.02em;
 }
 .lot-cell.prio-must .prio-tag { background: #3a1608; color: #ff8a3d; }
@@ -2289,11 +2289,11 @@ button.lot-cell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 14px;
-  min-width: 14px;
-  padding: 0 2px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 3px;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   line-height: 1;
   letter-spacing: 0.02em;
@@ -2302,6 +2302,12 @@ button.lot-cell {
 .size-badge.s-大 { background: #3a1608; color: #ff8a3d; }
 .size-badge.s-中 { background: #3a2e08; color: #ffcc33; }
 .size-badge.s-小 { background: #0d2a18; color: #5ee08a; }
+.size-badge.s-2L { background: #4a1208; color: #ffb08a; }
+.size-badge.s-L { background: #3a1608; color: #ff8a3d; }
+.size-badge.s-M { background: #3a2e08; color: #ffcc33; }
+.size-badge.s-S { background: #0d2a18; color: #5ee08a; }
+.size-badge.s-2S { background: #062828; color: #4ad4c8; }
+.size-badge.s-3S { background: #0a1c2e; color: #7ab8ff; }
 .cell-item.dim { color: transparent; }
 .cell-flags {
   display: flex;
@@ -2562,6 +2568,72 @@ button.lot-cell {
 .size-chip[data-v="大"].on { background: #ff6a1a; color: #fff; }
 .size-chip[data-v="中"].on { background: #f0a000; color: #1a1000; }
 .size-chip[data-v="小"].on { background: #038736; color: #fff; }
+.size-chip[data-v="2L"].on { background: #ff4a10; color: #fff; }
+.size-chip[data-v="L"].on { background: #ff6a1a; color: #fff; }
+.size-chip[data-v="M"].on { background: #f0a000; color: #1a1000; }
+.size-chip[data-v="S"].on { background: #038736; color: #fff; }
+.size-chip[data-v="2S"].on { background: #0a7a72; color: #fff; }
+.size-chip[data-v="3S"].on { background: #1a5aa0; color: #fff; }
+.size-chips.tomato-sizes {
+  display: grid;
+  grid-template-columns: auto repeat(6, minmax(0, 1fr));
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 6px;
+  width: 100%;
+}
+.size-chips.tomato-sizes .size-lbl { font-size: 13px; }
+.size-chips.tomato-sizes .size-chip {
+  min-width: 0;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 4px;
+  font-size: 16px;
+  font-weight: 800;
+}
+@media (max-width: 400px) {
+  /* Two chip rows beside the 大小 label, so 備註 stays above the tab bar. */
+  .size-chips.tomato-sizes {
+    grid-template-columns: auto repeat(3, minmax(0, 1fr));
+    column-gap: 5px;
+    row-gap: 5px;
+    padding: 2px 0 0;
+  }
+  .size-chips.tomato-sizes .size-lbl {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    max-width: 2.2em;
+    line-height: 1.2;
+    font-size: 12px;
+  }
+  .size-chips.tomato-sizes .size-chip {
+    min-height: 40px;
+    font-size: 16px;
+  }
+}
+@media (max-width: 400px) and (max-height: 700px) {
+  .size-chips.tomato-sizes .size-chip {
+    min-height: 36px;
+    font-size: 16px;
+  }
+}
+
+/* Two-row 番茄 sizes need a little keypad room so 備註 stays above the tab bar. */
+@media (max-height: 640px) {
+  .note-screen:has(.size-chips.tomato-sizes) .note-body {
+    min-height: calc(48px * 4 + 4px * 3);
+  }
+  .note-screen:has(.size-chips.tomato-sizes) .keypad {
+    grid-template-rows: repeat(4, minmax(48px, 1fr));
+    min-height: calc(48px * 4 + 4px * 3);
+    gap: 4px;
+  }
+  .note-screen:has(.size-chips.tomato-sizes) .key { min-height: 48px; }
+}
 
 .plan-screen {
   position: fixed;
@@ -3853,7 +3925,8 @@ button.lot-cell {
   .lot-cell .num-sub-wrap .cell-num { letter-spacing: 0.01em; }
   .eta-badge { font-size: 11px; }
   .moved-mark { font-size: 10px; padding: 1px 2px; min-width: 14px; }
-  .prio-stack { min-width: 14px; padding: 2px 0; gap: 1px; }
+  .prio-stack { min-width: 20px; padding: 2px 0; gap: 1px; }
+  .prio-tag { font-size: 12px; padding: 2px 2px; }
   .cur-now-num { letter-spacing: 0; }
   .subcode-sheet .key { min-height: 64px; }
 }

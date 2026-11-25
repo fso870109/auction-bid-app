@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v70';
+const APP_VERSION = 'v71';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -17,6 +17,8 @@ const GROUP_RANK = {
    default item grid. Search, custom items, and previously used items stay. */
 const VOLUME_GRID_MIN = 500;
 const ITEM_SIZES = ['大', '中', '小'];
+const TOMATO_SIZES = ['2L', 'L', 'M', 'S', '2S', '3S'];
+const TOMATO_SIZE_FROM_OLD = { '大': 'L', '中': 'M', '小': 'S' };
 const MUSHROOM_CROPS = ['金絲菇', '杏鮑菇', '其他菇類', '鴻喜菇', '濕木耳', '濕香菇', '洋菇', '秀珍菇', '草菇', '珊瑚菇', '蠔菇', '巴西蘑菇', '松茸', '柳松菇', '猴頭菇'];
 const GOURD_FROM_BULK_CROPS = ['芋', '大蒜', '青花苔', '薑', '甘藷', '薯蕷', '豆薯', '菊芋'];
 const GOURD_FROM_BULK_V21_CROPS = ['花椰菜', '球莖甘藍', '竹筍', '萵苣莖', '蓮藕', '蘆筍', '牛蒡'];
@@ -181,8 +183,35 @@ function itemNeedsSize(name) {
   return String(name).includes('番茄');
 }
 
-function sizeLabel(size) {
-  return ITEM_SIZES.includes(size) ? size : '';
+function isTomatoCrop(name) {
+  if (!name) return false;
+  const crop = findCrop(name);
+  if (crop) return crop.n === '番茄';
+  const s = String(name);
+  return s.includes('番茄') && !s.includes('小番茄');
+}
+
+function sizesForItem(name) {
+  return isTomatoCrop(name) ? TOMATO_SIZES : ITEM_SIZES;
+}
+
+function normalizeSize(size, name) {
+  if (size == null || size === '') return '';
+  const raw = String(size).trim();
+  if (!raw) return '';
+  if (isTomatoCrop(name)) {
+    if (TOMATO_SIZE_FROM_OLD[raw]) return TOMATO_SIZE_FROM_OLD[raw];
+    return TOMATO_SIZES.includes(raw) ? raw : '';
+  }
+  return ITEM_SIZES.includes(raw) ? raw : '';
+}
+
+function sizeLabel(size, name) {
+  return normalizeSize(size, name);
+}
+
+function defaultSizeForItem(name) {
+  return isTomatoCrop(name) ? 'M' : '';
 }
 
 const GRID_PROMOTIONS = [
@@ -759,7 +788,7 @@ function normalizePlanItems(list) {
 function lotPlanText(lot) {
   if (!lot || !lot.item) return '';
   const name = itemDisplayName(lot.item);
-  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
+  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size, lot.item) ? ' ' + sizeLabel(lot.size, lot.item) : '';
   return String(name + size).trim();
 }
 
@@ -787,12 +816,13 @@ function parsePlanItemText(text) {
   let raw = String(text || '').trim().replace(/\s+/g, ' ');
   let size = '';
   let name = raw;
-  const paren = raw.match(/^(.*?)[（(]\s*([大中小])\s*[）)]\s*$/);
+  const sizeBit = '(2L|2S|3S|L|M|S|[大中小])';
+  const paren = raw.match(new RegExp('^(.*?)[（(]\\s*' + sizeBit + '\\s*[）)]\\s*$'));
   if (paren && String(paren[1] || '').trim()) {
     name = paren[1].trim();
     size = paren[2];
   } else {
-    const spaced = raw.match(/^(.*)\s([大中小])\s*$/);
+    const spaced = raw.match(new RegExp('^(.*)\\s' + sizeBit + '\\s*$'));
     if (spaced && String(spaced[1] || '').trim()) {
       name = spaced[1].trim();
       size = spaced[2];
@@ -1512,9 +1542,9 @@ function planLotMatchScore(plan, lot) {
   const lotRes = resolveLotItem(lot.item);
   const crop = lotRes.crop;
   const variety = lotRes.variety;
-  const lotSize = itemNeedsSize(lot.item) || (crop && itemNeedsSize(crop.n)) || (crop && itemNeedsSize(crop.l)) ? sizeLabel(lot.size) : '';
+  const lotSize = itemNeedsSize(lot.item) || (crop && itemNeedsSize(crop.n)) || (crop && itemNeedsSize(crop.l)) ? sizeLabel(lot.size, lot.item) : '';
   if (parsed.size) {
-    if (lotSize !== parsed.size) return 0;
+    if (normalizeSize(parsed.size, lot.item) !== lotSize) return 0;
   }
   if (resolved.level === 'variety' && resolved.crop && resolved.variety) {
     if (!crop || crop.n !== resolved.crop.n) return 0;
@@ -2026,7 +2056,7 @@ function cropPlanCount(crop) {
   add(label);
   add(crop.n);
   if (itemNeedsSize(crop.n) || itemNeedsSize(crop.l)) {
-    for (const s of ITEM_SIZES) add(label + ' ' + s);
+    for (const s of sizesForItem(crop.n || crop.l)) add(label + ' ' + s);
   }
   for (const v of pickerVariants(crop, '')) {
     add(v.l || v.n);
@@ -2053,7 +2083,7 @@ function renderPlanGrid() {
     if (kind === 'size') {
       const none = planCountBadge(label);
       btns.push(`<button type="button" class="item-btn${none.cls}${peelClass(crop.n)}" data-act="plan-tap-item" data-name="${escapeHtml(label)}">不指定大小${none.html}</button>`);
-      for (const s of ITEM_SIZES) {
+      for (const s of sizesForItem(crop.n || crop.l)) {
         const text = label + ' ' + s;
         const badge = planCountBadge(text);
         btns.push(`<button type="button" class="item-btn${badge.cls}${peelClass(crop.n)}" data-act="plan-tap-item" data-name="${escapeHtml(text)}">${escapeHtml(s)}${badge.html}</button>`);
@@ -2391,13 +2421,16 @@ function clearPlanItems(kind) {
 
 function renderSizeChips(current, opts) {
   opts = opts || {};
+  const item = opts.item || (opts.lotId && (state.lots || []).find((l) => l.id === opts.lotId)?.item) || draftItem || '';
+  const sizes = sizesForItem(item);
+  const cur = normalizeSize(current, item);
   const act = opts.lotId ? 'set-size' : 'set-draft-size';
   const lotAttr = opts.lotId ? ` data-id="${escapeHtml(opts.lotId)}"` : '';
-  const cls = opts.sheet ? 'size-chips sheet-size' : 'size-chips';
+  const cls = (opts.sheet ? 'size-chips sheet-size' : 'size-chips') + (isTomatoCrop(item) ? ' tomato-sizes' : '');
   return `<div class="${cls}" role="group" aria-label="大小">
     <span class="size-lbl">大小</span>
-    ${ITEM_SIZES.map((s) => {
-      const on = current === s ? ' on' : '';
+    ${sizes.map((s) => {
+      const on = cur === s ? ' on' : '';
       return `<button type="button" class="size-chip${on}" data-act="${act}" data-v="${s}"${lotAttr}>${s}</button>`;
     }).join('')}
   </div>`;
@@ -2663,6 +2696,9 @@ function loadState() {
         const c = String(lot.subCode).replace(/\D/g, '').slice(0, 3);
         lot.subCode = c;
       }
+      if (lot.item && itemNeedsSize(lot.item)) {
+        lot.size = normalizeSize(lot.size, lot.item);
+      }
     }
     if (/^\d{4}$/.test(String(merged.sellerCode || ''))) merged.setupDone = true;
     if (merged.tab === 'track' || merged.tab === 'result' || merged.tab === 'settings') {
@@ -2836,15 +2872,15 @@ function lotPriority(lot) {
 }
 
 function prioLabel(p) {
-  if (p === 'must') return '必標';
-  if (p === 'skip') return '可不標';
-  return '看價';
+  if (p === 'must') return '美';
+  if (p === 'skip') return '交貨';
+  return '普';
 }
 
 function prioShort(p) {
-  if (p === 'must') return '必';
-  if (p === 'skip') return '可';
-  return '價';
+  if (p === 'must') return '美';
+  if (p === 'skip') return '交';
+  return '普';
 }
 
 function hundredBlock(num) {
@@ -3349,7 +3385,7 @@ function lotLabel(lot) {
   const code = lotSubCode(lot);
   const codeBit = code ? '　' + code : '';
   if (!lot.item) return String(lot.number) + codeBit;
-  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + lot.size : '';
+  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size, lot.item) ? ' ' + sizeLabel(lot.size, lot.item) : '';
   return `${lot.number} ${itemDisplayName(lot.item)}${size}${codeBit}`;
 }
 
@@ -3370,7 +3406,7 @@ function lotNumHtml(lot, opts) {
 
 function lotLabelHtml(lot, opts) {
   if (!lot) return '';
-  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? ' ' + escapeHtml(lot.size) : '';
+  const size = itemNeedsSize(lot.item) && sizeLabel(lot.size, lot.item) ? ' ' + escapeHtml(sizeLabel(lot.size, lot.item)) : '';
   const item = lot.item ? ` <span class="ln-item">${escapeHtml(itemDisplayName(lot.item))}${size}</span>` : '';
   return `${lotNumHtml(lot, opts)}${item}`;
 }
@@ -3930,6 +3966,7 @@ function applyItemToLot(lot, name) {
   if (!lot) return;
   lot.item = name;
   if (!itemNeedsSize(name)) lot.size = '';
+  else lot.size = normalizeSize(lot.size, name) || defaultSizeForItem(name);
   bumpItemUse(name, lot.half || state.currentHalf);
   saveState();
   toast(withPlanToast(`${lot.number}　${name}`));
@@ -3939,8 +3976,9 @@ function applyItemToLot(lot, name) {
 function setLotSize(id, size) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || !itemNeedsSize(lot.item)) return;
-  const next = sizeLabel(size);
-  lot.size = lot.size === next ? '' : next;
+  const next = sizeLabel(size, lot.item);
+  const cur = normalizeSize(lot.size, lot.item);
+  lot.size = cur === next ? '' : next;
   saveState();
   const noteMsg = latestPlanToast();
   if (noteMsg) toast(noteMsg);
@@ -3950,8 +3988,10 @@ function setLotSize(id, size) {
 function cycleLotSize(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot || !itemNeedsSize(lot.item)) return;
-  const i = ITEM_SIZES.indexOf(lot.size);
-  lot.size = ITEM_SIZES[(i + 1) % ITEM_SIZES.length];
+  const sizes = sizesForItem(lot.item);
+  const cur = normalizeSize(lot.size, lot.item);
+  const i = sizes.indexOf(cur);
+  lot.size = sizes[(i + 1) % sizes.length];
   saveState();
   const noteMsg = latestPlanToast();
   if (noteMsg) toast(noteMsg);
@@ -3959,17 +3999,20 @@ function cycleLotSize(id) {
 }
 
 function setDraftSize(size) {
-  const next = sizeLabel(size);
+  const item = (itemTargetId && (state.lots.find((l) => l.id === itemTargetId)?.item)) || draftItem || '';
+  const next = sizeLabel(size, item);
   if (itemTargetId) {
     const lot = state.lots.find((l) => l.id === itemTargetId);
     if (lot && itemNeedsSize(lot.item || draftItem)) {
-      lot.size = lot.size === next ? '' : next;
+      const cur = normalizeSize(lot.size, lot.item || draftItem);
+      lot.size = cur === next ? '' : next;
       saveState();
       render();
       return;
     }
   }
-  draftSize = draftSize === next ? '' : next;
+  const cur = normalizeSize(draftSize, item);
+  draftSize = cur === next ? '' : next;
   render();
 }
 
@@ -3977,6 +4020,7 @@ function assignItem(name) {
   name = String(name || '').trim();
   if (!name) return;
   if (!itemNeedsSize(name)) draftSize = '';
+  else draftSize = normalizeSize(draftSize, name) || defaultSizeForItem(name);
   if (draftNum) {
     draftItem = name;
     itemLocked = true;
@@ -4007,6 +4051,7 @@ function lockItem(name, opts) {
   name = String(name || '').trim();
   if (!name) return;
   if (!itemNeedsSize(name)) draftSize = '';
+  else draftSize = normalizeSize(draftSize, name) || defaultSizeForItem(name);
   draftItem = name;
   itemLocked = true;
   itemTargetId = null;
@@ -4181,7 +4226,7 @@ function commitLotRange(preview) {
       number: row.number,
       note: '',
       item: draftItem,
-      size: itemNeedsSize(draftItem) ? sizeLabel(draftSize) : '',
+      size: itemNeedsSize(draftItem) ? (sizeLabel(draftSize, draftItem) || defaultSizeForItem(draftItem)) : '',
       status: 'pending',
       priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
       qty: 1,
@@ -4736,7 +4781,7 @@ function commitLot(num, machineId, half) {
     number: num,
     note: draftNote.trim(),
     item: draftItem || '',
-    size: itemNeedsSize(draftItem) ? sizeLabel(draftSize) : '',
+    size: itemNeedsSize(draftItem) ? (sizeLabel(draftSize, draftItem) || defaultSizeForItem(draftItem)) : '',
     status: 'pending',
     priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
     qty: 1,
@@ -5287,7 +5332,7 @@ function daySummaryData() {
   let pieces = 0;
   for (const lot of won) {
     const name = itemDisplayName(lot.item) || lot.item || '未填品項';
-    const size = itemNeedsSize(lot.item) && sizeLabel(lot.size) ? lot.size : '';
+    const size = itemNeedsSize(lot.item) && sizeLabel(lot.size, lot.item) ? sizeLabel(lot.size, lot.item) : '';
     const key = name + (size ? ' ' + size : '');
     const g = lot.item ? cropGroupOfName(lot.item) : '其他';
     if (!groups.has(g)) groups.set(g, new Map());
@@ -5456,7 +5501,7 @@ function resultText() {
       if (over.length) lines.push(`  過號：${over.map(lotLabel).join('、')}（${over.length}）`);
       if (p.length) lines.push(`  未拍：${p.map(lotLabel).join('、')}（${p.length}）`);
       const musts = group.filter((l) => isUnauctionedMust(l));
-      if (musts.length) lines.push(`  必標未拍：${musts.map(lotLabel).join('、')}（${musts.length}）`);
+      if (musts.length) lines.push(`  美未拍：${musts.map(lotLabel).join('、')}（${musts.length}）`);
     }
   }
   const second = secondLots();
@@ -5805,7 +5850,7 @@ function renderNote() {
     : ((itemTargetId && state.lots.find((l) => l.id === itemTargetId)?.item) || draftItem);
   const sizeLot = (!itemLocked && itemTargetId) ? state.lots.find((l) => l.id === itemTargetId) : null;
   const sizeBlock = itemNeedsSize(sizeItem)
-    ? renderSizeChips(sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.size : draftSize, { lotId: sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.id : '' })
+    ? renderSizeChips(sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.size : draftSize, { item: sizeItem, lotId: sizeLot && itemNeedsSize(sizeLot.item) ? sizeLot.id : '' })
     : '';
   const planN = planTodayCount();
   const lockName = itemLocked && draftItem ? itemDisplayName(draftItem) : '';
@@ -5841,10 +5886,10 @@ function renderNote() {
     <div class="note-screen${itemLocked ? ' item-locked' : ''}${rangeMode ? ' range-mode' : ''}">
       ${headHtml}
       ${lockBar}
-      <div class="prio-toggle note-prio" role="group" aria-label="標貨優先">
+      <div class="prio-toggle note-prio" role="group" aria-label="美普交貨">
         ${['must', 'watch', 'skip'].map((p) => {
           const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
-          return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${p === 'must' ? '必標' : p === 'skip' ? '可不' : '看價'}</button>`;
+          return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${prioLabel(p)}</button>`;
         }).join('')}
       </div>
       ${picker}
@@ -5916,8 +5961,9 @@ function renderLive() {
               const etaHtml = eta ? `<span class="eta-badge">${escapeHtml(eta)}</span>` : '';
               const movedMark = l.status === 'moved' ? '<span class="moved-mark">搬</span>' : '';
               const er = l.secondMarket ? '<span class="er-mark">二</span>' : '';
+              const sz = l.item && itemNeedsSize(l.item) ? sizeLabel(l.size, l.item) : '';
               const size = itemNeedsSize(l.item) && l.item
-                ? `<span class="size-badge${sizeLabel(l.size) ? ' on s-' + l.size : ' empty'}" data-act="cycle-size" data-id="${escapeHtml(l.id)}">${sizeLabel(l.size) || '規'}</span>`
+                ? `<span class="size-badge${sz ? ' on s-' + sz : ' empty'}" data-act="cycle-size" data-id="${escapeHtml(l.id)}">${sz || '規'}</span>`
                 : '';
               const item = l.item
                 ? `<span class="cell-item"><span class="cell-item-name">${escapeHtml(itemCellName(l.item))}</span></span>`
@@ -5967,7 +6013,7 @@ function renderLive() {
     <div class="live-screen">
       <div class="live-bar">
         <div class="live-counts">
-          <span class="must-count${mustLeft ? ' on' : ''}"><b>${mustLeft}</b>必標</span>
+          <span class="must-count${mustLeft ? ' on' : ''}"><b>${mustLeft}</b>美</span>
           <span><b>${won}</b>標到</span>
           ${unmovedPieces ? `<span class="unmoved-count"><b>${unmovedPieces}</b>未搬</span>` : ''}
           <span><b>${lost}</b>沒標到</span>
@@ -6287,13 +6333,13 @@ function renderModal() {
           <button type="button" class="plan-qty-btn" data-act="lot-qty-inc" data-id="${escapeHtml(lot.id)}" aria-label="增加件數">＋</button>
         </div>
         <button type="button" class="action-btn" data-act="edit-subcode" data-id="${escapeHtml(lot.id)}">${lotSubCode(lot) ? lotSubCode(lot) + '（改或清除）' : '註記小代碼'}</button>
-        <div class="prio-toggle sheet-prio" role="group" aria-label="標貨優先">
+        <div class="prio-toggle sheet-prio" role="group" aria-label="美普交貨">
           ${['must', 'watch', 'skip'].map((p) => {
             const on = lotPriority(lot) === p ? ' on' : '';
             return `<button type="button" class="prio-${p}${on}" data-act="set-prio" data-id="${escapeHtml(lot.id)}" data-v="${p}">${prioLabel(p)}</button>`;
           }).join('')}
         </div>
-        ${itemNeedsSize(lot.item) ? renderSizeChips(lot.size || '', { lotId: lot.id, sheet: true }) : ''}
+        ${itemNeedsSize(lot.item) ? renderSizeChips(lot.size || '', { lotId: lot.id, item: lot.item, sheet: true }) : ''}
         <button type="button" class="action-btn" data-act="pick-lot-item" data-id="${escapeHtml(lot.id)}">改品項</button>
         ${undoMark}
         ${lostBtn}
