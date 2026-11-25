@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v74';
+const APP_VERSION = 'v75';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2584,6 +2584,22 @@ function defaultMachineMerges(machines) {
   return out;
 }
 
+function clearCollapsedMerges(st) {
+  st = st || state;
+  if (!st || !st.machineMerges || typeof st.machineMerges !== 'object') return;
+  const halves = Object.keys(st.machineMerges);
+  for (const half of halves) {
+    const map = st.machineMerges[half];
+    if (!map || typeof map !== 'object') continue;
+    for (const id of Object.keys(map)) {
+      const e = map[id];
+      if (e && typeof e === 'object' && e.into) {
+        map[id] = { into: null, ts: Date.now(), cleared: true };
+      }
+    }
+  }
+}
+
 function defaultSeriesPlans(machines) {
   const out = { fruit: {}, morning: {}, afternoon: {} };
   for (const half of HALVES) {
@@ -2829,7 +2845,8 @@ function machineIsRunningSeries(machineId, half, ser) {
   return !!(s && s.key === ser.key);
 }
 
-function lotsInSeriesOnOtherMachines(machineId, half, ser) {
+function lotsInSeriesOnOtherMachines(machineId, half, ser, opts) {
+  opts = opts || {};
   const h = half || state.currentHalf;
   const day = state.day;
   const out = [];
@@ -2839,7 +2856,8 @@ function lotsInSeriesOnOtherMachines(machineId, half, ser) {
     if (lot.machineId === machineId) continue;
     if (lot.status !== 'pending') continue;
     if (!inSeries(lot.number, ser)) continue;
-    if (machineIsRunningSeries(lot.machineId, h, ser)) continue;
+    if (isPassed(lot, currentOf(lot.machineId, h))) continue;
+    if (!opts.includeRunning && machineIsRunningSeries(lot.machineId, h, ser)) continue;
     out.push(lot);
   }
   return out;
@@ -3039,6 +3057,10 @@ function loadState() {
       merged.currentNumbers = defaultCurrents(merged.machines);
       merged.progressAnchors = defaultAnchors(merged.machines);
       merged.progressV2 = true;
+    }
+    if (!merged.machinesMigratedXferV75) {
+      clearCollapsedMerges(merged);
+      merged.machinesMigratedXferV75 = true;
     }
     merged.planItems = normalizePlanItems(merged.planItems);
     merged.boughtHistory = normalizeBoughtHistory(merged.boughtHistory);
@@ -3570,7 +3592,7 @@ function undoLast() {
     render();
     return;
   }
-  if (snap.kind === 'merge-machine') {
+  if (snap.kind === 'xfer-wrap' || snap.kind === 'merge-machine') {
     for (const row of snap.moved || []) {
       const lot = (state.lots || []).find((l) => l.id === row.id);
       if (lot) {
@@ -4964,8 +4986,15 @@ function setProgress(machineId, next, half, opts) {
         ended: false
       });
       liveScrollFollow[machineId] = true;
-      if (!opts.silentAdopt && pathInfo && pathInfo.ser && (pathInfo.started || pathInfo.changedSeries || pathInfo.first)) {
-        pendingAdopt = { machineId, half: h, ser: pathInfo.ser, start: pathInfo.start, first: !!pathInfo.first };
+      if (!opts.silentAdopt && pathInfo && pathInfo.ser) {
+        const startN = pathInfo.start != null ? pathInfo.start : seriesStart(machineId, h, pathInfo.ser);
+        const typedWrap = !!(opts.typed && startN != null && Number(n) < Number(startN) && inSeries(n, pathInfo.ser));
+        if (pathInfo.started || pathInfo.changedSeries || pathInfo.first || typedWrap) {
+          pendingAdopt = {
+            machineId, half: h, ser: pathInfo.ser, start: pathInfo.start, first: !!pathInfo.first,
+            includeRunning: !!typedWrap
+          };
+        }
       }
     }
   }
@@ -4980,7 +5009,11 @@ function offerAdoptIfNeeded() {
   pendingAdopt = null;
   if (!job || !job.ser) return;
   if (modal) return;
-  const lots = lotsInSeriesOnOtherMachines(job.machineId, job.half, job.ser);
+  let lots = lotsInSeriesOnOtherMachines(job.machineId, job.half, job.ser, { includeRunning: !!job.includeRunning });
+  if (job.includeRunning && job.start != null) {
+    const startN = Number(job.start);
+    lots = lots.filter((l) => Number(l.number) < startN);
+  }
   if (!lots.length) {
     if (job.first && job.start != null && job.ser && job.start !== job.ser.lo) {
       toast('這段起點是 ' + job.start + '。若起點不對，請長按「現在」改正。');
@@ -5048,75 +5081,171 @@ function commitSetStart() {
   }
 }
 
-function openXfer(machineId) {
-  modal = { type: 'xfer', srcId: machineId, half: state.currentHalf };
-  render();
-}
-
-function confirmXfer(srcId, destId) {
-  const half = state.currentHalf;
-  if (!srcId || !destId || srcId === destId) return;
-  const pending = columnLots(srcId, half).filter((l) => l.status === 'pending' && !l.secondMarket);
-  const destName = columnTitleOf(destId, half);
-  const srcName = columnTitleOf(srcId, half);
-  modal = {
-    type: 'confirm',
-    title: '轉到' + destName + '？',
-    body: srcName + '還沒拍的 ' + pending.length + ' 筆會移過去，已標過的留在' + srcName + '。',
-    ok: '轉過去',
-    cancel: '取消',
-    onOk: () => doXfer(srcId, destId, half),
-    onCancel: () => { modal = null; render(); }
-  };
-  render();
-}
-
-function doXfer(srcId, destId, half) {
+function wrapLotsBeforeStart(machineId, half, ser, start) {
   const h = half || state.currentHalf;
-  modal = null;
-  const pending = columnLots(srcId, h).filter((l) => l.status === 'pending' && !l.secondMarket);
-  const snapPath = structuredClone(state.seriesPath);
-  ensurePathStore(h);
-  const prevMerge = state.machineMerges[h][srcId] || null;
-  const moved = moveLotsToMachine(pending, destId, h);
-  state.machineMerges[h][srcId] = {
-    into: destId,
-    at: Date.now(),
-    day: state.day,
-    count: moved.length,
-    ts: Date.now(),
-    moved: moved.map((r) => ({ id: r.id, machineId: r.machineId }))
+  if (!ser || start == null) return [];
+  const startN = Number(start);
+  return columnLots(machineId, h).filter((l) => (
+    l.status === 'pending'
+    && !l.secondMarket
+    && inSeries(l.number, ser)
+    && Number(l.number) < startN
+  ));
+}
+
+function xferCandidateFromLots(ser, lots, start) {
+  const nums = lots.map((l) => Number(l.number)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  const from = nums.length ? nums[0] : (ser ? ser.lo : 0);
+  const to = nums.length ? nums[nums.length - 1] : (start != null ? Number(start) - 1 : from);
+  return {
+    key: ser && ser.key,
+    ser,
+    start: start != null ? Number(start) : null,
+    from,
+    to,
+    lots,
+    count: lots.length,
+    label: from + '–' + to
   };
+}
+
+function xferCandidates(machineId, half) {
+  const h = half || state.currentHalf;
+  const out = [];
+  const seen = new Set();
+  const cur = currentOf(machineId, h);
+  const curSer = cur != null ? seriesOf(cur, h) : null;
+  const segs = pathEntry(machineId, h).segs || [];
+  const starts = [];
+  for (const seg of segs) {
+    if (seg && seg.start != null) {
+      const ser = seriesOf(seg.start, h) || (seg.key ? { key: seg.key, lo: seg.lo, hi: seg.hi } : null);
+      if (ser) starts.push({ ser, start: Number(seg.start) });
+    }
+  }
+  if (curSer) {
+    const s = seriesStart(machineId, h, curSer);
+    if (s != null && !starts.some((x) => x.ser.key === curSer.key)) starts.push({ ser: curSer, start: s });
+  }
+  const ordered = [];
+  if (curSer) {
+    const hit = starts.find((x) => x.ser.key === curSer.key);
+    if (hit) ordered.push(hit);
+  }
+  for (const x of starts) {
+    if (!ordered.some((y) => y.ser.key === x.ser.key)) ordered.push(x);
+  }
+  for (const { ser, start } of ordered) {
+    const lots = wrapLotsBeforeStart(machineId, h, ser, start);
+    if (!lots.length) continue;
+    seen.add(ser.key);
+    out.push(xferCandidateFromLots(ser, lots, start));
+  }
+  // Received wrap segments can be sent onward (including back to the original 台),
+  // even when this 台's start is the series first number (so wrap-before-start is empty).
+  const recs = pathEntry(machineId, h).received || [];
+  for (const rec of recs) {
+    if (!rec || seen.has(rec.key)) continue;
+    const lots = [];
+    for (const id of rec.ids || []) {
+      const lot = (state.lots || []).find((l) => l.id === id);
+      if (!lot || lot.machineId !== machineId) continue;
+      if (lot.status !== 'pending' || lot.secondMarket) continue;
+      lots.push(lot);
+    }
+    if (!lots.length) continue;
+    const ser = (lots[0] && seriesOf(lots[0].number, h)) || rec.ser || null;
+    if (!ser) continue;
+    seen.add(ser.key);
+    const cand = xferCandidateFromLots(ser, lots, rec.start != null ? rec.start : seriesStart(machineId, h, ser));
+    if (rec.from != null) cand.from = rec.from;
+    if (rec.to != null) cand.to = rec.to;
+    cand.label = cand.from + '–' + cand.to;
+    out.push(cand);
+  }
+  return out;
+}
+
+function xferEmptyMessage(machineId, half) {
+  const h = half || state.currentHalf;
+  const cands = xferCandidates(machineId, h);
+  if (cands.length) return null;
+  const cur = currentOf(machineId, h);
+  const curSer = cur != null ? seriesOf(cur, h) : null;
+  const start = curSer ? seriesStart(machineId, h, curSer) : null;
+  const hasAnyStart = (pathEntry(machineId, h).segs || []).some((s) => s && s.start != null) || start != null;
+  if (!hasAnyStart) return '請先設定這段起點（長按「現在」）。還沒有起點時，無法判斷哪一段是前面要轉走的號碼。';
+  return '這台目前沒有起點前面的未拍號碼可轉。';
+}
+
+function openXfer(machineId) {
+  const half = state.currentHalf;
+  const candidates = xferCandidates(machineId, half);
+  const empty = xferEmptyMessage(machineId, half);
+  modal = {
+    type: 'xfer',
+    srcId: machineId,
+    half,
+    candidates,
+    candKey: candidates.length === 1 ? candidates[0].key : null,
+    empty
+  };
+  render();
+}
+
+function pickXferRange(key) {
+  if (!modal || modal.type !== 'xfer') return;
+  modal.candKey = key;
+  render();
+}
+
+function confirmXfer(srcId, destId, key) {
+  doXfer(srcId, destId, state.currentHalf, key);
+}
+
+function doXfer(srcId, destId, half, key) {
+  const h = half || state.currentHalf;
+  if (!srcId || !destId || srcId === destId) return;
+  const cands = (modal && modal.type === 'xfer' && modal.srcId === srcId && Array.isArray(modal.candidates))
+    ? modal.candidates
+    : xferCandidates(srcId, h);
+  const cand = key
+    ? cands.find((c) => c.key === key)
+    : (cands.length === 1 ? cands[0] : null);
+  if (!cand || !cand.lots || !cand.lots.length) {
+    modal = null;
+    toast('沒有可轉的號碼');
+    render();
+    return;
+  }
+  modal = null;
+  const snapPath = structuredClone(state.seriesPath);
+  const lots = cand.lots.slice();
+  const moved = moveLotsToMachine(lots, destId, h);
+  const ser = cand.ser;
+  if (ser && !machineIsRunningSeries(destId, h, ser) && seriesStart(destId, h, ser) == null) {
+    setSeriesStart(destId, ser.lo, h);
+  }
+  const destEntry = pathEntry(destId, h);
+  destEntry.received = (destEntry.received || []).filter((r) => r && r.key !== (ser && ser.key));
+  destEntry.received.push({
+    key: ser ? ser.key : cand.key,
+    ids: moved.map((r) => r.id),
+    from: cand.from,
+    to: cand.to,
+    start: ser ? ser.lo : null,
+    ts: Date.now()
+  });
+  destEntry.ts = Date.now();
   saveState();
   offerUndo({
-    kind: 'merge-machine',
+    kind: 'xfer-wrap',
     moved,
     srcId,
     destId,
     half: h,
-    merge: prevMerge,
     seriesPath: snapPath
-  }, '已轉到' + columnTitleOf(destId, h));
-  render();
-}
-
-function undoMergeFromBanner(srcId) {
-  const half = state.currentHalf;
-  ensurePathStore(half);
-  const info = state.machineMerges[half][srcId];
-  if (!info) return;
-  for (const row of info.moved || []) {
-    const lot = (state.lots || []).find((l) => l.id === row.id);
-    if (lot && lot.status === 'pending' && !lot.secondMarket) {
-      lot.machineId = row.machineId || srcId;
-      if (typeof BidSyncCore !== 'undefined' && BidSyncCore.stamp) {
-        BidSyncCore.stamp(lot, BidSyncCore.LOT_FIELDS, Date.now(), state.peerId || '');
-      }
-    }
-  }
-  state.machineMerges[half][srcId] = { into: null, ts: Date.now() };
-  saveState();
-  toast('已復原');
+  }, '已把 ' + cand.label + ' 轉到' + columnTitleOf(destId, h));
   render();
 }
 
@@ -5716,7 +5845,7 @@ function setCurrent(machineId, value) {
     return;
   }
   const snap = snapshotProgress(machineId, half);
-  setProgress(machineId, next, half);
+  setProgress(machineId, next, half, { typed: true });
   offerUndo(snap, next == null ? '已清除進度' : `${next}　已設為現在進度`);
   render();
   offerAdoptIfNeeded();
@@ -6727,9 +6856,7 @@ function renderLive() {
   }
   const unmovedPieces = unmovedQty(allToday);
 
-  const merges = (state.machineMerges && state.machineMerges[half]) || {};
-  const activeMachines = (state.machines[half] || []).filter((m) => !merges[m.id] || !merges[m.id].into);
-  const mergedMachines = (state.machines[half] || []).filter((m) => merges[m.id] && merges[m.id].into);
+  const activeMachines = state.machines[half] || [];
 
   const cols = activeMachines
     .map((m) => {
@@ -6828,15 +6955,6 @@ function renderLive() {
     })
     .join('');
 
-  const mergeBanners = mergedMachines.map((m) => {
-    const info = merges[m.id];
-    const dest = columnTitleOf(info.into, half);
-    const src = columnTitle(m, half);
-    return `<div class="merge-banner">
-      <span>${escapeHtml(src)}已轉到${escapeHtml(dest)}</span>
-      <button type="button" data-act="undo-merge" data-id="${escapeHtml(m.id)}">復原</button>
-    </div>`;
-  }).join('');
 
   const empty = allToday.length === 0
     ? '<div class="live-empty">到「抄號」把紙上的號碼存進來，各台會並排顯示。</div>'
@@ -6857,7 +6975,6 @@ function renderLive() {
           : ''}
         <button type="button" class="live-sheet-btn" data-act="open-second">清單</button>
       </div>
-      ${mergeBanners ? `<div class="merge-banners">${mergeBanners}</div>` : ''}
       <div class="live-cols" data-n="${activeMachines.length}">${cols || '<div class="empty-hint">請先在設定裡確認台別</div>'}</div>
       ${empty}
     </div>`;
@@ -7156,15 +7273,45 @@ function renderModal() {
   if (modal.type === 'xfer') {
     const half = modal.half || state.currentHalf;
     const srcId = modal.srcId;
-    const pending = columnLots(srcId, half).filter((l) => l.status === 'pending' && !l.secondMarket);
+    const cands = modal.candidates || [];
+    const empty = modal.empty;
     const others = (state.machines[half] || []).filter((m) => m.id !== srcId);
     const destBtns = others.length
       ? others.map((m) => `<button type="button" class="btn primary xfer-dest" data-act="xfer-to" data-id="${escapeHtml(m.id)}">轉到${escapeHtml(columnTitle(m, half))}</button>`).join('')
       : '<p>沒有其他台可以轉。</p>';
+    if (empty && !cands.length) {
+      return `<div class="overlay" data-act="modal-cancel">
+        <div class="sheet" data-stop="1">
+          <h3>轉台</h3>
+          <p>${escapeHtml(empty)}</p>
+          <div class="sheet-actions">
+            <button type="button" class="btn" data-act="modal-cancel">知道了</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (!modal.candKey && cands.length > 1) {
+      const rangeBtns = cands.map((c) => (
+        `<button type="button" class="btn primary xfer-dest" data-act="xfer-pick" data-key="${escapeHtml(c.key)}">${escapeHtml(c.label)} 未拍 ${c.count} 筆</button>`
+      )).join('');
+      return `<div class="overlay" data-act="modal-cancel">
+        <div class="sheet" data-stop="1">
+          <h3>轉台</h3>
+          <p>要轉哪一段？這是各段起點前面還沒拍的號碼。</p>
+          <div class="sheet-actions" style="flex-direction:column;gap:10px">${rangeBtns}
+            <button type="button" class="btn" data-act="modal-cancel">取消</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    const cand = cands.find((c) => c.key === modal.candKey) || cands[0];
+    const head = cand
+      ? (cand.label + ' 未拍 ' + cand.count + ' 筆 移到哪一台？')
+      : '移到哪一台？';
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet" data-stop="1">
         <h3>轉台</h3>
-        <p>${escapeHtml(columnTitleOf(srcId, half))}還沒拍的 ${pending.length} 筆會移過去。已標過的留在原台。</p>
+        <p>${escapeHtml(head)}</p>
         <div class="sheet-actions" style="flex-direction:column;gap:10px">${destBtns}
           <button type="button" class="btn" data-act="modal-cancel">取消</button>
         </div>
@@ -7888,11 +8035,11 @@ function onClick(e) {
     case 'open-xfer':
       openXfer(btn.dataset.id);
       break;
-    case 'xfer-to':
-      confirmXfer(modal && modal.srcId, btn.dataset.id);
+    case 'xfer-pick':
+      pickXferRange(btn.dataset.key);
       break;
-    case 'undo-merge':
-      undoMergeFromBanner(btn.dataset.id);
+    case 'xfer-to':
+      confirmXfer(modal && modal.srcId, btn.dataset.id, modal && modal.candKey);
       break;
     case 'open-seq':
       openSeq(btn.dataset.id);
@@ -8849,6 +8996,9 @@ if (typeof window !== 'undefined') {
   window.__openXfer = openXfer;
   window.__confirmXfer = confirmXfer;
   window.__doXfer = doXfer;
+  window.__xferCandidates = xferCandidates;
+  window.__wrapLotsBeforeStart = wrapLotsBeforeStart;
+  window.__clearCollapsedMerges = clearCollapsedMerges;
   window.__bumpCurrent = bumpCurrent;
   window.__setCurrent = setCurrent;
   window.__setProgress = setProgress;
