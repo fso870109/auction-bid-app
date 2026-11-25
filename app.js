@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v89';
+const APP_VERSION = 'v90';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -7470,6 +7470,7 @@ function render() {
     restorePlanListScroll();
     restoreMainScroll();
     requestAnimationFrame(restoreMainScroll);
+    if (typeof syncMachinePickAnim === 'function') syncMachinePickAnim();
     afterRenderMotion(doSegAnim, doLotAnim);
     if (modal?.type === 'type-item') {
       const input = document.getElementById('type-item-input');
@@ -7586,6 +7587,90 @@ function renderTab() {
   return renderNote();
 }
 
+function shouldShowMachinePick() {
+  if (!state || showSettings || state.tab !== 'note') return false;
+  if (showMachinePicker) return true;
+  const parsed = draftNum ? parseInt(draftNum, 10) : null;
+  return parsed != null && Number.isFinite(parsed) && !detectMachineId(parsed, state.currentHalf);
+}
+
+let machinePickWasOpen = false;
+let machinePickAnimTok = 0;
+
+function syncMachinePickAnim() {
+  const slot = document.getElementById('machine-pick-slot');
+  const tok = ++machinePickAnimTok;
+  if (!slot) {
+    machinePickWasOpen = false;
+    return;
+  }
+  const want = shouldShowMachinePick();
+  const reduce = typeof reducedMotion === 'function' && reducedMotion();
+
+  function snap(open) {
+    slot.classList.add('no-motion');
+    slot.classList.toggle('is-open', open);
+    slot.classList.toggle('is-closed', !open);
+    slot.setAttribute('aria-hidden', open ? 'false' : 'true');
+    slot.offsetHeight;
+    slot.classList.remove('no-motion');
+  }
+
+  if (reduce) {
+    snap(want);
+    machinePickWasOpen = want;
+    return;
+  }
+
+  if (want && machinePickWasOpen) {
+    snap(true);
+    return;
+  }
+
+  if (want && !machinePickWasOpen) {
+    slot.classList.add('no-motion');
+    slot.classList.remove('is-open');
+    slot.classList.remove('is-closed');
+    slot.offsetHeight;
+    slot.classList.remove('no-motion');
+    requestAnimationFrame(() => {
+      if (machinePickAnimTok !== tok) return;
+      slot.classList.add('is-open');
+      slot.setAttribute('aria-hidden', 'false');
+    });
+    machinePickWasOpen = true;
+    return;
+  }
+
+  if (!want && machinePickWasOpen) {
+    slot.classList.add('no-motion');
+    slot.classList.add('is-open');
+    slot.classList.remove('is-closed');
+    slot.offsetHeight;
+    slot.classList.remove('no-motion');
+    const onEnd = (e) => {
+      if (e && e.propertyName && e.propertyName !== 'grid-template-rows' && e.propertyName !== 'opacity') return;
+      if (e && e.target !== slot) return;
+      slot.removeEventListener('transitionend', onEnd);
+      if (machinePickAnimTok !== tok) return;
+      if (!shouldShowMachinePick()) {
+        slot.classList.add('is-closed');
+        slot.setAttribute('aria-hidden', 'true');
+      }
+    };
+    slot.addEventListener('transitionend', onEnd);
+    requestAnimationFrame(() => {
+      if (machinePickAnimTok !== tok) return;
+      slot.classList.remove('is-open');
+    });
+    machinePickWasOpen = false;
+    return;
+  }
+
+  snap(false);
+  machinePickWasOpen = false;
+}
+
 function renderNote() {
   const num = draftNum;
   const parsed = num ? parseInt(num, 10) : null;
@@ -7673,15 +7758,17 @@ function renderNote() {
     })
     .join('');
 
-  let picker = '';
-  if (showMachinePicker || (parsed != null && !detectMachineId(parsed, state.currentHalf))) {
-    picker = `<div class="machine-pick">${state.machines[state.currentHalf]
-      .map(
-        (m) =>
-          `<button type="button" class="${draftMachineId === m.id ? 'on' : ''}" data-act="pick-machine" data-id="${m.id}">${escapeHtml(m.name)}</button>`
-      )
-      .join('')}</div>`;
-  }
+  const machineBtns = (state.machines[state.currentHalf] || [])
+    .map(
+      (m) =>
+        `<button type="button" class="${draftMachineId === m.id ? 'on' : ''}" data-act="pick-machine" data-id="${m.id}">${escapeHtml(m.name)}</button>`
+    )
+    .join('');
+  const picker = `<div class="machine-pick-slot is-closed" id="machine-pick-slot" aria-hidden="true">
+      <div class="machine-pick-clip">
+        <div class="machine-pick" role="group" aria-label="選擇台別">${machineBtns}</div>
+      </div>
+    </div>`;
 
   const sizeItem = (itemLocked && draftItem)
     ? draftItem
@@ -7724,14 +7811,16 @@ function renderNote() {
     <div class="note-screen${itemLocked ? ' item-locked' : ''}${rangeMode ? ' range-mode' : ''}">
       ${headHtml}
       ${lockBar}
-      <div class="prio-toggle note-prio" role="group" aria-label="美普交貨">
-        <span class="seg-indicator" aria-hidden="true"></span>
-        ${['must', 'watch', 'skip'].map((p) => {
-          const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
-          return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${prioLabel(p)}</button>`;
-        }).join('')}
+      <div class="note-prio-block">
+        <div class="prio-toggle note-prio" role="group" aria-label="美普交貨">
+          <span class="seg-indicator" aria-hidden="true"></span>
+          ${['must', 'watch', 'skip'].map((p) => {
+            const on = (draftPriority || state.lastPriority || 'watch') === p ? ' on' : '';
+            return `<button type="button" class="prio-${p}${on}" data-act="set-draft-prio" data-v="${p}">${prioLabel(p)}</button>`;
+          }).join('')}
+        </div>
+        ${picker}
       </div>
-      ${picker}
       ${recentHtml}
       <div class="note-body">
         <div class="keypad">${keypad}</div>
