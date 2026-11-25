@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v76';
+const APP_VERSION = 'v77';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2767,6 +2767,27 @@ function wrapDist(from, to, start, ser) {
   return b - a;
 }
 
+/* A series with a start splits into the run (n >= start) and the wrap (n < start).
+   ETA and "near" only apply when 現在 is already inside the same part as the lot. */
+function inSameStartSegment(from, to, start, ser) {
+  if (!ser || start == null) return false;
+  if (!inSeries(from, ser) || !inSeries(to, ser) || !inSeries(start, ser)) return false;
+  const s = Number(start);
+  return (Number(from) >= s) === (Number(to) >= s);
+}
+
+/* Forward count inside one start-split segment. Does not wrap around the series.
+   When start is unknown, falls back to a plain numeric difference. */
+function segmentDist(from, to, start, ser) {
+  if (start == null || !ser) {
+    const d = Number(to) - Number(from);
+    return Number.isFinite(d) ? d : null;
+  }
+  if (!inSameStartSegment(from, to, start, ser)) return null;
+  const d = Number(to) - Number(from);
+  return Number.isFinite(d) ? d : null;
+}
+
 function walkSeries(from, steps, start, ser) {
   const fromN = Number(from);
   if (!ser || start == null) {
@@ -3378,8 +3399,10 @@ function lotEtaMinutes(lot, cur) {
   if (!ser || !lotSer || ser.key !== lotSer.key) return null;
   const start = seriesStart(mid, half, ser);
   if (start == null) return null;
-  const d = wrapDist(now, lot.number, start, ser);
-  if (!Number.isFinite(d) || d <= 0) return null;
+  // Wrap lots (before 起) are a later segment. Do not pretend this 台 will
+  // finish the rest of the series first unless 現在 is already in that wrap.
+  const d = segmentDist(now, lot.number, start, ser);
+  if (d == null || !Number.isFinite(d) || d <= 0) return null;
   const rate = lotsPerMin();
   if (!(rate > 0)) return null;
   return Math.max(1, Math.round(d / rate));
@@ -5779,7 +5802,8 @@ function checkAlerts() {
       const lotSer = seriesOf(lot.number, half);
       if (!ser || !lotSer || ser.key !== lotSer.key) continue;
       const start = seriesStart(m.id, half, ser);
-      const d = start != null ? wrapDist(cur, lot.number, start, ser) : (lot.number - cur);
+      const d = segmentDist(cur, lot.number, start, ser);
+      if (d == null) continue;
       if (d >= 0 && d <= gap) {
         const key = `${state.day}:${lot.id}:${d === 0 ? 'now' : 'near'}`;
         if (!state.alerted[key]) {
@@ -6466,15 +6490,37 @@ function fitItemBtnLabels() {
 }
 
 function fitLotCellNames() {
+  // Names stay at the CSS size in every row. Long names ellipsis; never shrink
+  // to make room for an ETA chip or a tight cell.
   document.querySelectorAll('.lot-cell .cell-item-name').forEach((el) => {
     el.style.fontSize = '';
-    let size = parseFloat(getComputedStyle(el).fontSize) || 16;
-    const min = 11;
-    const maxH = size * 3.3;
-    while (size > min && (el.scrollWidth > el.clientWidth + 0.5 || el.scrollHeight > maxH + 0.5)) {
-      size -= 0.5;
-      el.style.fontSize = size + 'px';
+  });
+}
+
+function fitLotCellEtas() {
+  document.querySelectorAll('.lot-cell .eta-badge').forEach((el) => {
+    el.style.display = '';
+    const top = el.closest('.cell-top');
+    if (!top) {
+      el.style.display = 'none';
+      return;
     }
+    const er = el.getBoundingClientRect();
+    const tr = top.getBoundingClientRect();
+    const wrap = top.querySelector('.num-sub-wrap');
+    const wr = wrap ? wrap.getBoundingClientRect() : null;
+    const squeezed = el.scrollWidth > el.clientWidth + 0.5;
+    const overflowTop = er.right > tr.right + 0.5 || er.left < tr.left - 0.5;
+    const overlapWrap = !!(wr && er.left < wr.right - 0.5);
+    if (squeezed || overflowTop || overlapWrap || er.width < 28) el.style.display = 'none';
+  });
+}
+
+function updateLiveListOverflow() {
+  document.querySelectorAll('.live-col-list').forEach((el) => {
+    const max = el.scrollHeight - el.clientHeight;
+    el.classList.toggle('can-scroll-more', max > 2 && el.scrollTop < max - 2);
+    el.classList.toggle('can-scroll-up', el.scrollTop > 2);
   });
 }
 
@@ -6542,7 +6588,13 @@ function render() {
       try { input.setSelectionRange(len, len); } catch { /* ignore */ }
     }
   }
-  if (state.tab === 'live' && !showSettings) requestAnimationFrame(fitLotCellNames);
+  if (state.tab === 'live' && !showSettings) {
+    requestAnimationFrame(() => {
+      fitLotCellNames();
+      fitLotCellEtas();
+      updateLiveListOverflow();
+    });
+  }
   if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
   if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
   requestAnimationFrame(fitItemBtnLabels);
@@ -6793,11 +6845,10 @@ function renderLive() {
               const over = isPassed(l, cur) || (l.status === 'pending' && l.secondMarket && cur != null && isPassed({ ...l, secondMarket: false }, cur));
               const isNext = next && l.id === next.id;
               const lotSer = seriesOf(l.number, half);
-              const d = (cur != null && l.status === 'pending' && !l.secondMarket && ser && lotSer && ser.key === lotSer.key && startN != null)
-                ? wrapDist(cur, l.number, startN, ser)
-                : (cur != null && l.status === 'pending' && !l.secondMarket && ser && lotSer && ser.key === lotSer.key)
-                  ? (l.number - cur)
-                  : null;
+              const pathStart = ser ? seriesStart(m.id, half, ser) : null;
+              const d = (cur != null && l.status === 'pending' && !l.secondMarket && ser && lotSer && ser.key === lotSer.key)
+                ? segmentDist(cur, l.number, pathStart, ser)
+                : null;
               const near = d != null && d >= 0 && d <= gapN;
               const prio = lotPriority(l);
               let cls = `lot-cell prio-${prio}${peelClass(l.item)}`;
@@ -6833,8 +6884,9 @@ function renderLive() {
                 <span class="cell-main">
                   <span class="cell-top">
                     ${lotNumHtml(l, { edit: true, numClass: 'cell-num' })}
+                    ${etaHtml}
                   </span>
-                  <span class="cell-item-row">${item}${etaHtml}<span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span></span>
+                  <span class="cell-item-row">${item}<span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span></span>
                 </span>
               </button>`;
             })
@@ -8632,6 +8684,10 @@ function bind() {
     window.visualViewport.addEventListener('scroll', syncViewportHeight);
   }
   document.addEventListener('click', (e) => { syncWakeLock(); onClick(e); maybeReloadForNewSW(); maybeRollAuctionDay(); });
+  document.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains('live-col-list')) updateLiveListOverflow();
+  }, true);
   document.addEventListener('input', onInput);
   document.addEventListener('change', onInput);
   window.addEventListener('popstate', onPlanPopState);
@@ -8816,6 +8872,10 @@ if (typeof window !== 'undefined') {
   window.__seriesPos = seriesPos;
   window.__wrapIsBehind = wrapIsBehind;
   window.__wrapDist = wrapDist;
+  window.__inSameStartSegment = inSameStartSegment;
+  window.__segmentDist = segmentDist;
+  window.__lotEtaMinutes = lotEtaMinutes;
+  window.__lotEtaLabel = lotEtaLabel;
   window.__walkSeries = walkSeries;
   window.__isPassed = isPassed;
   window.__columnLots = columnLots;

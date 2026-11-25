@@ -2018,14 +2018,17 @@ html.is-dragging .live-col-list {
   min-width: 0;
 }
 .live-col-foot {
+  position: relative;
+  z-index: 3;
   flex: 0 0 auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 8px 4px 10px;
   border-top: 1px solid var(--line);
   background: #141414;
-  z-index: 2;
+  box-shadow: 0 -1px 0 #141414;
 }
 .live-cur-row {
   display: flex;
@@ -2259,11 +2262,13 @@ html.is-dragging .live-col-list {
 }
 .prog-pop .linkish { font-size: 12px; font-weight: 800; white-space: nowrap; }
 .live-col-list {
+  position: relative;
+  z-index: 0;
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 3px;
+  padding: 3px 3px 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2273,7 +2278,38 @@ html.is-dragging .live-col-list {
   user-select: none;
   -webkit-touch-callout: none;
 }
-.live-col-list::-webkit-scrollbar { width: 0; }
+/* Flex overflow containers often drop padding-bottom; a trailing spacer lets
+   the last row scroll fully into view above the footer with a clear gap. */
+.live-col-list::after {
+  content: "";
+  display: block;
+  flex: 0 0 10px;
+  height: 10px;
+  width: 100%;
+  pointer-events: none;
+}
+.live-col-list::-webkit-scrollbar { width: 3px; }
+.live-col-list::-webkit-scrollbar-track { background: transparent; }
+.live-col-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.32);
+  border-radius: 2px;
+}
+.live-col-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.32) transparent;
+}
+.live-col-list.can-scroll-more {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 20px), transparent 100%);
+}
+.live-col-list.can-scroll-up {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 16px, #000 100%);
+}
+.live-col-list.can-scroll-more.can-scroll-up {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16px, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 16px, #000 calc(100% - 20px), transparent 100%);
+}
 .col-empty {
   color: var(--dim);
   font-size: 11px;
@@ -2402,7 +2438,7 @@ button.lot-cell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  max-width: 46%;
+  margin-left: auto;
   height: 16px;
   padding: 0 4px;
   border-radius: 4px;
@@ -2413,8 +2449,6 @@ button.lot-cell {
   letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .lot-cell.passed .eta-badge { color: #c8b84a; }
 .cell-item {
@@ -2435,6 +2469,8 @@ button.lot-cell {
 .cell-item-name {
   display: block;
   min-width: 0;
+  font-size: inherit;
+  font-weight: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
