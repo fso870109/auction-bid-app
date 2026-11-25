@@ -1311,10 +1311,13 @@ input:focus, textarea:focus {
   flex: 0 0 auto;
   flex-wrap: nowrap;
   overflow-x: auto;
-  gap: 4px;
+  gap: 5px;
   justify-content: flex-start;
-  margin: 0;
-  padding: 4px 0 0;
+  margin: 4px 0 0;
+  padding: 5px 5px;
+  background: #1e3c42;
+  border: 1px solid #5a9aa4;
+  border-radius: 12px;
   transform: translateY(-8px);
   transition: transform 220ms ease;
   -webkit-overflow-scrolling: touch;
@@ -1324,11 +1327,31 @@ input:focus, textarea:focus {
 }
 .note-screen .machine-pick button {
   flex: 1 1 0;
-  min-height: 32px;
-  padding: 2px 6px;
-  font-size: 12px;
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: 800;
   border-radius: 999px;
   white-space: nowrap;
+  background: #e8eef2;
+  color: #102028;
+  border: 1px solid #8aa4ac;
+}
+.note-screen .machine-pick button:active {
+  background: #c5d2d8;
+  color: #102028;
+  border-color: #6a868e;
+}
+.note-screen .machine-pick button.on {
+  background: #0e7480;
+  color: #f3fffe;
+  border: 2px solid #d8f6f8;
+  box-shadow: 0 0 0 1px #0e7480;
+  font-weight: 900;
+}
+.note-screen .machine-pick button.on:active {
+  background: #0a5c66;
+  color: #f3fffe;
 }
 @media (prefers-reduced-motion: reduce) {
   .machine-pick-slot,
