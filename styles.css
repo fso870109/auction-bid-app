@@ -2040,19 +2040,33 @@ html.is-dragging .live-col-list {
 .live-col-foot .live-cur {
   flex: 0 0 auto;
   display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 4px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
   width: 100%;
   min-width: 0;
-  min-height: 34px;
-  padding: 4px 2px 2px;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
+  padding: 2px 2px 0;
   border-radius: 6px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   color: var(--yellow);
 }
 .live-col-foot .live-cur:active { background: var(--bg-press); }
+.cur-now-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  flex: 0 0 32px;
+}
 .cur-now-lbl {
   flex: 0 0 auto;
   font-size: 11px;
@@ -2071,6 +2085,26 @@ html.is-dragging .live-col-list {
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+.live-info-lbl {
+  display: block;
+  width: 100%;
+  height: 16px;
+  min-height: 16px;
+  flex: 0 0 16px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #ffe18a;
+  letter-spacing: 0;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live-info-lbl.empty {
+  color: transparent;
+}
 .cur-step {
   flex: 1 1 0;
   width: auto;
@@ -2086,29 +2120,13 @@ html.is-dragging .live-col-list {
   color: var(--text);
 }
 .cur-step:active { background: var(--bg-press); }
-.live-col-foot .live-cur { flex-wrap: wrap; }
-.live-start-lbl,
-.live-plan-lbl {
-  display: block;
-  width: 100%;
-  text-align: center;
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--muted);
-  line-height: 1.2;
-}
-.live-plan-lbl {
-  color: #ffe18a;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-}
 .live-foot-actions {
   display: flex;
   align-items: stretch;
   gap: 8px;
 }
 .xfer-btn,
-.seq-btn {
+.start-btn {
   flex: 1 1 0;
   min-width: 0;
   min-height: 48px;
@@ -2122,7 +2140,7 @@ html.is-dragging .live-col-list {
   color: var(--text);
 }
 .xfer-btn:active,
-.seq-btn:active { background: var(--bg-press); }
+.start-btn:active { background: var(--bg-press); }
 .merge-banners {
   flex: 0 0 auto;
   display: flex;
@@ -2199,13 +2217,14 @@ html.is-dragging .live-col-list {
 .xfer-dest { width: 100%; min-height: 52px; font-size: 20px; font-weight: 900; }
 @media (max-height: 640px) {
   .live-col-foot { gap: 6px; padding: 6px 3px 8px; }
-  .live-col-foot .live-cur { min-height: 30px; padding: 3px 2px 1px; }
+  .live-col-foot .live-cur { height: 46px; min-height: 46px; max-height: 46px; padding: 1px 2px 0; gap: 1px; }
+  .cur-now-row { height: 28px; min-height: 28px; flex-basis: 28px; }
   .cur-now-num { font-size: clamp(22px, 6.2vw, 26px); }
+  .live-info-lbl { height: 15px; min-height: 15px; flex-basis: 15px; line-height: 15px; font-size: 13px; }
   .live-cur-row { gap: 6px; }
   .cur-step { min-height: 56px; font-size: 26px; }
   .live-foot-actions { gap: 6px; }
-  .xfer-btn, .seq-btn { min-height: 44px; font-size: 18px; }
-  .live-start-lbl, .live-plan-lbl { font-size: 12px; }
+  .xfer-btn, .start-btn { min-height: 44px; font-size: 18px; }
 }
 .prog-pop {
   position: absolute;
@@ -2266,8 +2285,10 @@ html.is-dragging .live-col-list {
   display: flex;
   flex-direction: row;
   align-items: stretch;
+  flex: 0 0 auto;
   min-height: 54px;
-  height: auto;
+  height: 54px;
+  max-height: 54px;
   padding: 0 3px 0 0;
   border-radius: 6px;
   background: var(--bg-elev);
@@ -2370,46 +2391,53 @@ button.lot-cell {
 }
 .cell-item-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 4px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   width: 100%;
 }
 .eta-badge {
   flex: 0 0 auto;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 46%;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 225, 0, 0.14);
+  font-size: 11px;
   font-weight: 800;
   color: var(--yellow);
-  letter-spacing: 0.02em;
-  line-height: 1.2;
+  letter-spacing: 0;
+  line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lot-cell.passed .eta-badge { color: #c8b84a; }
 .cell-item {
   display: block;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
   width: auto;
   font-size: clamp(15px, 4.4vw, 18px);
   font-weight: 800;
   color: var(--muted);
-  line-height: 1.2;
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin: 0;
 }
 .cell-item-name {
   display: block;
   min-width: 0;
   overflow: hidden;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .size-badge {
   flex: 0 0 auto;

@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -625,7 +625,6 @@ let resultFilter = 'all';
 let deferredInstall = null;
 let editCurrent = null; // { half, machineId, value }
 let editStart = null; // { half, machineId, value }
-let seqEdit = null; // { half, machineId, entries, draft }
 let draftItem = '';
 let itemLocked = false;
 let rangeMode = false;
@@ -2600,6 +2599,23 @@ function clearCollapsedMerges(st) {
   }
 }
 
+function clearSavedSeriesPlans(st) {
+  st = st || state;
+  if (!st) return;
+  const now = Date.now();
+  const out = defaultSeriesPlans(st.machines);
+  const prev = st.seriesPlans && typeof st.seriesPlans === 'object' ? st.seriesPlans : {};
+  for (const half of Object.keys(out)) {
+    const ids = new Set(Object.keys(out[half] || {}));
+    const src = prev[half] && typeof prev[half] === 'object' ? prev[half] : {};
+    Object.keys(src).forEach((id) => ids.add(id));
+    out[half] = out[half] || {};
+    ids.forEach((id) => { out[half][id] = { entries: [], ts: now }; });
+  }
+  st.seriesPlans = out;
+}
+
+
 function defaultSeriesPlans(machines) {
   const out = { fruit: {}, morning: {}, afternoon: {} };
   for (const half of HALVES) {
@@ -2714,12 +2730,27 @@ function seriesStart(machineId, half, ser) {
   const segs = pathEntry(machineId, half).segs;
   const hit = segs.filter((s) => s && s.key === ser.key).pop();
   if (hit && hit.start != null && Number.isFinite(Number(hit.start))) return Number(hit.start);
-  const planned = plannedEntries(machineId, half);
-  for (const n of planned) {
-    const p = seriesOf(n, half);
-    if (p && p.key === ser.key) return n;
+  return null;
+}
+
+function displayStartOf(machineId, half) {
+  const h = half || (state && state.currentHalf);
+  const cur = currentOf(machineId, h);
+  const ser = cur != null ? seriesOf(cur, h) : null;
+  if (ser) {
+    const s = seriesStart(machineId, h, ser);
+    if (s != null) return s;
+  }
+  const segs = pathEntry(machineId, h).segs || [];
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const seg = segs[i];
+    if (seg && seg.start != null && Number.isFinite(Number(seg.start))) return Number(seg.start);
   }
   return null;
+}
+
+function liveInfoLabel(startN) {
+  return startN != null && Number.isFinite(Number(startN)) ? ('起 ' + Number(startN)) : '';
 }
 
 function wrapIsBehind(n, cur, start, ser) {
@@ -2805,12 +2836,7 @@ function ensureSeriesPath(machineId, n, half, opts) {
     entry.ts = nowDate().getTime();
     return { changedSeries: true, started: false, resumed: true, ser, start: existing.start };
   }
-  const planned = plannedEntries(machineId, h).find((x) => {
-    const p = seriesOf(x, h);
-    return p && p.key === ser.key;
-  });
-  const start = opts.start != null ? Number(opts.start)
-    : (planned != null ? planned : Number(n));
+  const start = opts.start != null ? Number(opts.start) : Number(n);
   entry.segs.push({
     key: ser.key, lo: ser.lo, hi: ser.hi, start, at: nowDate().getTime(), lastCur: null
   });
@@ -3061,6 +3087,10 @@ function loadState() {
     if (!merged.machinesMigratedXferV75) {
       clearCollapsedMerges(merged);
       merged.machinesMigratedXferV75 = true;
+    }
+    if (!merged.machinesMigratedSeqV76) {
+      clearSavedSeriesPlans(merged);
+      merged.machinesMigratedSeqV76 = true;
     }
     merged.planItems = normalizePlanItems(merged.planItems);
     merged.boughtHistory = normalizeBoughtHistory(merged.boughtHistory);
@@ -3439,21 +3469,9 @@ function lotOrderTuple(lot, machineId, half) {
   const curSer = cur != null ? seriesOf(cur, h) : null;
   const lotSer = seriesOf(lot.number, h);
   const segs = pathEntry(machineId, h).segs || [];
-  const plan = plannedEntries(machineId, h);
   if (curSer && lotSer && lotSer.key === curSer.key) {
     const start = seriesStart(machineId, h, curSer) ?? curSer.lo;
     return [0, seriesPos(lot.number, start, lotSer) ?? 0, lot.createdAt || 0];
-  }
-  let planIdx = -1;
-  if (lotSer) {
-    planIdx = plan.findIndex((n) => {
-      const s = seriesOf(n, h);
-      return s && s.key === lotSer.key;
-    });
-  }
-  if (planIdx >= 0) {
-    const start = seriesStart(machineId, h, lotSer) ?? plan[planIdx];
-    return [1 + planIdx, seriesPos(lot.number, start, lotSer) ?? 0, lot.createdAt || 0];
   }
   const idx = lotSer ? segs.findIndex((s) => s.key === lotSer.key) : -1;
   if (idx >= 0) {
@@ -5249,92 +5267,6 @@ function doXfer(srcId, destId, half, key) {
   render();
 }
 
-function openSeq(machineId) {
-  const half = state.currentHalf;
-  seqEdit = { machineId, half, entries: plannedEntries(machineId, half).slice(), draft: '' };
-  modal = { type: 'seq' };
-  render();
-}
-
-function addSeqDraft() {
-  if (!seqEdit) return;
-  const n = parseInt(seqEdit.draft, 10);
-  if (!Number.isFinite(n) || n < 1) return;
-  if (!seqEdit.entries.includes(n)) seqEdit.entries.push(n);
-  seqEdit.draft = '';
-  render();
-}
-
-function commitSeq() {
-  if (!seqEdit) return;
-  const mid = seqEdit.machineId;
-  const half = seqEdit.half || state.currentHalf;
-  let entries = (seqEdit.entries || []).slice();
-  const draft = parseInt(seqEdit.draft, 10);
-  if (Number.isFinite(draft) && draft >= 1 && !entries.includes(draft)) entries.push(draft);
-  entries = entries.filter((n) => Number.isFinite(n) && n >= 1);
-  seqEdit = null;
-  modal = null;
-  const prevPlan = structuredClone(planEntry(mid, half));
-  const snapPath = structuredClone(state.seriesPath);
-  ensurePathStore(half);
-  state.seriesPlans[half][mid] = { entries, ts: Date.now() };
-  for (const n of entries) {
-    const ser = seriesOf(n, half);
-    if (ser && seriesStart(mid, half, ser) == null) setSeriesStart(mid, n, half);
-  }
-  const toMove = lotsInSeriesOnOthersForPlan(mid, half, entries);
-  if (!toMove.length) {
-    saveState();
-    offerUndo({
-      kind: 'series-plan',
-      machineId: mid,
-      half,
-      prevPlan,
-      moved: [],
-      seriesPath: snapPath
-    }, entries.length ? '已記住順序 ' + entries.join(' → ') : '已清除順序');
-    render();
-    return;
-  }
-  modal = {
-    type: 'confirm',
-    title: '依順序移過來？',
-    body: '把這份順序裡還沒拍的 ' + toMove.length + ' 筆移到' + columnTitleOf(mid, half) + '？已標過的留在原台。',
-    ok: '移過來',
-    cancel: '只要順序',
-    onOk: () => {
-      modal = null;
-      const moved = moveLotsToMachine(toMove, mid, half);
-      saveState();
-      offerUndo({
-        kind: 'series-plan',
-        machineId: mid,
-        half,
-        prevPlan,
-        moved,
-        seriesPath: snapPath
-      }, '已記住順序，並移入 ' + moved.length + ' 筆');
-      render();
-    },
-    onCancel: () => {
-      modal = null;
-      saveState();
-      offerUndo({
-        kind: 'series-plan',
-        machineId: mid,
-        half,
-        prevPlan,
-        moved: [],
-        seriesPath: snapPath
-      }, '已記住順序 ' + entries.join(' → '));
-      render();
-    }
-  };
-  render();
-}
-
-
 function ensureAutoAnchors() {
   if (!autoAdvanceOn() || !state) return false;
   let changed = false;
@@ -5783,9 +5715,9 @@ function bumpCurrent(machineId, delta) {
   let cur = currentOf(machineId, half);
   const snap = snapshotProgress(machineId, half);
   if (cur == null) {
-    const planned = plannedEntries(machineId, half);
+    const explicit = displayStartOf(machineId, half);
     const m = machineById(machineId, half);
-    const start = planned[0] ?? (m?.ranges || []).find((r) => r.start != null)?.start;
+    const start = explicit ?? (m?.ranges || []).find((r) => r.start != null)?.start;
     cur = start ?? 0;
     const next = clampProgress(cur);
     setProgress(machineId, next, half);
@@ -5797,14 +5729,6 @@ function bumpCurrent(machineId, delta) {
   const ser = seriesOf(cur, half);
   const start = ser ? (seriesStart(machineId, half, ser) ?? cur) : null;
   if (ser && start != null && delta > 0 && seriesAtEnd(machineId, half, cur)) {
-    const nxt = nextPlannedEntry(machineId, half, cur);
-    if (nxt != null) {
-      setProgress(machineId, nxt, half);
-      offerUndo(snap, `下一段 ${nxt}`);
-      render();
-      offerAdoptIfNeeded();
-      return;
-    }
     toast('這段已到尾，點「現在」輸入下一段號碼');
     return;
   }
@@ -5812,14 +5736,6 @@ function bumpCurrent(machineId, delta) {
   if (ser && start != null) {
     const walked = walkSeries(cur, delta, start, ser);
     if (walked.capped && delta > 0) {
-      const nxt = nextPlannedEntry(machineId, half, cur);
-      if (nxt != null) {
-        setProgress(machineId, nxt, half);
-        offerUndo(snap, `下一段 ${nxt}`);
-        render();
-        offerAdoptIfNeeded();
-        return;
-      }
       toast('這段已到尾，點「現在」輸入下一段號碼');
       return;
     }
@@ -6869,14 +6785,8 @@ function renderLive() {
       const title = columnTitle(m, half);
       const curLabel = cur == null ? '—' : String(cur);
       const ser = cur != null ? seriesOf(cur, half) : null;
-      const startN = ser ? seriesStart(m.id, half, ser) : null;
-      const startHtml = startN != null
-        ? `<span class="live-start-lbl">起 ${startN}</span>`
-        : '';
-      const plan = plannedEntries(m.id, half);
-      const planHtml = plan.length
-        ? `<span class="live-plan-lbl">${plan.map(String).join(' → ')}</span>`
-        : '';
+      const startN = displayStartOf(m.id, half);
+      const infoLabel = liveInfoLabel(startN);
       const cells = lots.length
         ? lots
             .map((l) => {
@@ -6937,18 +6847,19 @@ function renderLive() {
         <div class="live-col-list" data-id="${m.id}">${cells}</div>
         <div class="live-col-foot hand-${thumbHand()}" data-stop="1">
           <button type="button" class="live-cur hold-btn" data-act="edit-cur" data-hold="set-start" data-id="${m.id}" aria-label="輸入現在進度，長按設定這段起點">
-            <span class="cur-now-lbl">現在</span>
-            <span class="cur-now-num">${curLabel}</span>
-            ${startHtml}
+            <span class="cur-now-row">
+              <span class="cur-now-lbl">現在</span>
+              <span class="cur-now-num">${curLabel}</span>
+            </span>
+            <span class="live-info-lbl${infoLabel ? '' : ' empty'}">${infoLabel ? escapeHtml(infoLabel) : ''}</span>
           </button>
-          ${planHtml}
           <div class="live-cur-row">
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
           </div>
           <div class="live-foot-actions">
             <button type="button" class="xfer-btn" data-act="open-xfer" data-id="${m.id}">轉台</button>
-            <button type="button" class="seq-btn" data-act="open-seq" data-id="${m.id}">順序</button>
+            <button type="button" class="start-btn" data-act="open-start" data-id="${m.id}">起始</button>
           </div>
         </div>
       </section>`;
@@ -7315,38 +7226,6 @@ function renderModal() {
         <div class="sheet-actions" style="flex-direction:column;gap:10px">${destBtns}
           <button type="button" class="btn" data-act="modal-cancel">取消</button>
         </div>
-      </div>
-    </div>`;
-  }
-  if (modal.type === 'seq' || seqEdit) {
-    const ed = seqEdit;
-    if (!ed) return '';
-    const m = machineById(ed.machineId, ed.half);
-    const chips = (ed.entries || []).map((n, i) => {
-      const arrow = i ? '<span class="seq-arrow">→</span>' : '';
-      return `${arrow}<span class="seq-chip">${escapeHtml(String(n))}<button type="button" class="seq-chip-x" data-act="seq-del" data-i="${i}" aria-label="刪掉">×</button></span>`;
-    }).join('');
-    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
-    const keypad = keys
-      .map((k) => {
-        if (k === '⌫') return `<button type="button" class="key muted" data-act="seq-back">⌫</button>`;
-        if (k === 'C') return `<button type="button" class="key muted" data-act="seq-clear">清除</button>`;
-        return `<button type="button" class="key" data-act="seq-digit" data-v="${k}">${k}</button>`;
-      })
-      .join('');
-    return `<div class="overlay" data-act="seq-cancel">
-      <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
-        <h3>今天這台的順序</h3>
-        <p>${escapeHtml(m?.name || '')}　市場怎麼喊就怎麼填，例如 5060 → 6030。可改、可留空。</p>
-        <div class="seq-chips">${chips || '<span class="seq-empty">還沒填順序</span>'}</div>
-        <div class="lot-display"><div class="num${ed.draft ? '' : ' empty'}">${ed.draft ? escapeHtml(ed.draft) : '下一號'}</div></div>
-        <div class="keypad">${keypad}</div>
-        <div class="sheet-actions seq-actions">
-          <button type="button" class="btn" data-act="seq-add">加上</button>
-          <button type="button" class="btn primary" data-act="seq-ok">儲存</button>
-          <button type="button" class="btn" data-act="seq-cancel">取消</button>
-        </div>
-        ${(ed.entries || []).length ? '<button type="button" class="btn" style="width:100%;margin-top:8px" data-act="seq-wipe">清除全部</button>' : ''}
       </div>
     </div>`;
   }
@@ -8041,51 +7920,8 @@ function onClick(e) {
     case 'xfer-to':
       confirmXfer(modal && modal.srcId, btn.dataset.id, modal && modal.candKey);
       break;
-    case 'open-seq':
-      openSeq(btn.dataset.id);
-      break;
-    case 'seq-digit':
-      if (seqEdit && String(seqEdit.draft || '').length < 4) {
-        seqEdit.draft = String(seqEdit.draft || '') + v;
-        render();
-      }
-      break;
-    case 'seq-back':
-      if (seqEdit) {
-        seqEdit.draft = String(seqEdit.draft || '').slice(0, -1);
-        render();
-      }
-      break;
-    case 'seq-clear':
-      if (seqEdit) {
-        seqEdit.draft = '';
-        render();
-      }
-      break;
-    case 'seq-add':
-      addSeqDraft();
-      break;
-    case 'seq-del':
-      if (seqEdit) {
-        const i = Number(btn.dataset.i);
-        if (Number.isFinite(i)) seqEdit.entries.splice(i, 1);
-        render();
-      }
-      break;
-    case 'seq-wipe':
-      if (seqEdit) {
-        seqEdit.entries = [];
-        seqEdit.draft = '';
-        render();
-      }
-      break;
-    case 'seq-ok':
-      commitSeq();
-      break;
-    case 'seq-cancel':
-      seqEdit = null;
-      modal = null;
-      render();
+    case 'open-start':
+      openSetStart(btn.dataset.id);
       break;
     case 'ss-digit':
       if (editStart && String(editStart.value || '').length < 4) {
@@ -8985,14 +8821,13 @@ if (typeof window !== 'undefined') {
   window.__columnLots = columnLots;
   window.__ensureSeriesPath = ensureSeriesPath;
   window.__setSeriesStart = setSeriesStart;
-  window.__plannedEntries = plannedEntries;
-  window.__nextPlannedEntry = nextPlannedEntry;
+  window.__liveInfoLabel = liveInfoLabel;
+  window.__displayStartOf = displayStartOf;
+  window.__openSetStart = openSetStart;
   window.__seriesAtEnd = seriesAtEnd;
   window.__lotsInSeriesOnOtherMachines = lotsInSeriesOnOtherMachines;
   window.__lotsInSeriesOnOthersForPlan = lotsInSeriesOnOthersForPlan;
   window.__moveLotsToMachine = moveLotsToMachine;
-  window.__openSeq = openSeq;
-  window.__commitSeq = commitSeq;
   window.__openXfer = openXfer;
   window.__confirmXfer = confirmXfer;
   window.__doXfer = doXfer;
