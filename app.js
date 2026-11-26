@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v91';
+const APP_VERSION = 'v92';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -888,6 +888,7 @@ let draftSize = '';
 let draftMachineId = '';
 let planOpen = false;
 let planHistoryPushed = false;
+let paddleHistoryPushed = false;
 let planDraft = '';
 let planQty = 1;
 let planPickOpen = false;
@@ -2670,11 +2671,12 @@ function openPlan() {
   render();
 }
 
-function closePlan(fromPop) {
+function closePlan(fromPop, opts) {
   if (!planOpen) return;
   planOpen = false;
   resetPlanListScroll();
-  if (!fromPop && planHistoryPushed) {
+  const skipHistory = !!(opts && opts.skipHistory);
+  if (!fromPop && planHistoryPushed && !skipHistory) {
     planHistoryPushed = false;
     try { history.back(); } catch { /* ignore */ }
   } else {
@@ -2684,6 +2686,10 @@ function closePlan(fromPop) {
 }
 
 function onPlanPopState() {
+  if (paddleOpen) {
+    exitPaddle(true);
+    return;
+  }
   if (planOpen) closePlan(true);
 }
 
@@ -6364,8 +6370,20 @@ async function enterPaddle() {
     toast('請先設定我的承銷人代號');
     return;
   }
-  if (planOpen) closePlan();
+  let reusedPlanHist = false;
+  if (planOpen) {
+    reusedPlanHist = !!planHistoryPushed;
+    closePlan(false, reusedPlanHist ? { skipHistory: true } : undefined);
+  }
   paddleOpen = true;
+  resetPaddleTaps();
+  try {
+    if (reusedPlanHist) history.replaceState({ auctionPaddle: true }, '');
+    else history.pushState({ auctionPaddle: true }, '');
+    paddleHistoryPushed = true;
+  } catch {
+    paddleHistoryPushed = false;
+  }
   render();
   const el = document.getElementById('paddle');
   try {
@@ -6385,12 +6403,13 @@ async function enterPaddle() {
   });
 }
 
-async function exitPaddle() {
-  if (!paddleOpen && !document.fullscreenElement) {
+async function exitPaddle(fromPop) {
+  if (!paddleOpen && !document.fullscreenElement && !document.webkitFullscreenElement) {
     await unlockOrientation();
     return;
   }
   paddleOpen = false;
+  resetPaddleTaps();
   await unlockOrientation();
   try {
     if (document.fullscreenElement || document.webkitFullscreenElement) {
@@ -6399,6 +6418,12 @@ async function exitPaddle() {
     }
   } catch {
     /* ignore */
+  }
+  if (!fromPop && paddleHistoryPushed) {
+    paddleHistoryPushed = false;
+    try { history.back(); } catch { /* ignore */ }
+  } else {
+    paddleHistoryPushed = false;
   }
   syncWakeLock();
   render();
@@ -8141,7 +8166,7 @@ function renderPaddle() {
         <div id="paddle-box">
           <div id="paddle-code">${[...code].map((d) => `<span>${escapeHtml(d)}</span>`).join('')}</div>
         </div>
-        <div id="paddle-hint">點一下螢幕返回　${themeLabel(theme)}</div>
+        <div id="paddle-hint">連點兩下螢幕返回　${themeLabel(theme)}</div>
       </div>
     </div>`;
 }
@@ -8475,7 +8500,84 @@ function renderModal() {
 }
 
 /* ---------- Events ---------- */
+const PADDLE_DOUBLE_MS = 400;
+const PADDLE_DOUBLE_SLOP = 100;
+let paddleTapPrimed = null;
+let paddleTapStroke = null;
+let paddleClickShieldUntil = 0;
+
+function isPaddleThemeTarget(t) {
+  return !!(t && t.closest && t.closest('#paddle [data-act="cycle-theme"]'));
+}
+
+function resetPaddleTaps() {
+  paddleTapPrimed = null;
+  paddleTapStroke = null;
+}
+
+function onPaddleExitPointerDown(e) {
+  if (!paddleOpen) return;
+  if (e.button != null && e.button !== 0) return;
+  if (isPaddleThemeTarget(e.target)) {
+    paddleTapStroke = null;
+    return;
+  }
+  // Fullscreen: count the tap even if hit-testing misses #paddle
+  // (css-landscape rotate + overflow can retarget to <html>).
+  const p = eventPoint(e);
+  paddleTapStroke = { id: p.id, x: p.x, y: p.y, ok: true };
+}
+
+function onPaddleExitPointerMove(e) {
+  if (!paddleTapStroke || !paddleTapStroke.ok) return;
+  const p = eventPoint(e);
+  if (paddleTapStroke.id != null && p.id != null && p.id !== paddleTapStroke.id) return;
+  const dx = p.x - paddleTapStroke.x;
+  const dy = p.y - paddleTapStroke.y;
+  if (dx * dx + dy * dy > PADDLE_DOUBLE_SLOP * PADDLE_DOUBLE_SLOP) paddleTapStroke.ok = false;
+}
+
+function onPaddleExitPointerUp(e) {
+  if (e.type === 'pointercancel' || e.type === 'touchcancel') {
+    paddleTapStroke = null;
+    return;
+  }
+  if (!paddleOpen) {
+    resetPaddleTaps();
+    return;
+  }
+  if (isPaddleThemeTarget(e.target)) {
+    paddleTapStroke = null;
+    return;
+  }
+  const stroke = paddleTapStroke;
+  paddleTapStroke = null;
+  if (!stroke || !stroke.ok) {
+    paddleTapPrimed = null;
+    return;
+  }
+  const p = eventPoint(e);
+  const now = Date.now();
+  const prev = paddleTapPrimed;
+  paddleTapPrimed = { t: now, x: p.x, y: p.y };
+  if (prev && now - prev.t <= PADDLE_DOUBLE_MS) {
+    const dx = (p.x - prev.x);
+    const dy = (p.y - prev.y);
+    if (dx * dx + dy * dy <= PADDLE_DOUBLE_SLOP * PADDLE_DOUBLE_SLOP) {
+      resetPaddleTaps();
+      paddleClickShieldUntil = now + 400;
+      if (e.cancelable) e.preventDefault();
+      exitPaddle();
+    }
+  }
+}
+
 function onClick(e) {
+  if (Date.now() < paddleClickShieldUntil) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   const t = e.target;
 
   if (paddleOpen) {
@@ -8486,7 +8588,8 @@ function onClick(e) {
       cyclePaddleTheme();
       return;
     }
-    exitPaddle();
+    e.preventDefault();
+    e.stopPropagation();
     return;
   }
 
@@ -9268,10 +9371,7 @@ function onInput(e) {
 
 function onFullscreenChange() {
   if (paddleOpen && !document.fullscreenElement && !document.webkitFullscreenElement) {
-    paddleOpen = false;
-    unlockOrientation();
-    syncWakeLock();
-    render();
+    exitPaddle(false);
   } else if (paddleOpen) {
     requestAnimationFrame(() => {
       applyCssLandscapeIfNeeded();
@@ -9928,6 +10028,10 @@ function bind() {
     window.visualViewport.addEventListener('resize', syncViewportHeight);
     window.visualViewport.addEventListener('scroll', syncViewportHeight);
   }
+  document.addEventListener('pointerdown', onPaddleExitPointerDown, true);
+  document.addEventListener('pointermove', onPaddleExitPointerMove, true);
+  document.addEventListener('pointerup', onPaddleExitPointerUp, true);
+  document.addEventListener('pointercancel', onPaddleExitPointerUp, true);
   document.addEventListener('click', (e) => { syncWakeLock(); onClick(e); maybeReloadForNewSW(); maybeRollAuctionDay(); });
   document.addEventListener('pointerdown', startPressFlash, { capture: true, passive: true });
   document.addEventListener('scroll', (e) => {

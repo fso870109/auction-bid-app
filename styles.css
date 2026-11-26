@@ -1772,6 +1772,15 @@ input:focus, textarea:focus {
 #paddle {
   display: block;
   overflow: hidden;
+  touch-action: manipulation;
+}
+#paddle-stage,
+#paddle-box,
+#paddle-code,
+#paddle-code span,
+#paddle-hint,
+#paddle-bar {
+  touch-action: manipulation;
 }
 #paddle-stage {
   position: relative;
