@@ -5460,3 +5460,168 @@ html.is-dragging .item-pick {
     transition: none !important;
   }
 }
+
+
+/* ===== v93: 備註 layout — one back path, no dead vertical gaps, rows fully visible ===== */
+.plan-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: auto;
+  inset: auto;
+  width: 100%;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
+  max-height: 100dvh;
+  max-height: var(--app-h, 100dvh);
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+.plan-mid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.plan-mid .plan-body,
+.plan-screen:not(.is-picking) .plan-body,
+.sum-screen .plan-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.plan-screen.is-picking .plan-mid .plan-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  padding-bottom: 4px;
+}
+.plan-screen.is-picking .plan-sec {
+  margin-bottom: 8px;
+}
+.plan-screen.is-picking .plan-sec:last-child {
+  margin-bottom: 0;
+}
+.plan-add {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(52dvh, calc(100% - 16.5rem));
+  overflow: hidden;
+  padding: 8px 12px 8px;
+}
+.plan-add .plan-target-row,
+.plan-add .plan-grid-tabs,
+.plan-add .plan-yest,
+.plan-add .plan-input-wrap,
+.plan-add .var-sheet-head {
+  flex: 0 0 auto;
+}
+.plan-add .item-pick.plan-grid-list,
+.plan-add .plan-grid-list,
+.plan-add .plan-var-sheet {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.plan-var-sheet {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.plan-add .var-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 8px;
+}
+.plan-add .var-back {
+  min-height: 44px;
+  min-width: 72px;
+  height: auto;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--yellow);
+  border: 2px solid var(--yellow);
+  background: var(--bg-elev);
+}
+.plan-add .var-title {
+  font-size: clamp(18px, 5vw, 20px);
+  font-weight: 900;
+}
+.plan-footer {
+  display: flex;
+  flex-direction: row;
+  flex: 0 0 auto;
+  padding: 8px 12px calc(10px + var(--safe-b));
+}
+.plan-footer.hand-left,
+.plan-footer.hand-right {
+  flex-direction: row;
+}
+.plan-footer .plan-grid-toggle {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 56px;
+  height: auto;
+  padding: 0 16px;
+  border-radius: 14px;
+  font-size: clamp(18px, 5.2vw, 22px);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+.plan-screen:not(.is-picking) .plan-footer .plan-grid-toggle {
+  background: var(--yellow);
+  color: var(--yellow-text);
+  border: 2px solid var(--yellow);
+}
+.plan-screen.is-picking .plan-footer .plan-grid-toggle {
+  background: var(--bg-elev);
+  color: var(--yellow);
+  border: 2px solid var(--yellow);
+}
+.plan-body {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.plan-row {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  overflow: visible;
+}
+.plan-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.plan-qty-row,
+.plan-del {
+  flex: 0 0 auto;
+}
+.plan-remain {
+  white-space: normal;
+}
+@media (max-width: 360px) {
+  .plan-row { gap: 8px; }
+  .plan-del { padding: 0 8px; min-width: 40px; }
+}
+@media (max-height: 720px) {
+  .plan-footer .plan-grid-toggle { min-height: 52px; }
+  .plan-add { max-height: min(42dvh, calc(100% - 16.5rem)); padding: 6px 10px 6px; }
+}

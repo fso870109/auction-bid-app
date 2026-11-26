@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v92';
+const APP_VERSION = 'v93';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2902,23 +2902,24 @@ function renderPlanScreen() {
       <h1>備註</h1>
       <button type="button" class="plan-bar-link" data-act="open-summary">今日總結</button>
     </header>
-    <div class="plan-body">
-      ${(todayItems.length || !planGridOpen) ? section('今日預計', planGridOpen ? '' : '昨天記下的會留在這裡，開始新的一天也不會清掉。要一次清掉請按清除。', todayItems, 'today') : ''}
-      ${(tomorrowItems.length || !planGridOpen) ? section('明日預計', planGridOpen ? '' : '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow') : ''}
-      ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
-      ${(!planGridOpen && items.length) ? '<button type="button" class="plan-clear-all" data-act="plan-clear" data-v="all">全部清除</button>' : ''}
-    </div>
-    ${planGridOpen ? `<div class="plan-add">
-      ${targetRow}
-      ${gridBox}
-      <div class="plan-input-wrap">
-        <input id="plan-input" maxlength="40" placeholder="搜尋品項，或輸入「高麗菜 5」直接設件數" value="${escapeHtml(planDraft)}" data-act="plan-draft" inputmode="search" autocomplete="off" />
-        ${suggestBox}
+    <div class="plan-mid">
+      <div class="plan-body">
+        ${(todayItems.length || !planGridOpen) ? section('今日預計', planGridOpen ? '' : '昨天記下的會留在這裡，開始新的一天也不會清掉。要一次清掉請按清除。', todayItems, 'today') : ''}
+        ${(tomorrowItems.length || !planGridOpen) ? section('明日預計', planGridOpen ? '' : '先記下來，明天會自動變成今日預計。', tomorrowItems, 'tomorrow') : ''}
+        ${doneItems.length ? section('已完成', '', doneItems, 'done') : ''}
+        ${(!planGridOpen && items.length) ? '<button type="button" class="plan-clear-all" data-act="plan-clear" data-v="all">全部清除</button>' : ''}
       </div>
-    </div>` : ''}
+      ${planGridOpen ? `<div class="plan-add">
+        ${targetRow}
+        ${gridBox}
+        <div class="plan-input-wrap">
+          <input id="plan-input" maxlength="40" placeholder="搜尋品項，或輸入「高麗菜 5」直接設件數" value="${escapeHtml(planDraft)}" data-act="plan-draft" inputmode="search" autocomplete="off" />
+          ${suggestBox}
+        </div>
+      </div>` : ''}
+    </div>
     <div class="plan-footer hand-${thumbHand()}">
       <button type="button" class="plan-grid-toggle" data-act="toggle-plan-grid" aria-expanded="${planGridOpen ? 'true' : 'false'}">${gridToggleLabel}</button>
-      <button type="button" class="plan-back-lg" data-act="close-plan">返回</button>
     </div>
   </div>`;
 }
