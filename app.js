@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v105';
+const APP_VERSION = 'v106';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2080,11 +2080,38 @@ function resolveLotItem(item) {
   return { crop: null, variety: null };
 }
 
+/* Plan rows added from the 備註 variety sheet only keep the bare variety label
+   (白梗, 小葉 …), and several crops share one label. Compare plan and lot on
+   those labels too, so a 白梗 plan row still counts a 芹菜-白梗 lot. */
+function foldPlanText(s) {
+  return String(s || '').trim().replace(/湿/g, '濕').replace(/\s+/g, ' ');
+}
+
+function lotMatchLabels(lot, lotRes) {
+  const out = new Set();
+  const add = (v) => {
+    const t = foldPlanText(v);
+    if (t) out.add(t);
+  };
+  add(itemDisplayName(lot.item));
+  add(lot.item);
+  add(itemCellName(lot.item));
+  add(lotPlanText(lot));
+  const v = lotRes && lotRes.variety;
+  if (v) {
+    add(v.n);
+    add(v.l);
+    for (const a of v.a || []) add(a);
+  }
+  return out;
+}
+
 function planLotMatchScore(plan, lot) {
   if (!plan || !lot || !lot.item) return 0;
-  const parsed = parsePlanItemText(plan.text);
+  const parsed = parsePlanItemText(foldPlanText(plan.text));
+  const lotItem = foldPlanText(lot.item);
   const resolved = resolvePlanName(parsed.name);
-  const lotRes = resolveLotItem(lot.item);
+  const lotRes = resolveLotItem(lotItem);
   const crop = lotRes.crop;
   const variety = lotRes.variety;
   const lotSize = itemNeedsSize(lot.item) || (crop && itemNeedsSize(crop.n)) || (crop && itemNeedsSize(crop.l)) ? sizeLabel(lot.size, lot.item) : '';
@@ -2092,19 +2119,16 @@ function planLotMatchScore(plan, lot) {
     if (normalizeSize(parsed.size, lot.item) !== lotSize) return 0;
   }
   if (resolved.level === 'variety' && resolved.crop && resolved.variety) {
-    if (!crop || crop.n !== resolved.crop.n) return 0;
-    if (!variety || variety.n !== resolved.variety.n) return 0;
-    return parsed.size ? 40 : 30;
+    if (crop && crop.n === resolved.crop.n && variety && variety.n === resolved.variety.n) {
+      return parsed.size ? 40 : 30;
+    }
+  } else if (resolved.level === 'crop' && resolved.crop) {
+    if (crop && crop.n === resolved.crop.n && !(variety && isPromoVariety(crop, variety))) {
+      return parsed.size ? 20 : 10;
+    }
   }
-  if (resolved.level === 'crop' && resolved.crop) {
-    if (!crop || crop.n !== resolved.crop.n) return 0;
-    if (variety && isPromoVariety(crop, variety)) return 0;
-    return parsed.size ? 20 : 10;
-  }
-  const exacts = [itemDisplayName(lot.item), lot.item, itemCellName(lot.item), lotPlanText(lot)]
-    .map((s) => String(s || '').trim())
-    .filter(Boolean);
-  if (exacts.some((s) => s === parsed.name || s === parsed.raw)) return parsed.size ? 25 : 15;
+  const labels = lotMatchLabels(lot, lotRes);
+  if (labels.has(parsed.name) || labels.has(parsed.raw)) return parsed.size ? 25 : 15;
   return 0;
 }
 
@@ -7404,6 +7428,11 @@ function groupRankForSummary(g) {
   return i < 0 ? 9 : i;
 }
 
+function sumNumsText(nums) {
+  const sorted = (nums || []).slice().sort((x, y) => x.number - y.number);
+  return sorted.map((n) => (n.qty > 1 ? `${n.number}×${n.qty}` : String(n.number))).join('、');
+}
+
 function daySummaryData() {
   const today = (state && state.day) || todayStr();
   const won = (state.lots || []).filter((l) => l.day === today && isWon(l));
@@ -7417,9 +7446,10 @@ function daySummaryData() {
     const g = lot.item ? cropGroupOfName(lot.item) : '其他';
     if (!groups.has(g)) groups.set(g, new Map());
     const row = groups.get(g);
-    const cur = row.get(key) || { name, size, pieces: 0, lots: 0 };
+    const cur = row.get(key) || { name, size, pieces: 0, lots: 0, nums: [] };
     cur.pieces += lotQty(lot);
     cur.lots += 1;
+    cur.nums.push({ number: lot.number, qty: lotQty(lot) });
     row.set(key, cur);
     pieces += lotQty(lot);
   }
@@ -7429,65 +7459,132 @@ function daySummaryData() {
       group: g,
       items: [...rows.values()].sort((a, b) => b.pieces - a.pieces || a.name.localeCompare(b.name, 'zh-Hant'))
     }));
+
   const wonMap = assignWonToPlans();
-  const day = todayStr();
-  const remainPlans = (state.planItems || []).filter((p) => {
-    if (!p || p.done || p.forDay > day) return false;
-    return planQtyOf(p) - planWonPieces(p, wonMap) > 0;
-  }).map((p) => ({
-    text: p.text,
-    remain: planQtyOf(p) - planWonPieces(p, wonMap),
-    qty: planQtyOf(p),
-    won: planWonPieces(p, wonMap),
-    purpose: planPurposeOf(p),
-    purposeLabel: planPurposeLabel(p)
-  }));
+  const assigned = new Set();
+  for (const ids of wonMap.values()) for (const id of ids) assigned.add(id);
+  const lotById = new Map((state.lots || []).map((l) => [l.id, l]));
+  const planRows = autoManagedPlans().map((p) => {
+    const qty = planQtyOf(p);
+    const wonN = planWonPieces(p, wonMap);
+    const nums = (wonMap.get(p.id) || []).map((id) => lotById.get(id)).filter(Boolean)
+      .map((l) => ({ number: l.number, qty: lotQty(l) }));
+    return {
+      id: p.id,
+      text: p.text,
+      qty,
+      won: wonN,
+      remain: Math.max(0, qty - wonN),
+      extra: Math.max(0, wonN - qty),
+      purpose: planPurposeOf(p),
+      purposeLabel: planPurposeLabel(p),
+      manualDone: !!(p.done && p.doneBy === 'manual'),
+      nums
+    };
+  });
+  const remainPlans = planRows.filter((r) => r.remain > 0);
+  const overPlans = planRows.filter((r) => r.extra > 0);
+  const donePlans = planRows.filter((r) => r.remain === 0 && r.extra === 0);
+
+  const unGroups = new Map();
+  for (const lot of won) {
+    if (assigned.has(lot.id)) continue;
+    const name = itemDisplayName(lot.item) || lot.item || '未填品項';
+    const size = itemNeedsSize(lot.item) && sizeLabel(lot.size, lot.item) ? sizeLabel(lot.size, lot.item) : '';
+    const key = (lot.item ? name : '未填品項') + (size ? ' ' + size : '');
+    const cur = unGroups.get(key) || { name: lot.item ? name : '未填品項', size, text: lot.item ? lotPlanText(lot) : '', pieces: 0, nums: [], ids: [], skip: 0, noItem: !lot.item };
+    cur.pieces += lotQty(lot);
+    cur.nums.push({ number: lot.number, qty: lotQty(lot) });
+    cur.ids.push(lot.id);
+    if (lotPriority(lot) === 'skip') cur.skip += lotQty(lot);
+    unGroups.set(key, cur);
+  }
+  const unplanned = [...unGroups.values()].sort((a, b) => b.pieces - a.pieces || a.name.localeCompare(b.name, 'zh-Hant'));
+  const unplannedPieces = unplanned.reduce((n, r) => n + r.pieces, 0);
+
   const deliveryRemain = remainPlans.filter((p) => p.purpose === 'delivery').reduce((n, p) => n + p.remain, 0);
   const retailRemain = remainPlans.filter((p) => p.purpose !== 'delivery').reduce((n, p) => n + p.remain, 0);
+  const overPieces = overPlans.reduce((n, p) => n + p.extra, 0);
   const deliveryWonPieces = won.filter((l) => lotPriority(l) === 'skip').reduce((n, l) => n + lotQty(l), 0);
-  return { date: today, wonLots: won.length, pieces, unmovedPieces, grouped, remainPlans, deliveryRemain, retailRemain, deliveryWonPieces };
+  return {
+    date: today, wonLots: won.length, pieces, unmovedPieces, grouped,
+    remainPlans, overPlans, donePlans, unplanned, unplannedPieces, overPieces,
+    deliveryRemain, retailRemain, deliveryWonPieces
+  };
 }
 
 function daySummaryText() {
   const d = daySummaryData();
-  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`, `未搬 ${d.unmovedPieces} 件`, `交貨標到 ${d.deliveryWonPieces} 件`, `交貨還差 ${d.deliveryRemain} 件　零賣還差 ${d.retailRemain} 件`];
+  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`, `未搬 ${d.unmovedPieces} 件`, `交貨標到 ${d.deliveryWonPieces} 件`, `計劃外買到 ${d.unplannedPieces} 件　買超過 ${d.overPieces} 件`, `交貨還差 ${d.deliveryRemain} 件　零賣還差 ${d.retailRemain} 件`];
+  lines.push('', '今天買到');
   for (const g of d.grouped) {
-    lines.push('', g.group);
+    lines.push(g.group);
     for (const it of g.items) {
       const label = it.size ? `${it.name} ${it.size}` : it.name;
-      lines.push(`  ${label}　${it.pieces} 件`);
+      lines.push(`  ${label}　${it.pieces} 件　${sumNumsText(it.nums)}`);
     }
   }
+  if (!d.grouped.length) lines.push('今天還沒有標到的貨。');
   const coded = (state.lots || []).filter((l) => l.day === d.date && isWon(l) && lotSubCode(l));
   if (coded.length) {
     lines.push('');
     for (const l of coded) lines.push(`  ${lotLabel(l)}`);
   }
-  if (!d.grouped.length) lines.push('', '今天還沒有標到的貨。');
-  if (d.remainPlans.length) {
-    lines.push('', '備註還差');
-    for (const p of d.remainPlans) lines.push(`  ${p.text}　${p.purposeLabel}　還差 ${p.remain} 件`);
-  } else {
-    lines.push('', '備註：今日預計都已買齊，或還沒有備註。');
+  lines.push('', `計劃外買到（備註沒有）${d.unplanned.length ? '' : '：沒有'}`);
+  for (const r of d.unplanned) {
+    lines.push(`  ${r.size ? `${r.name} ${r.size}` : r.name}　${r.pieces} 件　${sumNumsText(r.nums)}`);
   }
+  lines.push('', `該買沒買到${d.remainPlans.length ? '' : '：沒有，都買齊了'}`);
+  for (const purpose of ['delivery', 'retail']) {
+    const list = d.remainPlans.filter((p) => p.purpose === purpose);
+    if (!list.length) continue;
+    lines.push(purpose === 'delivery' ? '交貨' : '零賣');
+    for (const p of list) lines.push(`  ${p.text}　標到 ${p.won}／預計 ${p.qty}　還差 ${p.remain} 件`);
+  }
+  lines.push('', `買超過${d.overPlans.length ? '' : '：沒有'}`);
+  for (const p of d.overPlans) lines.push(`  ${p.text}　${p.purposeLabel}　標到 ${p.won}／預計 ${p.qty}　多 ${p.extra} 件　${sumNumsText(p.nums)}`);
   return lines.join('\n');
 }
 
 function renderDaySummary() {
   if (!showDaySummary) return '';
   const d = daySummaryData();
+  const numsLine = (nums) => (nums && nums.length ? `<div class="sum-nums">號碼 ${escapeHtml(sumNumsText(nums))}</div>` : '');
   const groups = d.grouped.length
     ? d.grouped.map((g) => {
         const rows = g.items.map((it) => {
           const label = it.size ? `${escapeHtml(it.name)} <span class="sum-size">${escapeHtml(it.size)}</span>` : escapeHtml(it.name);
-          return `<div class="sum-row"><span class="sum-name">${label}</span><span class="sum-qty">${it.pieces} 件</span></div>`;
+          return `<div class="sum-row has-nums"><div class="sum-line"><span class="sum-name">${label}</span><span class="sum-qty">${it.pieces} 件</span></div>${numsLine(it.nums)}</div>`;
         }).join('');
-        return `<section class="sum-sec"><h2>${escapeHtml(g.group)}</h2>${rows}</section>`;
+        return `<section class="sum-sec"><h3 class="sum-grp">${escapeHtml(g.group)}</h3>${rows}</section>`;
       }).join('')
     : '<div class="sum-empty">今天還沒有標到的貨</div>';
-  const remain = d.remainPlans.length
-    ? d.remainPlans.map((p) => `<div class="sum-row remain"><span class="sum-name">${escapeHtml(p.text)}</span><span class="sum-purpose ${p.purpose}">${escapeHtml(p.purposeLabel)}</span><span class="sum-qty">還差 ${p.remain} 件</span></div>`).join('')
-    : '<div class="sum-empty">今日預計都已買齊，或還沒有備註</div>';
+
+  const unplanned = d.unplanned.length
+    ? d.unplanned.map((r) => {
+        const label = r.size ? `${escapeHtml(r.name)} <span class="sum-size">${escapeHtml(r.size)}</span>` : escapeHtml(r.name);
+        const add = r.noItem
+          ? ''
+          : `<button type="button" class="sum-add-btn" data-act="sum-add-plan" data-ids="${escapeHtml(r.ids.join(','))}">加到備註</button>`;
+        return `<div class="sum-row has-nums unplanned"><div class="sum-line"><span class="sum-name">${label}</span><span class="sum-qty">${r.pieces} 件</span></div>${numsLine(r.nums)}${add}</div>`;
+      }).join('')
+    : '<div class="sum-empty">沒有，買到的都在備註裡</div>';
+
+  const remainBlock = (purpose, title) => {
+    const list = d.remainPlans.filter((p) => p.purpose === purpose);
+    if (!list.length) return '';
+    const total = list.reduce((n, p) => n + p.remain, 0);
+    const rows = list.map((p) => `<div class="sum-row has-nums remain"><div class="sum-line"><span class="sum-name">${escapeHtml(p.text)}</span><span class="sum-qty">還差 ${p.remain} 件</span></div><div class="sum-nums">標到 ${p.won}／預計 ${p.qty}${p.manualDone ? '　已手動勾完成' : ''}${p.nums.length ? '　號碼 ' + escapeHtml(sumNumsText(p.nums)) : ''}</div></div>`).join('');
+    return `<div class="sum-sub"><span class="sum-purpose ${purpose}">${title}</span><span class="sum-sub-n">共還差 ${total} 件</span></div>${rows}`;
+  };
+  const remainHtml = d.remainPlans.length
+    ? remainBlock('delivery', '交貨') + remainBlock('retail', '零賣')
+    : '<div class="sum-empty">沒有，備註都買齊了</div>';
+
+  const over = d.overPlans.length
+    ? d.overPlans.map((p) => `<div class="sum-row has-nums over"><div class="sum-line"><span class="sum-name">${escapeHtml(p.text)}</span><span class="sum-purpose ${p.purpose}">${escapeHtml(p.purposeLabel)}</span><span class="sum-qty">多 ${p.extra} 件</span></div><div class="sum-nums">標到 ${p.won}／預計 ${p.qty}　號碼 ${escapeHtml(sumNumsText(p.nums))}</div></div>`).join('')
+    : '<div class="sum-empty">沒有買超過的</div>';
+
   return `<div class="plan-screen sum-screen" id="sum-screen">
     <header class="plan-bar">
       <button type="button" class="plan-back" data-act="close-summary">返回</button>
@@ -7501,27 +7598,55 @@ function renderDaySummary() {
         <div class="tot"><b>${d.wonLots}</b><span>標到筆數</span></div>
         <div class="tot"><b>${d.unmovedPieces}</b><span>未搬件數</span></div>
         <div class="tot"><b>${d.deliveryWonPieces}</b><span>交貨標到</span></div>
-        <div class="tot"><b>${d.deliveryRemain}</b><span>交貨還差</span></div>
-        <div class="tot"><b>${d.retailRemain}</b><span>零賣還差</span></div>
-        <div class="tot"><b>${d.remainPlans.length}</b><span>備註還差</span></div>
+        <div class="tot${d.unplannedPieces ? ' warn' : ''}"><b>${d.unplannedPieces}</b><span>計劃外買到</span></div>
+        <div class="tot${d.remainPlans.length ? ' warn' : ''}"><b>${d.deliveryRemain + d.retailRemain}</b><span>該買沒買到</span></div>
+        <div class="tot${d.overPieces ? ' warn' : ''}"><b>${d.overPieces}</b><span>買超過</span></div>
       </div>
-      ${groups}
+      <section class="sum-sec"><h2>今天買到</h2>${groups}</section>
       ${(() => {
         const coded = (state.lots || []).filter((l) => l.day === d.date && isWon(l) && lotSubCode(l));
         if (!coded.length) return '';
         const rows = coded.map((l) => `<div class="sum-row"><span class="sum-name">${lotLabelHtml(l)}</span></div>`).join('');
-        return `<section class="sum-sec">${rows}</section>`;
+        return `<section class="sum-sec"><h3 class="sum-grp">有小代碼的</h3>${rows}</section>`;
       })()}
-      <section class="sum-sec">
-        <h2>備註還差</h2>
-        ${remain}
-      </section>
+      <section class="sum-sec sum-unplanned"><h2>計劃外買到<small>備註沒有的</small></h2>${unplanned}</section>
+      <section class="sum-sec sum-short"><h2>該買沒買到<small>標到少於預計</small></h2>${remainHtml}</section>
+      <section class="sum-sec sum-over"><h2>買超過<small>標到多於預計</small></h2>${over}</section>
       <div class="share-row sum-share">
         <button type="button" class="btn" data-act="copy-summary">複製文字</button>
         <button type="button" class="btn primary" data-act="share-summary">分享</button>
       </div>
     </div>
   </div>`;
+}
+
+function addUnplannedToPlan(idsText) {
+  const ids = String(idsText || '').split(',').filter(Boolean);
+  const lots = ids.map((id) => (state.lots || []).find((l) => l.id === id)).filter((l) => l && l.item && isWon(l));
+  if (!lots.length) return;
+  const text = lotPlanText(lots[0]);
+  if (!text) return;
+  const qty = Math.min(99, lots.reduce((n, l) => n + lotQty(l), 0));
+  const skip = lots.reduce((n, l) => n + (lotPriority(l) === 'skip' ? lotQty(l) : 0), 0);
+  const snap = snapshotPlanItems();
+  const today = todayStr();
+  if (!Array.isArray(state.planItems)) state.planItems = [];
+  state.planItems.push({
+    id: uid(),
+    text,
+    forDay: today,
+    done: false,
+    doneOn: '',
+    createdOn: today,
+    qty,
+    doneBy: '',
+    lockCount: 0,
+    purpose: skip * 2 > qty ? 'delivery' : 'retail'
+  });
+  saveState();
+  offerPlanUndo(snap, `已加到備註　${text}　${qty} 件`);
+  buzz(24);
+  render();
 }
 
 function openDaySummary() {
@@ -9504,6 +9629,9 @@ function onClick(e) {
       break;
     case 'share-summary':
       shareDaySummary();
+      break;
+    case 'sum-add-plan':
+      addUnplannedToPlan(btn.dataset.ids);
       break;
     case 'copy-summary':
       copyResults(daySummaryText());
