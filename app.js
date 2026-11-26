@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v106';
+const APP_VERSION = 'v107';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -11268,6 +11268,7 @@ function init() {
     setAuctionNow(window.__pendingAuctionNow);
   }
   state = loadState();
+  if (typeof captureSyncBaseline === 'function') captureSyncBaseline();
   if (state.keepAwake == null) state.keepAwake = true;
   ensureItemUseLog(state);
   freezeItemRanks();

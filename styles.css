@@ -6737,3 +6737,35 @@ html.is-dragging .item-pick {
   letter-spacing: 0.04em;
 }
 .sum-add-btn:active { filter: brightness(1.2); }
+
+/* v107: sync status shows a word, not just a dot */
+.sync-dot {
+  width: auto;
+  min-width: 44px;
+  height: 36px;
+  padding: 0 8px 0 7px;
+  gap: 5px;
+  border-radius: 999px;
+}
+.sync-dot i { width: 11px; height: 11px; flex: 0 0 auto; }
+.sync-dot b {
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  color: #9a9a9a;
+}
+.sync-dot.online b { color: #7ee0a6; }
+.sync-dot.connecting b, .sync-dot.syncing b, .sync-dot.pending b { color: #f0c35a; }
+.sync-dot.offline b { color: #ff9a9a; }
+.sync-dot.offline { box-shadow: inset 0 0 0 2px #ff8a8a; }
+#sync-detail-status { font-size: 16px; padding: 6px 12px; }
+/* Narrow phones: the 場次 switch needs the room, so keep just the coloured dot.
+   The full status and last-sync time stay in 設定 → 同步. */
+@media (max-width: 389px) {
+  .sync-dot { min-width: 0; width: 24px; height: 24px; padding: 0; gap: 0; }
+  .sync-dot b { display: none; }
+  .sync-dot i { width: 11px; height: 11px; }
+}
+.sync-dot.compact { min-width: 0; width: 28px; height: 28px; padding: 0; gap: 0; }
+.sync-dot.compact b { display: none; }

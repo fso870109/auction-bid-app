@@ -21,6 +21,19 @@ let remoteFlash = {};
 let pendingJoinCode = '';
 let lastSyncError = '';
 let shownJoinRequestId = '';
+/* v107 liveness: a phone that slept or switched Wi-Fi/4G can keep a socket that
+   still says OPEN but never delivers anything. Track the last frame we got and
+   probe/replace silent sockets, so the other phone's entries keep arriving. */
+let syncLastRxAt = 0;       // last frame from the server on the current socket
+let syncLastOkAt = 0;       // last time we were confirmed in sync (hello / ack / ops / pong)
+let syncProbeTimer = null;
+let syncHiddenAt = 0;
+let syncTickTimer = null;
+const SYNC_PING_MS = 5000;
+const SYNC_SILENT_MS = 20000;
+const SYNC_PROBE_MS = 2000;
+const SYNC_CHUNK_OPS = 120;
+const SYNC_CHUNK_BYTES = 180 * 1024;
 
 function syncBase() {
   return SYNC_URL.replace(/\/$/, '');
@@ -184,6 +197,15 @@ function ensureDeviceId() {
   return state.syncDeviceId;
 }
 
+/* v107: what this phone had already shared (or queued) when the App opened.
+   Without it the first save after a reload re-sent every row and stamped every
+   setting as brand new, which could overwrite the other phone's newer values. */
+function captureSyncBaseline() {
+  if (!state || !state.syncRoom || typeof BidSyncCore === 'undefined') return;
+  try { lastShared = sharedSlice(); } catch { lastShared = null; }
+  syncLastOkAt = Number(state.syncLastOkAt) || 0;
+}
+
 function sharedSlice() {
   return {
     lots: (state.lots || []).map((l) => Object.assign({}, l)),
@@ -202,6 +224,34 @@ function currentStatus() {
   return syncStatus;
 }
 
+function syncAgoText() {
+  if (!syncLastOkAt) return '';
+  const sec = Math.max(0, Math.round((Date.now() - syncLastOkAt) / 1000));
+  if (sec < 10) return '剛剛';
+  if (sec < 60) return sec + ' 秒前';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + ' 分前';
+  try {
+    const d = new Date(syncLastOkAt);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  } catch { return ''; }
+}
+
+function syncShortLabel() {
+  const s = currentStatus();
+  if (s === 'online') return '同步';
+  if (s === 'connecting' || s === 'syncing') return '連線';
+  if (s === 'pending') return '等待';
+  if (s === 'off') return '';
+  return '離線';
+}
+
+function syncDetailLabel() {
+  const base = syncStatusLabel();
+  const ago = syncAgoText();
+  return ago ? base + '・最後同步 ' + ago : base;
+}
+
 function syncStatusLabel() {
   const s = currentStatus();
   if (s === 'online') return '已同步';
@@ -213,19 +263,180 @@ function syncStatusLabel() {
   return '離線';
 }
 
+let syncPillCompact = false;
+
+/* Show the word next to the dot only when the 場次 switch still fits. */
+function fitSyncPill(el) {
+  if (!el || el.hidden) return;
+  const hs = document.querySelector('.header .half-switch');
+  if (!hs) return;
+  const clips = () => [...hs.querySelectorAll('button')].some((b) => b.scrollWidth > b.clientWidth + 0.5);
+  el.classList.remove('compact');
+  let compact = clips();
+  if (compact) el.classList.add('compact');
+  syncPillCompact = compact;
+}
+
 function paintSyncDot(el) {
   if (!el) return;
-  const label = syncStatusLabel();
-  el.className = 'sync-dot ' + currentStatus();
+  const label = syncDetailLabel();
+  el.className = 'sync-dot ' + currentStatus() + (syncPillCompact ? ' compact' : '');
   el.hidden = !state.syncRoom;
   el.setAttribute('aria-label', label);
   el.title = label;
-  if (!el.querySelector('i')) el.innerHTML = '<i></i>';
+  let i = el.querySelector('i');
+  let b = el.querySelector('b');
+  if (!i || !b) { el.innerHTML = '<i></i><b></b>'; b = el.querySelector('b'); }
+  const t = syncShortLabel();
+  if (b.textContent !== t) b.textContent = t;
+  fitSyncPill(el);
+  const det = document.getElementById('sync-detail-status');
+  if (det) {
+    det.className = 'sync-pill ' + currentStatus();
+    det.textContent = label;
+  }
 }
 
 function setSyncStatus(s) {
   if (syncStatus !== s) syncStatus = s;
   paintSyncDot(document.getElementById('sync-pill'));
+}
+
+function markSyncOk() {
+  syncLastOkAt = Date.now();
+  try { state.syncLastOkAt = syncLastOkAt; } catch { /* ignore */ }
+}
+
+/* Lamport-style clock: never stamp a local edit older than anything we have
+   already seen from the room, so a phone whose clock runs a few minutes slow
+   still wins with its newer edit instead of being silently ignored. */
+function syncNow() {
+  const seen = Number(state && state.syncClockSeen) || 0;
+  return Math.max(Date.now(), seen + 1);
+}
+
+function noteSeenTs(ts) {
+  const n = Number(ts) || 0;
+  if (!state || !n || n > Date.now() + 7 * 24 * 3600 * 1000) return;
+  if (n > (Number(state.syncClockSeen) || 0)) state.syncClockSeen = n;
+}
+
+function noteSeenOps(ops) {
+  for (const op of ops || []) {
+    if (!op) continue;
+    noteSeenTs(op.ts);
+    if (op.payload) {
+      noteSeenTs(op.payload.updatedAt);
+      const ft = op.payload.fieldTs;
+      if (ft && typeof ft === 'object') for (const k of Object.keys(ft)) noteSeenTs(ft[k]);
+    }
+  }
+}
+
+function noteSeenSnapshot(snap) {
+  if (!snap) return;
+  noteSeenTs(snap.rev);
+  for (const l of Object.values(snap.lots || {})) noteSeenTs(l && l.updatedAt);
+  for (const p of Object.values(snap.planItems || {})) noteSeenTs(p && p.updatedAt);
+  for (const e of Object.values(snap.kv || {})) noteSeenTs(e && e.ts);
+}
+
+function syncKvTsFromSnap(kv) {
+  if (!kv || !state) return;
+  if (!state.syncKvTs || typeof state.syncKvTs !== 'object') state.syncKvTs = {};
+  for (const key of Object.keys(kv)) {
+    const t = Number(kv[key] && kv[key].ts) || 0;
+    if (t > (Number(state.syncKvTs[key]) || 0)) state.syncKvTs[key] = t;
+  }
+}
+
+/* Merge queued ops so a long offline stretch doesn't grow into a message the
+   server refuses: keep only the newest upsert per row and newest kv per key. */
+function compactSyncQueue(q) {
+  if (!Array.isArray(q) || q.length < 2) return q || [];
+  const lastIdx = {};
+  q.forEach((op, i) => {
+    if (!op) return;
+    let k = '';
+    if (op.kind === 'kv') k = 'kv:' + op.key;
+    else if (op.kind === 'lot-upsert' || op.kind === 'lot-delete') k = 'lot:' + (op.id || (op.payload && op.payload.id));
+    else if (op.kind === 'plan-upsert' || op.kind === 'plan-delete') k = 'plan:' + (op.id || (op.payload && op.payload.id));
+    if (k) lastIdx[k] = i;
+  });
+  return q.filter((op, i) => {
+    if (!op) return false;
+    let k = '';
+    if (op.kind === 'kv') k = 'kv:' + op.key;
+    else if (op.kind === 'lot-upsert' || op.kind === 'lot-delete') k = 'lot:' + (op.id || (op.payload && op.payload.id));
+    else if (op.kind === 'plan-upsert' || op.kind === 'plan-delete') k = 'plan:' + (op.id || (op.payload && op.payload.id));
+    // A kv blob is a whole value, so the last one is enough. Row upserts carry
+    // the full row with per-field stamps, so the last one also covers earlier ones.
+    return !k || lastIdx[k] === i;
+  });
+}
+
+function nextSyncChunk(q) {
+  const out = [];
+  let bytes = 0;
+  for (const op of q) {
+    const n = JSON.stringify(op).length;
+    if (out.length && (out.length >= SYNC_CHUNK_OPS || bytes + n > SYNC_CHUNK_BYTES)) break;
+    out.push(op);
+    bytes += n;
+  }
+  return out;
+}
+
+function syncSocketAlive() {
+  return !!(syncWs && syncWs.readyState === 1 && syncWs._authed);
+}
+
+function forceReconnect(why) {
+  closeSyncSocket();
+  if (!state || !state.syncRoom || isLegacyRoom(state.syncRoom)) return;
+  setSyncStatus('connecting');
+  connectSync();
+}
+
+/* Ask the server for a pong; if nothing comes back quickly the socket is dead. */
+function probeSync(timeoutMs) {
+  if (syncProbeTimer && syncWs && syncWs._probeWs === syncWs) return; // one probe at a time
+  clearTimeout(syncProbeTimer);
+  syncProbeTimer = null;
+  if (!state || !state.syncRoom || isLegacyRoom(state.syncRoom) || !state.syncDeviceToken) return;
+  if (!navigator.onLine) { setSyncStatus('offline'); return; }
+  if (!syncSocketAlive()) { connectSync(); return; }
+  const ws = syncWs;
+  const sentAt = Date.now();
+  try {
+    ws.send(JSON.stringify({ type: 'ping', deviceId: state.syncDeviceId, token: state.syncDeviceToken }));
+  } catch {
+    forceReconnect('send');
+    return;
+  }
+  ws._probeWs = ws;
+  syncProbeTimer = setTimeout(() => {
+    syncProbeTimer = null;
+    ws._probeWs = null;
+    if (syncWs !== ws) return;
+    if ((ws._lastRx || 0) < sentAt) forceReconnect('probe');
+  }, timeoutMs || SYNC_PROBE_MS);
+}
+
+/* Coming back from the background / screen-off / network change. */
+function onSyncResume() {
+  if (!state || !state.syncRoom || isLegacyRoom(state.syncRoom) || !state.syncDeviceToken) return;
+  const away = syncHiddenAt ? Date.now() - syncHiddenAt : 0;
+  syncHiddenAt = 0;
+  if (!syncSocketAlive()) {
+    if (syncWs && syncWs.readyState === 1 && Date.now() - (syncWs._openedAt || 0) > 3000) closeSyncSocket();
+    connectSync();
+    return;
+  }
+  // Away long enough for the network to have dropped us: start a fresh socket.
+  // The hello snapshot brings in everything the other phone entered meanwhile.
+  if (away > 15000) { forceReconnect('resume'); return; }
+  probeSync(SYNC_PROBE_MS);
 }
 
 function writeStampsToState(next) {
@@ -284,7 +495,7 @@ function onLocalStateSaved() {
   if (syncApplying || !state || !state.syncRoom || state.syncPending) return;
   if (isLegacyRoom(state.syncRoom)) return;
   if (typeof BidSyncCore === 'undefined') return;
-  const now = Date.now();
+  const now = syncNow();
   if (!state.syncKvTs) state.syncKvTs = {};
   const prev = lastShared || { lots: [], planItems: [], kv: {} };
   const next = sharedSlice();
@@ -309,6 +520,8 @@ function onLocalStateSaved() {
   if (!ops.length) return;
   if (!Array.isArray(state.syncQueue)) state.syncQueue = [];
   state.syncQueue.push.apply(state.syncQueue, ops);
+  noteSeenTs(now);
+  if (!syncSentCount) state.syncQueue = compactSyncQueue(state.syncQueue);
   persistSyncState();
   flushSync();
 }
@@ -321,15 +534,22 @@ function flushSync() {
     connectSync();
     return;
   }
+  if (!syncSentCount) state.syncQueue = compactSyncQueue(state.syncQueue || []);
   const q = state.syncQueue || [];
   if (!q.length) { setSyncStatus('online'); return; }
-  if (syncSentCount) return;
+  if (syncSentCount) {
+    // An ack that never comes means the socket is dead; don't wait forever.
+    if (syncWs._sentAt && Date.now() - syncWs._sentAt > 6000) forceReconnect('ack');
+    return;
+  }
   setSyncStatus('syncing');
-  syncSentCount = q.length;
+  const chunk = nextSyncChunk(q);
+  syncSentCount = chunk.length;
+  syncWs._sentAt = Date.now();
   try {
     syncWs.send(JSON.stringify({
       type: 'ops',
-      ops: q.slice(),
+      ops: chunk,
       deviceId: state.syncDeviceId,
       token: state.syncDeviceToken
     }));
@@ -365,8 +585,10 @@ function applyRemoteOps(ops, flashes, from) {
   if (!ops || !ops.length || typeof BidSyncCore === 'undefined') return;
   syncApplying = true;
   try {
+    noteSeenOps(ops);
     const snap = BidSyncCore.snapshotFromState(state);
     const result = BidSyncCore.applyOps(snap, ops);
+    syncKvTsFromSnap(snap.kv);
     state.lots = BidSyncCore.mapToLots(snap.lots);
     state.planItems = BidSyncCore.mapToPlans(snap.planItems);
     state.syncTombstones = snap.tombstones;
@@ -398,12 +620,14 @@ function mergeSnapshotOnHello(incoming) {
   if (!incoming || typeof BidSyncCore === 'undefined') return;
   syncApplying = true;
   try {
+    noteSeenSnapshot(incoming);
     const localSnap = BidSyncCore.snapshotFromState(state);
     const remoteOps = BidSyncCore.snapshotToOps(incoming);
     const { flashes } = BidSyncCore.applyOps(localSnap, remoteOps);
     if (state.syncQueue && state.syncQueue.length) {
       BidSyncCore.applyOps(localSnap, state.syncQueue);
     }
+    syncKvTsFromSnap(localSnap.kv);
     state.lots = BidSyncCore.mapToLots(localSnap.lots);
     state.planItems = BidSyncCore.mapToPlans(localSnap.planItems);
     state.syncTombstones = localSnap.tombstones;
@@ -503,14 +727,10 @@ function startSyncPing(ws) {
   clearInterval(syncPingTimer);
   syncPingTimer = setInterval(() => {
     if (!ws || ws.readyState !== 1) return;
-    try {
-      ws.send(JSON.stringify({
-        type: 'ping',
-        deviceId: state && state.syncDeviceId,
-        token: state && state.syncDeviceToken
-      }));
-    } catch { /* ignore */ }
-  }, 25000);
+    if (syncWs !== ws || !ws._authed) return;
+    if (document.hidden) return;
+    probeSync(SYNC_PROBE_MS + 1500);
+  }, SYNC_PING_MS);
 }
 
 function connectSync() {
@@ -518,6 +738,10 @@ function connectSync() {
   if (isLegacyRoom(state.syncRoom)) { setSyncStatus('offline'); return; }
   if (!state.syncDeviceToken) return;
   if (!navigator.onLine) { setSyncStatus('offline'); return; }
+  if (syncWs && syncWs.readyState === 1 && !syncWs._authed && Date.now() - (syncWs._openedAt || 0) > 5000) {
+    // Opened but the server never answered our login: that socket is dead.
+    closeSyncSocket();
+  }
   if (syncWs && syncWs.readyState === 1) return;
   if (syncWs && syncWs.readyState === 0) {
     if (!syncWs._openedAt) syncWs._openedAt = Date.now();
@@ -566,6 +790,18 @@ function openSyncSocket() {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
     if (!msg) return;
+    ws._lastRx = Date.now();
+    if (syncWs === ws) syncLastRxAt = ws._lastRx;
+    if (ws._probeWs === ws && syncProbeTimer) {
+      // Any frame proves the socket is alive; the probe is answered.
+      clearTimeout(syncProbeTimer);
+      syncProbeTimer = null;
+      ws._probeWs = null;
+    }
+    if (ws._authed && (msg.type === 'pong' || msg.type === 'ops' || msg.type === 'ack')) {
+      markSyncOk();
+      if (msg.type === 'pong') paintSyncDot(document.getElementById('sync-pill'));
+    }
     if (msg.type === 'hello') {
       if (msg.status === 'pending') {
         state.syncPending = true;
@@ -584,6 +820,7 @@ function openSyncSocket() {
         devices: msg.devices,
         pending: msg.pending
       });
+      markSyncOk();
       persistSyncState();
       if (msg.snapshot) mergeSnapshotOnHello(msg.snapshot);
       else if (typeof render === 'function') render();
@@ -597,6 +834,7 @@ function openSyncSocket() {
       ws._authed = true;
       state.syncPending = false;
       applyMembership({ status: 'approved', role: msg.role || 'member', devices: msg.devices });
+      markSyncOk();
       persistSyncState();
       if (msg.snapshot) mergeSnapshotOnHello(msg.snapshot);
       toast('已加入房間' + (state.syncLabel ? ' ' + state.syncLabel : ''));
@@ -663,6 +901,8 @@ function openSyncSocket() {
 
 function closeSyncSocket() {
   clearInterval(syncPingTimer);
+  clearTimeout(syncProbeTimer);
+  syncProbeTimer = null;
   clearTimeout(syncTimer);
   syncSentCount = 0;
   const ws = syncWs;
@@ -989,7 +1229,7 @@ function renderSyncSettings() {
       <div class="sync-code-label">房間</div>
       <div class="sync-code">${escapeHtml(state.syncLabel || '')}</div>
       <div class="sync-qr" id="sync-qr" aria-label="邀請 QR 碼"></div>
-      <div class="sync-pill ${currentStatus()}" style="position:static;margin:8px auto 0">${escapeHtml(syncStatusLabel())}</div>
+      <div class="sync-pill ${currentStatus()}" id="sync-detail-status" style="position:static;margin:8px auto 0">${escapeHtml(syncDetailLabel())}</div>
     </div>
     <p class="empty-hint" style="text-align:left;padding:10px 0 0;line-height:1.45">另一支手機掃描上面的 QR 碼，或打開邀請連結即可加入。請妥善保管邀請，知道連結的人才能申請加入。</p>
     <div class="row-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
@@ -1008,8 +1248,9 @@ function renderSyncSettings() {
 
 function renderSyncPill() {
   if (!state || !state.syncRoom) return '';
-  const label = syncStatusLabel();
-  return `<button type="button" class="sync-dot ${currentStatus()}" id="sync-pill" data-act="settings" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><i></i></button>`;
+  const label = syncDetailLabel();
+  try { requestAnimationFrame(() => paintSyncDot(document.getElementById('sync-pill'))); } catch { /* ignore */ }
+  return `<button type="button" class="sync-dot ${currentStatus()}${syncPillCompact ? ' compact' : ''}" id="sync-pill" data-act="settings" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><i></i><b>${escapeHtml(syncShortLabel())}</b></button>`;
 }
 
 function lotHasRemoteFlash(id) {
@@ -1036,8 +1277,14 @@ function initSync() {
     closeSyncSocket();
   });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && state.syncRoom) connectSync();
+    if (!state.syncRoom) return;
+    if (document.hidden) { if (!syncHiddenAt) syncHiddenAt = Date.now(); return; }
+    onSyncResume();
   });
+  window.addEventListener('resize', () => paintSyncDot(document.getElementById('sync-pill')));
+  window.addEventListener('pageshow', () => { if (state.syncRoom) onSyncResume(); });
+  window.addEventListener('focus', () => { if (state.syncRoom && !document.hidden) onSyncResume(); });
+  window.addEventListener('pagehide', () => { if (!syncHiddenAt) syncHiddenAt = Date.now(); });
   const params = new URLSearchParams(location.search || '');
   const q = normalizeInvite(params.get('room') || '');
   if (isLegacyRoom(q)) {
@@ -1064,10 +1311,18 @@ function initSync() {
     if (!state || !state.syncRoom || isLegacyRoom(state.syncRoom) || !state.syncDeviceToken) return;
     if (!navigator.onLine) return;
     if (syncWs && syncWs.readyState === 0) return;
+    paintSyncDot(document.getElementById('sync-pill'));
     if (syncWs && syncWs.readyState === 1 && syncWs._authed) {
-      if ((state.syncQueue || []).length && !syncSentCount) flushSync();
+      // Timers barely run while the screen is off; a long gap means we slept.
+      const gap = syncTickTimer ? Date.now() - syncTickTimer : 0;
+      syncTickTimer = Date.now();
+      if (gap > 15000) { forceReconnect('slept'); return; }
+      if (document.hidden) return;
+      if (Date.now() - (syncWs._lastRx || syncWs._openedAt || 0) > SYNC_SILENT_MS) { forceReconnect('silent'); return; }
+      if ((state.syncQueue || []).length) flushSync();
       return;
     }
+    syncTickTimer = Date.now();
     if (syncWs && syncWs.readyState === 1 && !syncWs._authed && syncWs._openedAt && Date.now() - syncWs._openedAt > 8000) {
       closeSyncSocket();
     }
