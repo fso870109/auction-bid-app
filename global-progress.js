@@ -101,6 +101,7 @@ function onGlobalProgressSaved() {
     /* Local opening-number prefills stay on this phone until someone really sets a number. */
     if (raw && raw.seeded && !raw.cleared) return;
     const a = gpAnchorOf(half, mid);
+    if (a && typeof isStaleProgressAt === 'function' && isStaleProgressAt(a.at, day)) return;
     const sig = gpSig(a);
     if (sig === (gpKnown[key] || '')) return;
     gpKnown[key] = sig;
@@ -165,8 +166,14 @@ function gpApplyEntry(half, mid, entry, serverNow) {
     ended: !!entry.ended,
     at: Math.round(localAt)
   };
+  if (typeof isStaleProgressAt === 'function' && isStaleProgressAt(remote.at, day)) return false;
+  if (state.gpIgnoreBefore && Number(remote.at) < Number(state.gpIgnoreBefore)
+      && Number(entry.ts || remote.at) < Number(state.gpIgnoreBefore)) {
+    return false;
+  }
   const rawLocal = state.progressAnchors && state.progressAnchors[half] && state.progressAnchors[half][mid];
   const localSeeded = !!(rawLocal && rawLocal.seeded && !rawLocal.cleared);
+  const localUnstarted = localSeeded || !rawLocal || rawLocal.number == null || rawLocal.cleared;
   const pend = gpPendingMap()[key];
   if (pend && !localSeeded) {
     const remoteTs = Number(entry.ts) - (Number.isFinite(skew) ? skew : 0);
@@ -183,11 +190,13 @@ function gpApplyEntry(half, mid, entry, serverNow) {
   if (!state.progressAnchors) state.progressAnchors = {};
   if (!state.progressAnchors[half]) state.progressAnchors[half] = {};
   if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
-  /* A real number from another phone always replaces a local opening prefill. */
+  /* A real number from another phone replaces a local opening prefill, but
+     does not start auto-advance on this phone until the user sets/starts. */
+  const keepPaused = localUnstarted || localSeeded || !!remote.paused;
   state.progressAnchors[half][mid] = {
     number: remote.number,
     at: remote.at,
-    paused: remote.paused,
+    paused: keepPaused,
     ended: remote.ended,
     cleared: remote.cleared
   };
@@ -307,6 +316,15 @@ function setGlobalProgressOn(on) {
   } else {
     gpDisconnect();
   }
+}
+
+function onAuctionDayChanged() {
+  if (!state) return;
+  const pending = gpPendingMap();
+  for (const k of Object.keys(pending)) delete pending[k];
+  gpSeedKnown();
+  gpSubDay = '';
+  if (gpReady()) gpSubscribe();
 }
 
 function initGlobalProgress() {

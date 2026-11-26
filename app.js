@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v97';
+const APP_VERSION = 'v98';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -924,6 +924,149 @@ function migrateAfternoonV96(merged) {
     const fresh = DEFAULT_MACHINES.afternoon.find((x) => x.id === m.id);
     if (fresh) m.ranges = structuredClone(fresh.ranges);
   }
+  return true;
+}
+
+function afternoonRangeKey(m) {
+  return JSON.stringify(((m && m.ranges) || [])
+    .filter((r) => r && r.start != null)
+    .map((r) => [Number(r.start), r.end == null ? null : Number(r.end)]));
+}
+
+function afternoonRangesAreDefault() {
+  const list = state && state.machines && state.machines.afternoon;
+  if (!Array.isArray(list)) return false;
+  for (const fresh of DEFAULT_MACHINES.afternoon) {
+    const m = list.find((x) => x && x.id === fresh.id);
+    if (!m || afternoonRangeKey(m) !== afternoonRangeKey(fresh)) return false;
+  }
+  return list.length === DEFAULT_MACHINES.afternoon.length;
+}
+
+/* Old 下半場 scheme: a1 was 20xx then 60xx, a2 a 25xx–50xx block, a3 a 50xx–5999 block.
+   Also treat near-defaults (a3 starting 5050/50xx, a2 start like 5030) as the old scheme. */
+function afternoonLooksLikeOldScheme(list) {
+  if (!Array.isArray(list) || list.length !== 3) return false;
+  const by = (id) => list.find((x) => x && x.id === id);
+  const a1 = by('a1');
+  const a2 = by('a2');
+  const a3 = by('a3');
+  if (!a1 || !a2 || !a3) return false;
+  if (afternoonRangeKey(a1) === afternoonRangeKey(DEFAULT_MACHINES.afternoon[0])
+    && afternoonRangeKey(a2) === afternoonRangeKey(DEFAULT_MACHINES.afternoon[1])
+    && afternoonRangeKey(a3) === afternoonRangeKey(DEFAULT_MACHINES.afternoon[2])) {
+    return false;
+  }
+  const starts = (m) => ((m.ranges || []).filter((r) => r && r.start != null).map((r) => Number(r.start)));
+  const ends = (m) => ((m.ranges || []).filter((r) => r && r.end != null).map((r) => Number(r.end)));
+  const a1s = starts(a1);
+  const a2s = starts(a2);
+  const a3s = starts(a3);
+  const a1e = ends(a1);
+  const a2e = ends(a2);
+  const a3e = ends(a3);
+  const a1old = a1s.some((n) => n >= 2000 && n <= 2499) && a1s.some((n) => n >= 6000 && n <= 6099)
+    && !a1s.some((n) => n >= 5001 && n <= 5200);
+  const a2old = a2s.length >= 1 && a2s[0] >= 2500 && a2s[0] <= 5099
+    && (a2e.length === 0 || a2e[0] >= 4999 && a2e[0] <= 5999)
+    && !a2s.some((n) => n >= 2000 && n <= 2499);
+  const a3old = a3s.length >= 1 && a3s[0] >= 5000 && a3s[0] <= 5199
+    && (a3e.length === 0 || a3e[0] === 5999)
+    && !a3s.some((n) => n >= 2000 && n <= 2499);
+  return a1old && a2old && a3old;
+}
+
+function applyAfternoonDefaultRanges(list) {
+  if (!Array.isArray(list)) return false;
+  let changed = false;
+  for (const m of list) {
+    const fresh = DEFAULT_MACHINES.afternoon.find((x) => x.id === m.id);
+    if (fresh && afternoonRangeKey(m) !== afternoonRangeKey(fresh)) {
+      m.ranges = structuredClone(fresh.ranges);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function migrateAfternoonV98(merged) {
+  const list = merged && merged.machines && merged.machines.afternoon;
+  if (!afternoonLooksLikeOldScheme(list)) return false;
+  return applyAfternoonDefaultRanges(list);
+}
+
+function auctionDayStartMs(day) {
+  const iso = String(day || (state && state.day) || '');
+  const p = iso.split('-').map(Number);
+  if (p.length !== 3 || !p[0] || !p[1] || !p[2]) return 0;
+  const cutoff = (typeof dayCutoffHour === 'function') ? dayCutoffHour() : 15;
+  const d = new Date(p[0], p[1] - 1, p[2]);
+  if (cutoff > 0) {
+    d.setDate(d.getDate() - 1);
+    d.setHours(cutoff, 0, 0, 0);
+  } else {
+    d.setHours(0, 0, 0, 0);
+  }
+  return d.getTime();
+}
+
+function isStaleProgressAt(at, day) {
+  const t = Number(at);
+  if (!Number.isFinite(t)) return true;
+  const start = auctionDayStartMs(day);
+  return start > 0 && t < start;
+}
+
+function resetHalfProgress(half) {
+  if (!state) return;
+  if (!state.currentNumbers) state.currentNumbers = {};
+  if (!state.progressAnchors) state.progressAnchors = {};
+  if (!state.seriesPath) state.seriesPath = {};
+  state.currentNumbers[half] = defaultCurrents(state.machines)[half];
+  state.progressAnchors[half] = defaultAnchors(state.machines)[half];
+  state.seriesPath[half] = defaultSeriesPath(state.machines)[half];
+}
+
+/* First v98 open of an auction day with no 抄號 yet: drop leftover/auto-advanced
+   numbers (and stale shared progress) so prefills can apply. */
+function cleanNewDayProgressIfNeeded() {
+  if (!state) return false;
+  const day = state.day;
+  if (!day) return false;
+  if (state.v98ProgressCleaned === day) return false;
+  const hasLots = (state.lots || []).some((l) => l && l.day === day);
+  if (hasLots) {
+    state.v98ProgressCleaned = day;
+    return false;
+  }
+  state.currentNumbers = defaultCurrents(state.machines);
+  state.progressAnchors = defaultAnchors(state.machines);
+  state.seriesPath = defaultSeriesPath(state.machines);
+  state.seriesPlans = defaultSeriesPlans(state.machines);
+  state.machineMerges = defaultMachineMerges(state.machines);
+  state.gpIgnoreBefore = Date.now();
+  state.v98ProgressCleaned = day;
+  applyFixedStartPrefills();
+  if (typeof gpSeedKnown === 'function') gpSeedKnown();
+  if (typeof syncProgressTimer === 'function') syncProgressTimer();
+  return true;
+}
+
+function adoptNewAfternoonRanges() {
+  if (!state || !state.machines) return false;
+  if (afternoonRangesAreDefault()) {
+    toast('已經是新的下半場號碼');
+    return false;
+  }
+  applyAfternoonDefaultRanges(state.machines.afternoon);
+  resetHalfProgress('afternoon');
+  applyFixedStartPrefills();
+  state.gpIgnoreBefore = Date.now();
+  if (typeof gpSeedKnown === 'function') gpSeedKnown();
+  if (typeof syncProgressTimer === 'function') syncProgressTimer();
+  saveState();
+  toast('已改成新的下半場號碼。第二台 2500，第三台 2000，第一台先留空');
+  render();
   return true;
 }
 
@@ -3485,6 +3628,9 @@ function defaultState() {
     dayRules: [],
     machinesMigratedV9: true,
     machinesMigratedAfternoonV96: true,
+    machinesMigratedAfternoonV98: true,
+    v98ProgressCleaned: '',
+    gpIgnoreBefore: 0,
     itemsMigratedV17: true,
     itemsMigratedV21: true,
     itemsMigratedV46: true,
@@ -3590,6 +3736,10 @@ function loadState() {
     if (!saved.machinesMigratedAfternoonV96) {
       migrateAfternoonV96(merged);
       merged.machinesMigratedAfternoonV96 = true;
+    }
+    if (!saved.machinesMigratedAfternoonV98) {
+      migrateAfternoonV98(merged);
+      merged.machinesMigratedAfternoonV98 = true;
     }
     if (!saved.itemsMigratedV17) {
       migrateItemsV17(merged);
@@ -5622,7 +5772,8 @@ function currentOf(machineId, half) {
   const stored = state && state.currentNumbers && state.currentNumbers[h] && state.currentNumbers[h][machineId];
   const storedN = stored == null || stored === '' ? null : Number(stored);
   const a = getAnchor(machineId, h);
-  if (autoAdvanceOn() && a && !a.paused && a.number != null && a.at != null) {
+  if (autoAdvanceOn() && a && !a.paused && !a.seeded && a.number != null && a.at != null
+      && !isStaleProgressAt(a.at, state && state.day)) {
     const elapsed = Math.max(0, nowDate().getTime() - a.at);
     const rate = lotsPerMin();
     const advanced = rate > 0 ? Math.floor((elapsed * rate) / 60000) : 0;
@@ -5648,7 +5799,8 @@ function isAutoRunning(machineId, half) {
   const h = half || state.currentHalf;
   if (!autoAdvanceOn()) return false;
   const a = getAnchor(machineId, h);
-  if (!a || a.paused || a.ended || a.number == null || a.at == null) return false;
+  if (!a || a.paused || a.ended || a.seeded || a.number == null || a.at == null) return false;
+  if (isStaleProgressAt(a.at, state && state.day)) return false;
   const cur = currentOf(machineId, h);
   if (seriesAtEnd(machineId, h, cur)) return false;
   const cap = progressCap(machineId, h);
@@ -5988,23 +6140,19 @@ function doXfer(srcId, destId, half, key) {
 }
 
 function ensureAutoAnchors() {
+  /* Do not start auto-advance just because a 台 already shows a number
+     (prefill, leftover, or shared progress). Only keep a 台 running if it
+     already has an unpaused, not-stale, not-seeded anchor. */
   if (!autoAdvanceOn() || !state) return false;
   let changed = false;
   for (const half of HALVES) {
     for (const m of state.machines[half] || []) {
-      const cur = currentOf(m.id, half);
-      if (cur == null) continue;
-      if (seriesAtEnd(m.id, half, cur)) continue;
       const a0 = getAnchor(m.id, half);
       if (a0 && a0.seeded) continue;
-      const cap = progressCap(m.id, half);
-      const ser = seriesOf(cur, half);
-      if (!ser && cap != null && cur >= cap) continue;
-      if (isAutoRunning(m.id, half)) continue;
-      if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
-      state.currentNumbers[half][m.id] = cur;
-      writeAnchor(m.id, half, { number: cur, at: nowDate().getTime(), paused: false, ended: false });
-      changed = true;
+      if (a0 && isStaleProgressAt(a0.at, state.day) && !a0.paused && !a0.cleared) {
+        writeAnchor(m.id, half, { number: a0.number, at: a0.at, paused: true, ended: !!a0.ended });
+        changed = true;
+      }
     }
   }
   if (changed) {
@@ -6161,9 +6309,81 @@ function toast(msg, ms, action) {
     const node = document.getElementById('toast');
     if (node) {
       node.classList.add('hidden');
+      node.classList.remove('has-action');
       node.innerHTML = '';
+      node.style.top = '';
+      node.style.bottom = '';
     }
   }, ms || (action ? 6000 : 1600));
+}
+
+function dismissActionToast() {
+  if (!toastAction || !toastMsg) return;
+  toastMsg = '';
+  toastAction = null;
+  clearTimeout(toastTimer);
+  const node = document.getElementById('toast');
+  if (node) {
+    node.classList.add('hidden');
+    node.classList.remove('has-action');
+    node.innerHTML = '';
+    node.style.top = '';
+    node.style.bottom = '';
+  }
+}
+
+function placeActionToast() {
+  const el = document.getElementById('toast');
+  if (!el || !toastMsg || !toastAction || el.classList.contains('hidden')) {
+    if (el && (!toastMsg || !toastAction)) {
+      el.style.top = '';
+      el.style.bottom = '';
+    }
+    return;
+  }
+  const gap = 8;
+  const vv = window.visualViewport;
+  const vh = vv ? vv.height : window.innerHeight;
+  const toastH = Math.max(el.getBoundingClientRect().height || 0, 64);
+  let top;
+  const overlayKeypad = document.querySelector('#app > .overlay .keypad, .overlay .keypad');
+  const sheet = overlayKeypad && overlayKeypad.closest('.sheet');
+  const liveBar = document.querySelector('.live-screen .live-bar');
+  const noteHead = document.querySelector('.note-screen .note-head') || document.querySelector('.note-screen .prio-toggle');
+  const header = document.querySelector('#app > .header');
+  const paddleBar = document.getElementById('paddle-bar');
+  if (sheet && overlayKeypad) {
+    const keyTop = overlayKeypad.getBoundingClientRect().top;
+    const display = sheet.querySelector('.lot-display');
+    const ceiling = display ? Math.min(display.getBoundingClientRect().top, keyTop) : keyTop;
+    top = ceiling - toastH - gap;
+    if (top < gap) top = gap;
+    if (top + toastH + gap > keyTop) top = Math.max(gap, keyTop - toastH - gap);
+  } else if (liveBar) {
+    top = liveBar.getBoundingClientRect().bottom + gap;
+  } else if (noteHead) {
+    const keypad = document.querySelector('.note-screen .keypad');
+    top = noteHead.getBoundingClientRect().bottom + gap;
+    if (keypad) {
+      const keyTop = keypad.getBoundingClientRect().top;
+      if (top + toastH + gap > keyTop) {
+        const headerBottom = header ? header.getBoundingClientRect().bottom : 0;
+        top = headerBottom + gap;
+        if (top + toastH + gap > keyTop) top = Math.max(gap, keyTop - toastH - gap);
+      }
+    }
+  } else if (paddleBar) {
+    top = paddleBar.getBoundingClientRect().bottom + gap;
+  } else if (header) {
+    top = header.getBoundingClientRect().bottom + gap;
+  } else {
+    top = gap;
+  }
+  const nav = document.querySelector('#app > .nav');
+  const navTop = nav ? nav.getBoundingClientRect().top : vh;
+  if (top + toastH + gap > navTop) top = Math.max(gap, navTop - toastH - gap);
+  el.style.top = Math.round(top) + 'px';
+  el.style.bottom = 'auto';
 }
 
 function paintToast(el) {
@@ -6172,6 +6392,8 @@ function paintToast(el) {
   el.classList.toggle('has-action', !!(toastMsg && toastAction));
   if (!toastMsg) {
     el.innerHTML = '';
+    el.style.top = '';
+    el.style.bottom = '';
     return;
   }
   const text = escapeHtml(String(toastMsg || '').replace(/\s+/g, ' ').trim());
@@ -6180,7 +6402,10 @@ function paintToast(el) {
   } else {
     el.innerHTML = `<span>${text}</span>`;
   }
-  requestAnimationFrame(fitToastText);
+  requestAnimationFrame(() => {
+    fitToastText();
+    placeActionToast();
+  });
 }
 
 function fitToastText() {
@@ -6207,6 +6432,7 @@ function isSetupNeeded() {
 /* ---------- 抄號 ---------- */
 function typeDigit(d) {
   d = String(d);
+  dismissActionToast();
   if (rangeMode) {
     typeRangeDigit(d);
     return;
@@ -6904,6 +7130,9 @@ function startNewDay(confirmed, opts) {
   state.seriesPlans = defaultSeriesPlans(state.machines);
   state.machineMerges = defaultMachineMerges(state.machines);
   applyFixedStartPrefills();
+  state.v98ProgressCleaned = auctionDay;
+  state.gpIgnoreBefore = Date.now();
+  if (typeof onAuctionDayChanged === 'function') onAuctionDayChanged();
   if (typeof syncProgressTimer === 'function') syncProgressTimer();
   state.tab = 'note';
   state.currentHalf = 'fruit';
@@ -8269,8 +8498,11 @@ function renderSettings() {
       const sub = half === 'fruit'
         ? '<p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">這場通常 1–2 台，號碼區間先留空，抄號時再選台，之後可在這裡補上。</p>'
         : '';
+      const adoptBtn = half === 'afternoon' && typeof afternoonRangesAreDefault === 'function' && !afternoonRangesAreDefault()
+        ? '<button type="button" class="btn primary adopt-afternoon-btn" data-act="adopt-afternoon-ranges">改用新的下半場號碼</button><p class="empty-hint" style="text-align:left;padding:8px 0 0;line-height:1.45">第二台從 2500 開始，第三台從 2000 開始，第一台每天 50xx 不一定，先留空。不會改已經抄進來的號碼。</p>'
+        : '';
       const heading = half === 'fruit' ? `${halfLabel(half)}　台別（1–2 台）` : `${halfLabel(half)}　三台號碼`;
-      return `<div class="setting-block"><h2>${heading}</h2>${sub}${editors}${addBtn}</div>`;
+      return `<div class="setting-block"><h2>${heading}</h2>${sub}${editors}${addBtn}${adoptBtn}</div>`;
     })
     .join('');
 
@@ -8860,6 +9092,16 @@ function onClick(e) {
   const act = btn.dataset.act;
   const v = btn.dataset.v;
 
+  const DISMISS_TOAST_ON_INPUT = {
+    digit: 1, back: 1, clear: 1,
+    'edit-cur': 1, 'open-start': 1,
+    'ss-digit': 1, 'ss-back': 1, 'ss-clear': 1, 'ss-chip': 1,
+    'ec-digit': 1, 'ec-back': 1, 'ec-clear': 1,
+    'plan-qty-digit': 1, 'plan-qty-back': 1, 'plan-qty-clear': 1, 'plan-qty-edit': 1,
+    'setup-digit': 1, 'setup-back': 1, 'setup-clear': 1
+  };
+  if (DISMISS_TOAST_ON_INPUT[act]) dismissActionToast();
+
   if (typeof handleSyncAction === 'function' && handleSyncAction(act, v, e)) return;
 
   switch (act) {
@@ -9366,6 +9608,17 @@ function onClick(e) {
       break;
     case 'xfer-to':
       confirmXfer(modal && modal.srcId, btn.dataset.id, modal && modal.candKey);
+      break;
+    case 'adopt-afternoon-ranges':
+      modal = {
+        type: 'confirm',
+        title: '改用新的下半場號碼？',
+        body: '第二台從 2500 開始，第三台從 2000 開始，第一台先留空（每天 50xx 不一定）。已抄的號碼不會改。',
+        ok: '改用新號碼',
+        cancel: '取消',
+        onOk: () => adoptNewAfternoonRanges()
+      };
+      render();
       break;
     case 'open-start':
       openSetStart(btn.dataset.id);
@@ -10323,6 +10576,7 @@ function bind() {
     requestAnimationFrame(() => {
       fitItemBtnLabels();
       layoutSegIndicators();
+      placeActionToast();
     });
   });
   window.addEventListener('orientationchange', () => {
@@ -10336,7 +10590,10 @@ function bind() {
   });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
-      requestAnimationFrame(layoutSegIndicators);
+      requestAnimationFrame(() => {
+        layoutSegIndicators();
+        placeActionToast();
+      });
     });
   }
   document.addEventListener('contextmenu', (e) => {
@@ -10540,6 +10797,15 @@ if (typeof window !== 'undefined') {
   window.__getAnchor = getAnchor;
   window.__restoreCurrent = restoreCurrent;
   window.__snapshotProgress = snapshotProgress;
+  window.__placeActionToast = placeActionToast;
+  window.__dismissActionToast = dismissActionToast;
+  window.__afternoonLooksLikeOldScheme = afternoonLooksLikeOldScheme;
+  window.__afternoonRangesAreDefault = afternoonRangesAreDefault;
+  window.__migrateAfternoonV98 = migrateAfternoonV98;
+  window.__adoptNewAfternoonRanges = adoptNewAfternoonRanges;
+  window.__auctionDayStartMs = auctionDayStartMs;
+  window.__isStaleProgressAt = isStaleProgressAt;
+  window.__cleanNewDayProgressIfNeeded = cleanNewDayProgressIfNeeded;
   window.__setDraftNum = (v) => { draftNum = String(v || ''); };
   window.__getDraftNum = () => draftNum;
   window.__lockItem = lockItem;
@@ -10570,6 +10836,7 @@ function init() {
   if (typeof initSync === 'function') initSync();
   if (typeof initGlobalProgress === 'function') initGlobalProgress();
   applyFixedStartPrefills();
+  cleanNewDayProgressIfNeeded();
   ensureAutoAnchors();
   render();
   syncProgressTimer();

@@ -5883,10 +5883,10 @@ html.is-dragging .item-pick {
 .jump-sheet-btn:active { background: #3a3500; }
 
 
-/* ===== v97: large, lasting 復原 toast — visible after 起始 / 跳到 / 現在 / 選台 ===== */
+/* ===== v98: large 復原 toast in empty list area, never over +/- / keypad / nav ===== */
 .toast.has-action {
-  top: auto;
-  bottom: calc(8px + var(--safe-b, 0px) + var(--nav-h, 76px));
+  top: calc(var(--safe-t) + var(--header-h, 56px) + 44px);
+  bottom: auto;
   left: 10px;
   right: 10px;
   width: auto;
@@ -5904,7 +5904,7 @@ html.is-dragging .item-pick {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
   border: 2px solid #111;
   z-index: 10050;
-  pointer-events: auto;
+  pointer-events: none;
   white-space: normal;
 }
 .toast.has-action button { pointer-events: auto; }
@@ -5934,8 +5934,19 @@ html.is-dragging .item-pick {
 #app:has(#plan-screen) .toast.has-action,
 #app:has(#sum-screen) .toast.has-action,
 #app:has(#paddle) .toast.has-action {
-  top: auto;
-  bottom: calc(12px + var(--safe-b, 0px));
+  top: calc(var(--safe-t) + 12px);
+  bottom: auto;
+}
+#app:has(.overlay .keypad) .toast.has-action {
+  top: calc(var(--safe-t) + 12px);
+  bottom: auto;
+}
+.adopt-afternoon-btn {
+  width: 100%;
+  margin-top: 12px;
+  min-height: 52px;
+  font-size: 18px;
+  font-weight: 900;
 }
 @media (max-width: 360px) {
   .toast.has-action { font-size: 18px; min-height: 60px; padding: 8px 8px 8px 12px; }
