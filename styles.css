@@ -5625,3 +5625,98 @@ html.is-dragging .item-pick {
   .plan-footer .plan-grid-toggle { min-height: 52px; }
   .plan-add { max-height: min(42dvh, calc(100% - 16.5rem)); padding: 6px 10px 6px; }
 }
+
+
+/* ===== v94: compact inset 備註 rows; list fills leftover; picker is a bottom sheet ===== */
+.plan-screen.is-picking .plan-mid .plan-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding-bottom: 8px;
+}
+.plan-add {
+  flex: 0 1 auto;
+  max-height: 45dvh;
+  padding: 8px 12px 6px;
+  border-top: 1px solid #4a4a54;
+}
+@media (max-height: 720px) {
+  .plan-add { max-height: 45dvh; padding: 6px 10px 4px; }
+  .plan-footer .plan-grid-toggle { min-height: 52px; }
+}
+.plan-screen.is-picking .plan-footer {
+  padding-top: 4px;
+}
+.plan-sec {
+  margin-bottom: 10px;
+}
+.plan-sec-head { margin: 0 0 6px; }
+.plan-sec h2,
+.plan-sec-head h2,
+.plan-sec h2.plan-target {
+  font-size: clamp(22px, 6.2vw, 24px);
+  min-height: 0;
+  line-height: 1.2;
+}
+.plan-sec h2 span {
+  font-size: 14px;
+  padding: 1px 8px;
+}
+.plan-hint {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.plan-empty { padding: 6px 0 8px; font-size: 16px; }
+.plan-row {
+  gap: 8px;
+  padding: 6px 12px;
+  min-height: 0;
+}
+.plan-text {
+  font-size: clamp(20px, 5.2vw, 21px);
+  line-height: 1.2;
+}
+.plan-remain {
+  font-size: 14px;
+  line-height: 1.2;
+}
+.plan-main { gap: 1px; }
+.plan-check {
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  border-radius: 10px;
+}
+.plan-qty-dec-lg {
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  border-radius: 10px;
+}
+.plan-qty-edit,
+.plan-qty-read {
+  min-width: 48px;
+  min-height: 40px;
+  font-size: 18px;
+  border-radius: 10px;
+}
+.plan-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #e6e0cc;
+  background: #171717;
+  border: 1px solid var(--line);
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.plan-del:active { background: var(--bg-press); }
+@media (max-width: 360px) {
+  .plan-row { gap: 6px; padding: 6px 10px; }
+  .plan-del { padding: 0 8px; min-width: 40px; }
+}
