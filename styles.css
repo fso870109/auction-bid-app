@@ -5800,3 +5800,84 @@ html.is-dragging .item-pick {
   .plan-add { max-height: 60dvh; }
   .plan-footer .plan-grid-toggle { min-height: 48px; }
 }
+
+
+/* ===== v96: 下半場 台別 — big jump to the next segment, quick start picks ===== */
+.jump-btn {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: #221f00;
+  border: 2px solid var(--yellow);
+  color: var(--yellow);
+  font-size: clamp(18px, 5.2vw, 22px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  font-variant-numeric: tabular-nums;
+}
+.jump-btn:active { background: #3a3500; }
+@media (max-width: 360px) {
+  .jump-btn { font-size: 18px; padding: 0 2px; }
+}
+.live-info-lbl {
+  font-size: 15px;
+  height: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  line-height: 18px;
+}
+.live-col-foot .live-cur {
+  height: 56px;
+  min-height: 56px;
+  max-height: 56px;
+}
+.start-btn { font-size: 20px; }
+.start-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.start-chip {
+  flex: 1 1 0;
+  min-width: 88px;
+  min-height: 52px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  border: 2px solid var(--line);
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.start-chip.on {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  background: #221f00;
+}
+.start-chip:active { background: var(--bg-press); }
+.jump-sheet-btn {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  margin: 4px 0 8px;
+  border-radius: 12px;
+  background: #221f00;
+  border: 2px solid var(--yellow);
+  color: var(--yellow);
+  font-size: 20px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.jump-sheet-btn:active { background: #3a3500; }

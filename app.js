@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v95';
+const APP_VERSION = 'v96';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -866,19 +866,66 @@ const DEFAULT_MACHINES = {
     { id: 'm2', name: '第二台・水菜', ranges: [{ start: 3001, end: 3499 }] },
     { id: 'm3', name: '第三台', ranges: [{ start: 3500, end: 3999 }] }
   ],
+  /* 下半場 瓜果: every 台 runs on its own and jumps to its next segment at the tail.
+     第一台 starts at 50xx (not fixed, e.g. 5001 or 5150) then 6001.
+     第二台 starts at 2500, at its tail jumps to 5001.
+     第三台 starts at 2000/2001, at its tail jumps to 6001.
+     5xxx is shared by 第一台 and 第二台, 6xxx by 第一台 and 第三台, so the 台
+     always comes from the one picked, never from the number alone. */
   afternoon: [
     {
       id: 'a1',
       name: '第一台・瓜果',
       ranges: [
-        { start: 2001, end: 2499 },
+        { start: 5001, end: 5999 },
         { start: 6001, end: 6999 }
       ]
     },
-    { id: 'a2', name: '第二台・瓜果', ranges: [{ start: 2500, end: 5049 }] },
-    { id: 'a3', name: '第三台・瓜果', ranges: [{ start: 5050, end: 5999 }] }
+    {
+      id: 'a2',
+      name: '第二台・瓜果',
+      ranges: [
+        { start: 2500, end: 4999 },
+        { start: 5001, end: 5999 }
+      ]
+    },
+    {
+      id: 'a3',
+      name: '第三台・瓜果',
+      ranges: [
+        { start: 2000, end: 2499 },
+        { start: 6001, end: 6999 }
+      ]
+    }
   ]
 };
+
+const OLD_AFTERNOON_DEFAULT_RANGES = {
+  a1: [[2001, 2499], [6001, 6999]],
+  a2: [[2500, 5049]],
+  a3: [[5050, 5999]]
+};
+
+/* Move 下半場 台別 to the real mechanism, but only for people who still have
+   the old built-in numbers. Anything they typed in themselves stays as it is. */
+function migrateAfternoonV96(merged) {
+  const list = merged && merged.machines && merged.machines.afternoon;
+  if (!Array.isArray(list)) return false;
+  const key = (m) => JSON.stringify(((m && m.ranges) || [])
+    .filter((r) => r && r.start != null)
+    .map((r) => [Number(r.start), r.end == null ? null : Number(r.end)]));
+  const ids = Object.keys(OLD_AFTERNOON_DEFAULT_RANGES);
+  if (list.length !== ids.length) return false;
+  for (const id of ids) {
+    const m = list.find((x) => x && x.id === id);
+    if (!m || key(m) !== JSON.stringify(OLD_AFTERNOON_DEFAULT_RANGES[id])) return false;
+  }
+  for (const m of list) {
+    const fresh = DEFAULT_MACHINES.afternoon.find((x) => x.id === m.id);
+    if (fresh) m.ranges = structuredClone(fresh.ranges);
+  }
+  return true;
+}
 
 let state;
 let draftNum = '';
@@ -3183,10 +3230,24 @@ function segmentDist(from, to, start, ser) {
   return Number.isFinite(d) ? d : null;
 }
 
-function walkSeries(from, steps, start, ser) {
+/* 下半場: each 台 runs a segment to its tail and then jumps to another segment
+   (5xxx→6xxx, 25xx→5xxx, 2xxx→6xxx). It never wraps back to the series start. */
+function seriesWraps(half) {
+  return half !== 'afternoon';
+}
+
+function walkSeries(from, steps, start, ser, half) {
   const fromN = Number(from);
   if (!ser || start == null) {
     return { n: clampProgress(fromN + steps), capped: false, wrapped: false };
+  }
+  if (half && !seriesWraps(half)) {
+    const floor = Number(start);
+    const next = fromN + steps;
+    if (steps > 0 && fromN >= ser.hi) return { n: fromN, capped: true, wrapped: false };
+    if (steps > 0 && next > ser.hi) return { n: ser.hi, capped: true, wrapped: false };
+    if (steps < 0 && next < floor) return { n: Math.min(fromN, floor), capped: true, wrapped: false };
+    return { n: next, capped: false, wrapped: false };
   }
   const pos = seriesPos(fromN, start, ser);
   if (pos == null) return { n: clampProgress(fromN + steps), capped: false, wrapped: false };
@@ -3205,10 +3266,62 @@ function seriesAtEnd(machineId, half, cur) {
   if (now == null) return false;
   const ser = seriesOf(now, h);
   if (!ser) return false;
+  if (!seriesWraps(h)) return now >= ser.hi;
   const start = seriesStart(machineId, h, ser);
   if (start == null) return false;
   const pos = seriesPos(now, start, ser);
   return pos != null && pos >= seriesCycleLen(ser) - 1;
+}
+
+/* Where this 台 goes after the segment it is in now, from its own ranges.
+   Uses the start already set for that segment, else the range's first number.
+   Only ever offered as a tap; nothing jumps by itself. */
+function nextSegmentOf(machineId, half) {
+  const h = half || state.currentHalf;
+  const m = machineById(machineId, h);
+  const cur = currentOf(machineId, h);
+  if (!m || cur == null) return null;
+  const ser = seriesOf(cur, h);
+  if (!ser) return null;
+  const ranges = (m.ranges || []).filter((r) => r && r.start != null && Number.isFinite(Number(r.start)));
+  let idx = -1;
+  for (let i = 0; i < ranges.length; i++) {
+    const rs = seriesOf(ranges[i].start, h);
+    if (rs && rs.key === ser.key) { idx = i; break; }
+  }
+  if (idx < 0) return null;
+  for (let j = idx + 1; j < ranges.length; j++) {
+    const nser = seriesOf(ranges[j].start, h);
+    if (!nser || nser.key === ser.key) continue;
+    const seg = (pathEntry(machineId, h).segs || []).find((x) => x && x.key === nser.key);
+    const start = seg && seg.start != null && Number.isFinite(Number(seg.start))
+      ? Number(seg.start)
+      : Number(ranges[j].start);
+    return { start, ser: nser, key: nser.key };
+  }
+  return null;
+}
+
+function endOfSegmentToast(machineId, half) {
+  const next = nextSegmentOf(machineId, half);
+  toast(next
+    ? '這段已到尾，按「跳到 ' + next.start + '」'
+    : '這段已到尾，點「現在」輸入下一段號碼');
+}
+
+function jumpToNextSegment(machineId) {
+  const half = state.currentHalf;
+  const next = nextSegmentOf(machineId, half);
+  if (!next) {
+    toast('這台沒有下一段');
+    return;
+  }
+  modal = null;
+  editCurrent = null;
+  const snap = snapshotProgress(machineId, half);
+  setProgress(machineId, next.start, half, { silentAdopt: true });
+  offerUndo(snap, '已跳到 ' + next.start + '，按復原可退回');
+  render();
 }
 
 function nextPlannedEntry(machineId, half, cur) {
@@ -3371,6 +3484,7 @@ function defaultState() {
     lastPriority: 'watch',
     dayRules: [],
     machinesMigratedV9: true,
+    machinesMigratedAfternoonV96: true,
     itemsMigratedV17: true,
     itemsMigratedV21: true,
     itemsMigratedV46: true,
@@ -3472,6 +3586,10 @@ function loadState() {
     if (!saved.machinesMigratedV9) {
       migrateMorning3500(merged);
       merged.machinesMigratedV9 = true;
+    }
+    if (!saved.machinesMigratedAfternoonV96) {
+      migrateAfternoonV96(merged);
+      merged.machinesMigratedAfternoonV96 = true;
     }
     if (!saved.itemsMigratedV17) {
       migrateItemsV17(merged);
@@ -5499,7 +5617,7 @@ function currentOf(machineId, half) {
     const ser = seriesOf(a.number, h);
     const start = ser ? (seriesStart(machineId, h, ser) ?? a.number) : a.number;
     if (ser && start != null) {
-      const walked = walkSeries(a.number, advanced, start, ser);
+      const walked = walkSeries(a.number, advanced, start, ser, h);
       return walked.n;
     }
     let n = a.number + advanced;
@@ -5590,11 +5708,31 @@ function setProgress(machineId, next, half, opts) {
   return pathInfo;
 }
 
+/* A series that more than one 台 lists in its ranges (5xxx on 第一台 and 第二台,
+   6xxx on 第一台 and 第三台) is run by each of them in turn. Entering it on one
+   台 says nothing about the other 台's numbers, so never offer to take them over. */
+function seriesSharedByRanges(ser, half) {
+  if (!ser) return false;
+  const lo = seriesEffLo(ser);
+  let n = 0;
+  for (const m of (state.machines[half] || [])) {
+    const hit = (m.ranges || []).some((r) => {
+      if (!r || r.start == null) return false;
+      const a = Number(r.start);
+      const b = r.end == null ? Infinity : Number(r.end);
+      return a <= ser.hi && b >= lo;
+    });
+    if (hit) n += 1;
+  }
+  return n > 1;
+}
+
 function offerAdoptIfNeeded() {
   const job = pendingAdopt;
   pendingAdopt = null;
   if (!job || !job.ser) return;
   if (modal) return;
+  if (seriesSharedByRanges(job.ser, job.half)) return;
   let lots = lotsInSeriesOnOtherMachines(job.machineId, job.half, job.ser, { includeRunning: !!job.includeRunning });
   if (job.includeRunning && job.start != null) {
     const startN = Number(job.start);
@@ -5633,10 +5771,12 @@ function openSetStart(machineId) {
   const cur = currentOf(machineId, half);
   const ser = cur != null ? seriesOf(cur, half) : null;
   const start = ser ? seriesStart(machineId, half, ser) : null;
+  const prefill = start != null ? String(start) : (cur != null ? String(cur) : '');
   editStart = {
     machineId,
     half,
-    value: start != null ? String(start) : (cur != null ? String(cur) : '')
+    value: prefill,
+    fresh: !!prefill
   };
   modal = { type: 'set-start' };
   render();
@@ -5879,13 +6019,13 @@ function resumeProgress(machineId, half) {
   const cur = currentOf(machineId, h);
   if (cur == null) return;
   if (seriesAtEnd(machineId, h, cur)) {
-    toast('這段已到尾，點「現在」輸入下一段號碼');
+    endOfSegmentToast(machineId, h);
     return;
   }
   const cap = progressCap(machineId, h);
   const ser = seriesOf(cur, h);
   if (!ser && cap != null && cur >= cap) {
-    toast('這段已到尾，點「現在」輸入下一段號碼');
+    endOfSegmentToast(machineId, h);
     return;
   }
   const snap = snapshotProgress(machineId, h);
@@ -6297,14 +6437,14 @@ function bumpCurrent(machineId, delta) {
   const ser = seriesOf(cur, half);
   const start = ser ? (seriesStart(machineId, half, ser) ?? cur) : null;
   if (ser && start != null && delta > 0 && seriesAtEnd(machineId, half, cur)) {
-    toast('這段已到尾，點「現在」輸入下一段號碼');
+    endOfSegmentToast(machineId, half);
     return;
   }
   let next;
   if (ser && start != null) {
-    const walked = walkSeries(cur, delta, start, ser);
+    const walked = walkSeries(cur, delta, start, ser, half);
     if (walked.capped && delta > 0) {
-      toast('這段已到尾，點「現在」輸入下一段號碼');
+      endOfSegmentToast(machineId, half);
       return;
     }
     next = walked.n;
@@ -7897,6 +8037,10 @@ function renderLive() {
       const ser = cur != null ? seriesOf(cur, half) : null;
       const startN = displayStartOf(m.id, half);
       const infoLabel = liveInfoLabel(startN);
+      const nextSeg = nextSegmentOf(m.id, half);
+      const jumpBtn = nextSeg
+        ? `<button type="button" class="jump-btn" data-act="jump-next" data-id="${m.id}" aria-label="這一段拍完，跳到下一段 ${nextSeg.start}">跳到 ${nextSeg.start}</button>`
+        : '';
       const cells = lots.length
         ? lots
             .map((l) => {
@@ -7967,6 +8111,7 @@ function renderLive() {
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
           </div>
+          ${jumpBtn}
           <div class="live-foot-actions">
             <button type="button" class="xfer-btn" data-act="open-xfer" data-id="${m.id}">轉台</button>
             <button type="button" class="start-btn" data-act="open-start" data-id="${m.id}">起始</button>
@@ -8251,6 +8396,10 @@ function renderModal() {
     const ed = editCurrent;
     if (!ed) return '';
     const m = machineById(ed.machineId);
+    const nextSeg = nextSegmentOf(ed.machineId, state.currentHalf);
+    const jumpRow = nextSeg
+      ? `<button type="button" class="btn jump-sheet-btn" data-act="ec-jump" data-id="${escapeHtml(ed.machineId)}">這段拍完　跳到 ${nextSeg.start}</button>`
+      : '';
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
     const keypad = keys
       .map((k) => {
@@ -8264,6 +8413,7 @@ function renderModal() {
         <h3>現在拍到哪一號？</h3>
         <p>${escapeHtml(m?.name || '')}　直接輸入號碼。若這段已結束，輸入下一段第一號，例如 6080。長按「現在」可改這段起點。</p>
         <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
+        ${jumpRow}
         <div class="keypad">${keypad}</div>
         <div class="sheet-actions">
           <button type="button" class="btn primary" data-act="ec-ok">確定</button>
@@ -8276,6 +8426,16 @@ function renderModal() {
     const ed = editStart;
     if (!ed) return '';
     const m = machineById(ed.machineId, ed.half);
+    const chipStarts = [];
+    for (const r of (m && m.ranges) || []) {
+      if (r && r.start != null && Number.isFinite(Number(r.start)) && !chipStarts.includes(Number(r.start))) {
+        chipStarts.push(Number(r.start));
+      }
+    }
+    const startChips = chipStarts.length
+      ? `<div class="start-chips" role="group" aria-label="常用起點">${chipStarts.map((n) =>
+        `<button type="button" class="start-chip${String(ed.value) === String(n) ? ' on' : ''}" data-act="ss-chip" data-v="${n}">${n}</button>`).join('')}</div>`
+      : '';
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
     const keypad = keys
       .map((k) => {
@@ -8286,9 +8446,10 @@ function renderModal() {
       .join('');
     return `<div class="overlay" data-act="ss-cancel">
       <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
-        <h3>這段從幾號開始？</h3>
-        <p>${escapeHtml(m?.name || '')}　例如今天這台從 5180 起拍，低於 5180 的號碼會排在後面。</p>
+        <h3>這台今天從幾號開始？</h3>
+        <p>${escapeHtml(m?.name || '')}　起點每天不一定，例如 5001 或 5150。起點前面的號碼會排在後面。</p>
         <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
+        ${startChips}
         <div class="keypad">${keypad}</div>
         <div class="sheet-actions">
           <button type="button" class="btn primary" data-act="ss-ok">確定</button>
@@ -9113,7 +9274,8 @@ function onClick(e) {
     case 'edit-cur':
       editCurrent = {
         machineId: btn.dataset.id,
-        value: currentOf(btn.dataset.id) != null ? String(currentOf(btn.dataset.id)) : ''
+        value: currentOf(btn.dataset.id) != null ? String(currentOf(btn.dataset.id)) : '',
+        fresh: currentOf(btn.dataset.id) != null
       };
       modal = { type: 'edit-cur' };
       render();
@@ -9131,22 +9293,41 @@ function onClick(e) {
       openSetStart(btn.dataset.id);
       break;
     case 'ss-digit':
-      if (editStart && String(editStart.value || '').length < 4) {
+      if (editStart && editStart.fresh) {
+        editStart.value = v;
+        editStart.fresh = false;
+        render();
+      } else if (editStart && String(editStart.value || '').length < 4) {
         editStart.value = String(editStart.value || '') + v;
+        render();
+      }
+      break;
+    case 'ss-chip':
+      if (editStart && /^\d{4}$/.test(String(v || ''))) {
+        editStart.value = String(v);
+        editStart.fresh = true;
         render();
       }
       break;
     case 'ss-back':
       if (editStart) {
+        editStart.fresh = false;
         editStart.value = String(editStart.value || '').slice(0, -1);
         render();
       }
       break;
     case 'ss-clear':
       if (editStart) {
+        editStart.fresh = false;
         editStart.value = '';
         render();
       }
+      break;
+    case 'jump-next':
+      jumpToNextSegment(btn.dataset.id);
+      break;
+    case 'ec-jump':
+      jumpToNextSegment(btn.dataset.id || (editCurrent && editCurrent.machineId));
       break;
     case 'ss-ok':
       commitSetStart();
@@ -9157,19 +9338,26 @@ function onClick(e) {
       render();
       break;
     case 'ec-digit':
-      if (editCurrent && editCurrent.value.length < 4) {
+      /* The number shown is the current one: the first digit typed starts a new number. */
+      if (editCurrent && editCurrent.fresh) {
+        editCurrent.value = v;
+        editCurrent.fresh = false;
+        render();
+      } else if (editCurrent && editCurrent.value.length < 4) {
         editCurrent.value += v;
         render();
       }
       break;
     case 'ec-back':
       if (editCurrent) {
+        editCurrent.fresh = false;
         editCurrent.value = editCurrent.value.slice(0, -1);
         render();
       }
       break;
     case 'ec-clear':
       if (editCurrent) {
+        editCurrent.fresh = false;
         editCurrent.value = '';
         render();
       }
