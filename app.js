@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v100';
+const APP_VERSION = 'v101';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -3102,12 +3102,14 @@ function renderPlanScreen() {
     const purpose = planPurposeOf(p);
     const purposeLbl = planPurposeLabel(p);
     const purposeBtn = `<button type="button" class="plan-purpose ${purpose}" data-act="plan-purpose" data-id="${escapeHtml(p.id)}" aria-label="用途 ${purposeLbl}，點一下改成${purpose === 'delivery' ? '零賣' : '交貨'}">${purposeLbl}</button>`;
+    const remainBlock = remainHtml ? `<div class="plan-meta">${remainHtml}</div>` : '';
     return `<div class="plan-row${kind === 'done' ? ' done' : ''}">
       <button type="button" class="plan-check${p.done ? ' on' : ''}" data-act="${p.done ? 'plan-undone' : 'plan-done'}" data-id="${escapeHtml(p.id)}" aria-label="${p.done ? '取消完成' : '完成'}">${p.done ? '✓' : ''}</button>
       <div class="plan-main">
         <div class="plan-text">${escapeHtml(p.text)}</div>
-        <div class="plan-meta">${remainHtml}${purposeBtn}</div>
+        ${remainBlock}
       </div>
+      ${purposeBtn}
       ${qtyCtrl}
       <button type="button" class="plan-del" data-act="plan-del" data-id="${escapeHtml(p.id)}" aria-label="刪除">刪</button>
     </div>`;
@@ -8484,6 +8486,7 @@ function renderLive() {
 
   const activeMachines = state.machines[half] || [];
 
+  const anyJump = activeMachines.some((m) => jumpTargetOf(m.id, half) != null);
   const cols = activeMachines
     .map((m) => {
       const cur = currentOf(m.id);
@@ -8500,6 +8503,9 @@ function renderLive() {
       const jumpN = jumpTargetOf(m.id, half);
       const jumpBtn = jumpN != null
         ? `<button type="button" class="jump-btn hold-btn" data-act="jump-next" data-hold="jump-next" data-id="${m.id}" aria-label="按住跳到 ${jumpN}"><span class="jump-btn-lbl">跳到</span><span class="jump-btn-num">${jumpN}</span></button>`
+        : '';
+      const jumpSlot = anyJump
+        ? `<div class="jump-slot">${jumpBtn}</div>`
         : '';
       const cells = lots.length
         ? lots
@@ -8571,11 +8577,11 @@ function renderLive() {
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="-1" aria-label="進度減一">−</button>
             <button type="button" class="cur-step" data-act="bump" data-id="${m.id}" data-d="1" aria-label="進度加一">＋</button>
           </div>
-          ${jumpBtn}
           <div class="live-foot-actions">
             <button type="button" class="xfer-btn" data-act="open-xfer" data-id="${m.id}">轉台</button>
             <button type="button" class="start-btn" data-act="open-start" data-id="${m.id}">起始</button>
           </div>
+          ${jumpSlot}
         </div>
       </section>`;
     })

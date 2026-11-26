@@ -5619,13 +5619,18 @@ html.is-dragging .item-pick {
 .plan-main {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 .plan-qty-row,
-.plan-del {
+.plan-del,
+.plan-purpose {
   flex: 0 0 auto;
 }
 .plan-remain {
-  white-space: normal;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @media (max-width: 360px) {
   .plan-row { gap: 8px; }
@@ -5685,6 +5690,10 @@ html.is-dragging .item-pick {
 .plan-text {
   font-size: clamp(20px, 5.2vw, 21px);
   line-height: 1.2;
+  word-break: keep-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .plan-remain {
   font-size: 14px;
@@ -5736,12 +5745,14 @@ html.is-dragging .item-pick {
 }
 .plan-purpose {
   flex: 0 0 auto;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 56px;
+  min-width: 52px;
   min-height: 40px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 10px;
   border-radius: 10px;
   font-size: 16px;
   font-weight: 800;
@@ -5779,8 +5790,16 @@ html.is-dragging .item-pick {
 }
 .sum-purpose.delivery { background: #2f62e8; color: #fff; }
 @media (max-width: 360px) {
-  .plan-row { gap: 6px; padding: 6px 10px; }
-  .plan-purpose { min-width: 52px; padding: 0 10px; font-size: 16px; }
+  .plan-body,
+  .plan-mid .plan-body,
+  .plan-screen:not(.is-picking) .plan-body {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .plan-row { gap: 4px; padding: 6px 2px; }
+  .plan-qty-row { gap: 4px; }
+  .plan-remain .plan-frac { display: none; }
+  .plan-purpose { min-width: 48px; width: 48px; min-height: 40px; height: 40px; padding: 0 4px; font-size: 16px; }
   .plan-del { padding: 0 8px; min-width: 40px; }
 }
 
@@ -5910,9 +5929,20 @@ html.is-dragging .item-pick {
   color: var(--yellow);
 }
 .jump-btn:active { background: #3a3500; }
+.jump-slot {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  width: 100%;
+  min-width: 0;
+  height: 52px;
+  min-height: 52px;
+}
+.jump-slot:empty { visibility: hidden; pointer-events: none; }
 @media (max-width: 360px) {
   .jump-btn { height: 52px; min-height: 52px; padding: 2px 2px; }
   .jump-btn-num { font-size: 20px; }
+  .jump-slot { height: 52px; min-height: 52px; }
 }
 .start-jump-fields {
   display: grid;
