@@ -5881,3 +5881,64 @@ html.is-dragging .item-pick {
   font-variant-numeric: tabular-nums;
 }
 .jump-sheet-btn:active { background: #3a3500; }
+
+
+/* ===== v97: large, lasting 復原 toast — visible after 起始 / 跳到 / 現在 / 選台 ===== */
+.toast.has-action {
+  top: auto;
+  bottom: calc(8px + var(--safe-b, 0px) + var(--nav-h, 76px));
+  left: 10px;
+  right: 10px;
+  width: auto;
+  max-width: none;
+  height: auto;
+  min-height: 64px;
+  max-height: none;
+  padding: 10px 10px 10px 14px;
+  border-radius: 14px;
+  background: #ffe500;
+  color: #111;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.25;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  border: 2px solid #111;
+  z-index: 10050;
+  pointer-events: auto;
+  white-space: normal;
+}
+.toast.has-action button { pointer-events: auto; }
+
+.toast.has-action span {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.25;
+  color: #111;
+}
+.toast.has-action button {
+  height: 52px;
+  min-height: 52px;
+  min-width: 96px;
+  padding: 0 18px;
+  border-radius: 12px;
+  background: #111;
+  color: #ffe500;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+.toast.has-action button:active { filter: brightness(1.25); }
+#app:has(#plan-screen) .toast.has-action,
+#app:has(#sum-screen) .toast.has-action,
+#app:has(#paddle) .toast.has-action {
+  top: auto;
+  bottom: calc(12px + var(--safe-b, 0px));
+}
+@media (max-width: 360px) {
+  .toast.has-action { font-size: 18px; min-height: 60px; padding: 8px 8px 8px 12px; }
+  .toast.has-action span { font-size: 18px; }
+  .toast.has-action button { min-width: 84px; height: 48px; min-height: 48px; font-size: 20px; padding: 0 14px; }
+}

@@ -52,7 +52,7 @@ function gpAnchorOf(half, mid) {
   const cleared = !!a.cleared || a.number == null || a.number === '';
   const n = cleared ? null : Number(a.number);
   if (!cleared && !Number.isFinite(n)) return null;
-  return { number: cleared ? null : Math.round(n), cleared, paused: !!a.paused, ended: !!a.ended, at };
+  return { number: cleared ? null : Math.round(n), cleared, paused: !!a.paused, ended: !!a.ended, at, seeded: !!a.seeded };
 }
 
 function gpSig(a) {
@@ -97,6 +97,9 @@ function onGlobalProgressSaved() {
   let added = false;
   gpEachLocal((half, mid) => {
     const key = gpKey(day, half, mid);
+    const raw = state.progressAnchors && state.progressAnchors[half] && state.progressAnchors[half][mid];
+    /* Local opening-number prefills stay on this phone until someone really sets a number. */
+    if (raw && raw.seeded && !raw.cleared) return;
     const a = gpAnchorOf(half, mid);
     const sig = gpSig(a);
     if (sig === (gpKnown[key] || '')) return;
@@ -162,20 +165,25 @@ function gpApplyEntry(half, mid, entry, serverNow) {
     ended: !!entry.ended,
     at: Math.round(localAt)
   };
+  const rawLocal = state.progressAnchors && state.progressAnchors[half] && state.progressAnchors[half][mid];
+  const localSeeded = !!(rawLocal && rawLocal.seeded && !rawLocal.cleared);
   const pend = gpPendingMap()[key];
-  if (pend) {
+  if (pend && !localSeeded) {
     const remoteTs = Number(entry.ts) - (Number.isFinite(skew) ? skew : 0);
     if (Number(pend.ts) > remoteTs) return false; // my unsent edit is newer
     delete gpPendingMap()[key];
+  } else if (pend && localSeeded) {
+    delete gpPendingMap()[key];
   }
   const local = gpAnchorOf(half, mid);
-  if (gpEquivalent(local, remote)) {
+  if (!localSeeded && gpEquivalent(local, remote)) {
     gpKnown[key] = gpSig(local);
     return false;
   }
   if (!state.progressAnchors) state.progressAnchors = {};
   if (!state.progressAnchors[half]) state.progressAnchors[half] = {};
   if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+  /* A real number from another phone always replaces a local opening prefill. */
   state.progressAnchors[half][mid] = {
     number: remote.number,
     at: remote.at,

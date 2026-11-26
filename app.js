@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v96';
+const APP_VERSION = 'v97';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4088,15 +4088,24 @@ function restoreCurrent(snap) {
   if (!state.progressAnchors) state.progressAnchors = defaultAnchors(state.machines);
   if (!state.progressAnchors[half]) state.progressAnchors[half] = {};
   if (Object.prototype.hasOwnProperty.call(snap, 'anchor')) {
-    state.progressAnchors[half][snap.machineId] = snap.anchor ? { ...snap.anchor } : null;
+    if (!snap.anchor) {
+      writeAnchor(snap.machineId, half, null);
+    } else {
+      const a = { ...snap.anchor };
+      a.at = nowDate().getTime();
+      a.seeded = false;
+      a.cleared = false;
+      state.progressAnchors[half][snap.machineId] = a;
+    }
   } else if (snap.current == null || snap.current === '') {
-    state.progressAnchors[half][snap.machineId] = null;
+    writeAnchor(snap.machineId, half, null);
   } else {
-    state.progressAnchors[half][snap.machineId] = {
+    writeAnchor(snap.machineId, half, {
       number: Number(snap.current),
       at: nowDate().getTime(),
-      paused: true
-    };
+      paused: true,
+      ended: false
+    });
   }
   if (snap.seriesPath && typeof snap.seriesPath === 'object') state.seriesPath = structuredClone(snap.seriesPath);
   if (snap.seriesPlans && typeof snap.seriesPlans === 'object') state.seriesPlans = structuredClone(snap.seriesPlans);
@@ -4106,7 +4115,7 @@ function restoreCurrent(snap) {
 
 function offerUndo(snap, msg) {
   undoStack = snap;
-  toast(msg, 2800, { label: '復原', fn: undoLast });
+  toast(msg, 6000, { label: '復原', fn: undoLast });
 }
 
 function undoLast() {
@@ -5559,7 +5568,9 @@ function getAnchor(machineId, half) {
     number: Number.isFinite(number) ? number : null,
     at: Number.isFinite(at) ? at : null,
     paused: !!a.paused,
-    ended: !!a.ended
+    ended: !!a.ended,
+    seeded: !!a.seeded,
+    cleared: !!a.cleared
   };
 }
 
@@ -5576,7 +5587,8 @@ function writeAnchor(machineId, half, anchor) {
     at: anchor.at,
     paused: !!anchor.paused,
     ended: !!anchor.ended,
-    cleared: false
+    cleared: false,
+    seeded: !!anchor.seeded
   };
 }
 
@@ -5983,6 +5995,8 @@ function ensureAutoAnchors() {
       const cur = currentOf(m.id, half);
       if (cur == null) continue;
       if (seriesAtEnd(m.id, half, cur)) continue;
+      const a0 = getAnchor(m.id, half);
+      if (a0 && a0.seeded) continue;
       const cap = progressCap(m.id, half);
       const ser = seriesOf(cur, half);
       if (!ser && cap != null && cur >= cap) continue;
@@ -6149,7 +6163,7 @@ function toast(msg, ms, action) {
       node.classList.add('hidden');
       node.innerHTML = '';
     }
-  }, ms || (action ? 2800 : 1600));
+  }, ms || (action ? 6000 : 1600));
 }
 
 function paintToast(el) {
@@ -6172,6 +6186,11 @@ function paintToast(el) {
 function fitToastText() {
   const label = document.querySelector('#toast:not(.hidden) span');
   if (!label) return;
+  const bar = label.closest('#toast');
+  if (bar && bar.classList.contains('has-action')) {
+    label.style.fontSize = '';
+    return;
+  }
   label.style.fontSize = '';
   let size = parseFloat(getComputedStyle(label).fontSize) || 13;
   const min = 11;
@@ -6326,8 +6345,10 @@ function commitLot(num, machineId, half) {
   itemTargetId = lot.id;
   itemTargetAuto = true;
   saveState();
-  if (keepItem) toast(`已存 ${lot.number}`, 1400);
-  else toast(lot.item ? `已存 ${lot.number}　${lot.item}` : `已存 ${num}　${machineNameOf(lot)}`);
+  const savedLabel = lot.item
+    ? `已存 ${lot.number}　${lot.item}`
+    : `已存 ${num}　${machineNameOf(lot)}`;
+  offerUndo({ kind: 'range-add', lots: [lot] }, savedLabel);
   buzz(26);
   render();
 }
@@ -6778,6 +6799,62 @@ function themeLabel(theme) {
 }
 
 /* ---------- 新的一天 ---------- */
+/* A day's opening number we can fill in automatically, only when the 台's
+   first-segment start is fixed (not 第一台 瓜果, whose start varies by day). */
+function fixedStartOf(machine, half) {
+  if (!machine) return null;
+  const h = half || '';
+  const ranges = (machine.ranges || []).filter((r) => r && r.start != null && Number.isFinite(Number(r.start)));
+  if (!ranges.length) return null;
+  if (h === 'afternoon') {
+    /* 第一台 starts at 50xx, different every day — leave blank for Frank. */
+    if (machine.id === 'a1') return null;
+    if (machine.id === 'a2' || machine.id === 'a3') return Number(ranges[0].start);
+    return null;
+  }
+  /* 上半場 台別 each have one fixed range (1001 / 3001 / 3500). */
+  if (h === 'morning' && ranges.length === 1) return Number(ranges[0].start);
+  return null;
+}
+
+function machineHasProgress(machineId, half) {
+  const h = half || (state && state.currentHalf);
+  if (currentOf(machineId, h) != null) return true;
+  if (typeof displayStartOf === 'function' && displayStartOf(machineId, h) != null) return true;
+  const raw = state.progressAnchors && state.progressAnchors[h] && state.progressAnchors[h][machineId];
+  if (raw && typeof raw === 'object' && (raw.cleared || raw.number != null || raw.seeded)) return true;
+  const segs = (typeof pathEntry === 'function' && pathEntry(machineId, h).segs) || [];
+  if (segs.some((seg) => seg && seg.start != null)) return true;
+  return false;
+}
+
+/* Fill 現在/起 with the fixed opening number when this 台 is still blank today.
+   Seeded values are local only: they do not upload to shared progress, they
+   stay paused so auto-advance does not run, and a number from another phone wins. */
+function applyFixedStartPrefills() {
+  if (!state || !state.machines) return false;
+  let changed = false;
+  for (const half of HALVES) {
+    for (const m of state.machines[half] || []) {
+      const start = fixedStartOf(m, half);
+      if (start == null) continue;
+      if (machineHasProgress(m.id, half)) continue;
+      setSeriesStart(m.id, start, half);
+      if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+      state.currentNumbers[half][m.id] = start;
+      writeAnchor(m.id, half, {
+        number: start,
+        at: nowDate().getTime(),
+        paused: true,
+        ended: false,
+        seeded: true
+      });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function startNewDay(confirmed, opts) {
   opts = opts || {};
   const auto = !!opts.auto;
@@ -6826,6 +6903,7 @@ function startNewDay(confirmed, opts) {
   state.seriesPath = defaultSeriesPath(state.machines);
   state.seriesPlans = defaultSeriesPlans(state.machines);
   state.machineMerges = defaultMachineMerges(state.machines);
+  applyFixedStartPrefills();
   if (typeof syncProgressTimer === 'function') syncProgressTimer();
   state.tab = 'note';
   state.currentHalf = 'fruit';
@@ -10450,6 +10528,18 @@ if (typeof window !== 'undefined') {
   window.__setCurrent = setCurrent;
   window.__setProgress = setProgress;
   window.__offerAdoptIfNeeded = offerAdoptIfNeeded;
+  window.__fixedStartOf = fixedStartOf;
+  window.__applyFixedStartPrefills = applyFixedStartPrefills;
+  window.__offerUndo = offerUndo;
+  window.__undoLast = undoLast;
+  window.__commitSetStart = commitSetStart;
+  window.__jumpToNextSegment = jumpToNextSegment;
+  window.__commitLot = commitLot;
+  window.__pickMachineForDraft = pickMachineForDraft;
+  window.__writeAnchor = writeAnchor;
+  window.__getAnchor = getAnchor;
+  window.__restoreCurrent = restoreCurrent;
+  window.__snapshotProgress = snapshotProgress;
   window.__setDraftNum = (v) => { draftNum = String(v || ''); };
   window.__getDraftNum = () => draftNum;
   window.__lockItem = lockItem;
@@ -10479,6 +10569,7 @@ function init() {
   registerSW();
   if (typeof initSync === 'function') initSync();
   if (typeof initGlobalProgress === 'function') initGlobalProgress();
+  applyFixedStartPrefills();
   ensureAutoAnchors();
   render();
   syncProgressTimer();
