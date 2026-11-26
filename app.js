@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v94';
+const APP_VERSION = 'v95';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -9401,9 +9401,13 @@ function onVisibility() {
 }
 
 function syncViewportHeight() {
+  const root = document.documentElement;
   const vv = window.visualViewport;
-  const h = Math.round((vv && vv.height) || window.innerHeight || document.documentElement.clientHeight);
-  if (h > 0) document.documentElement.style.setProperty('--app-h', h + 'px');
+  const layoutH = Math.round(window.innerHeight || root.clientHeight || 0);
+  const h = Math.round((vv && vv.height) || layoutH);
+  const top = Math.round((vv && vv.offsetTop) || 0);
+  if (h > 0) root.style.setProperty('--app-h', h + 'px');
+  root.style.setProperty('--app-top', top + 'px');
 }
 
 
