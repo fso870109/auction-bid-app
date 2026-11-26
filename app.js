@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v107';
+const APP_VERSION = 'v108';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -1421,6 +1421,9 @@ const GOURD_PEEL_CROP = {
   '薑': 'tan',
   '萵苣莖': 'paleGreen',
   'A菜心': 'paleGreen',
+  '萵筍': 'paleGreen',
+  '大心菜': 'paleGreen',
+  '菜心': 'paleGreen',
   '薯蕷': 'tan',
   '山藥': 'tan',
   '豆薯': 'tan',
@@ -3782,6 +3785,7 @@ function defaultState() {
     itemsMigratedV67: true,
     itemsMigratedV85: true,
     itemsMigratedV86: true,
+    itemsMigratedV108: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
     lotsPerMin: DEFAULT_LOTS_PER_MIN,
     skipAutoDay: '',
@@ -3907,6 +3911,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV86) {
       migrateItemsV86(merged);
+    }
+    if (!saved.itemsMigratedV108) {
+      migrateItemsV108(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -5147,6 +5154,111 @@ function migrateItemsV86(merged) {
     }
   }
   merged.itemsMigratedV86 = true;
+}
+
+const DISPLAY_RENAME_V108 = {
+  'A菜心': '萵筍',
+  '萵苣莖': '萵筍',
+  '大心菜': '菜心',
+  '大心菜-帶葉': '菜心',
+  '大心菜 帶葉': '菜心'
+};
+
+const CAIXIN_V108_NAMES = new Set([
+  '大心菜', '菜心', '大心菜-帶葉', '大心菜 帶葉', '大心菜-其他', '大心菜 其他'
+]);
+
+function renameDisplayTextV108(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return raw;
+  if (DISPLAY_RENAME_V108[raw]) return DISPLAY_RENAME_V108[raw];
+  const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw, size: '', raw };
+  if (parsed && parsed.name && DISPLAY_RENAME_V108[parsed.name]) {
+    const next = DISPLAY_RENAME_V108[parsed.name];
+    if (parsed.size) return next + ' ' + parsed.size;
+    if (parsed.raw && parsed.raw !== parsed.name) return parsed.raw.replace(parsed.name, next);
+    return next;
+  }
+  return raw;
+}
+
+function migrateItemsV108(merged) {
+  const rename = (raw) => {
+    const n = String(raw || '').trim();
+    if (!n) return n;
+    const next = renameDisplayTextV108(n);
+    return next || n;
+  };
+  for (const p of merged.planItems || []) {
+    if (!p) continue;
+    p.text = rename(p.text);
+  }
+  for (const lot of merged.lots || []) {
+    if (!lot || !lot.item) continue;
+    lot.item = rename(lot.item);
+  }
+  for (const h of merged.boughtHistory || []) {
+    for (const it of (h && h.items) || []) {
+      if (!it) continue;
+      it.text = rename(it.text);
+    }
+  }
+  if (merged.itemCounts && typeof merged.itemCounts === 'object') {
+    for (const [from, to] of Object.entries(DISPLAY_RENAME_V108)) mergeCountKey(merged.itemCounts, from, to);
+  }
+  if (merged.itemCountsByHalf && typeof merged.itemCountsByHalf === 'object') {
+    for (const half of Object.keys(merged.itemCountsByHalf)) {
+      const map = merged.itemCountsByHalf[half];
+      if (!map || typeof map !== 'object') continue;
+      for (const [from, to] of Object.entries(DISPLAY_RENAME_V108)) mergeCountKey(map, from, to);
+    }
+  }
+  if (merged.itemUseLogByHalf && typeof merged.itemUseLogByHalf === 'object') {
+    for (const half of Object.keys(merged.itemUseLogByHalf)) {
+      const log = merged.itemUseLogByHalf[half];
+      if (!log || typeof log !== 'object') continue;
+      for (const [from, to] of Object.entries(DISPLAY_RENAME_V108)) mergeUseLogKey(log, from, to);
+    }
+  }
+  const renameInList = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    const out = [];
+    const have = new Set();
+    for (const raw of arr) {
+      const n = rename(raw);
+      if (!n || have.has(n)) continue;
+      have.add(n);
+      out.push(n);
+    }
+    return out;
+  };
+  if (Array.isArray(merged.customItems)) merged.customItems = renameInList(merged.customItems);
+  if (merged.customItemsByHalf && typeof merged.customItemsByHalf === 'object') {
+    for (const half of Object.keys(merged.customItemsByHalf)) {
+      merged.customItemsByHalf[half] = renameInList(merged.customItemsByHalf[half]);
+    }
+  }
+  if (merged.itemOrderByHalf && typeof merged.itemOrderByHalf === 'object') {
+    for (const half of Object.keys(merged.itemOrderByHalf)) {
+      const groups = merged.itemOrderByHalf[half];
+      if (!groups || typeof groups !== 'object') continue;
+      for (const group of Object.keys(groups)) {
+        groups[group] = renameInList(groups[group]);
+      }
+    }
+  }
+  moveCustomsAndCounts(merged, 'morning', 'afternoon', CAIXIN_V108_NAMES);
+  if (merged.itemOrderByHalf && merged.itemOrderByHalf.morning && typeof merged.itemOrderByHalf.morning === 'object') {
+    for (const group of Object.keys(merged.itemOrderByHalf.morning)) {
+      const arr = merged.itemOrderByHalf.morning[group];
+      if (!Array.isArray(arr)) continue;
+      merged.itemOrderByHalf.morning[group] = arr.filter((n) => !CAIXIN_V108_NAMES.has(String(n || '').trim()));
+    }
+  }
+  if (typeof normalizeItemOrderMap === 'function') {
+    merged.itemOrderByHalf = normalizeItemOrderMap(merged.itemOrderByHalf);
+  }
+  merged.itemsMigratedV108 = true;
 }
 
 function migrateItemsV85(merged) {
