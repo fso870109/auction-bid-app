@@ -6225,3 +6225,165 @@ html.is-dragging .item-pick {
   .plan-remain .plan-frac { display: inline; }
   .plan-del { min-width: 36px; width: 36px; padding: 0 2px; }
 }
+
+
+/* ===== v103: no system keyboard on app keypads; pin 取消/確定; vertical 件數 stepper ===== */
+.overlay {
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  bottom: auto;
+  height: var(--app-h, 100dvh);
+  max-height: var(--app-h, 100dvh);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.overlay:has(.keypad) .sheet,
+.overlay .sheet:has(.keypad) {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.overlay:has(.keypad) .sheet > h3,
+.overlay:has(.keypad) .sheet > p,
+.overlay:has(.keypad) .sheet > .lot-display,
+.overlay:has(.keypad) .sheet > .plan-qty-display,
+.overlay:has(.keypad) .sheet > .empty-hint,
+.overlay:has(.keypad) .sheet > .start-jump-fields,
+.overlay:has(.keypad) .sheet > .start-chips,
+.overlay:has(.keypad) .sheet > .jump-sheet-btn {
+  flex: 0 0 auto;
+}
+.overlay:has(.keypad) .sheet .keypad {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 8px;
+  align-content: stretch;
+}
+.overlay:has(.keypad) .sheet .key {
+  min-height: 52px;
+}
+.overlay:has(.keypad) .sheet .sheet-actions,
+.overlay:has(.keypad) .sheet .btn-save {
+  flex: 0 0 auto;
+  margin-top: 10px;
+}
+.plan-qty-sheet .lot-display,
+.plan-qty-display {
+  margin: 8px 0;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.plan-qty-sheet .lot-display .num,
+.plan-qty-display .num {
+  font-size: clamp(36px, 12vw, 52px);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  min-height: 0;
+  line-height: 1;
+  color: var(--text);
+  caret-color: transparent;
+}
+.plan-qty-sheet .lot-display .num.empty,
+.plan-qty-display .num.empty { color: #5a5a5a; }
+
+.plan-qty-step {
+  flex: 0 0 auto;
+  position: relative;
+  width: 48px;
+  height: 80px;
+  min-width: 48px;
+  min-height: 80px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #171717;
+  box-shadow: var(--inset-top), var(--raise-sm);
+  overflow: hidden;
+  align-self: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.plan-qty-plus,
+.plan-qty-minus {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #f0ead8;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+.plan-qty-plus { top: 0; }
+.plan-qty-minus { bottom: 0; }
+.plan-qty-plus:active,
+.plan-qty-minus:active { background: var(--bg-press); }
+.plan-qty-num {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #171717;
+  color: #f8f1d4;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.plan-qty-num span {
+  font-size: 11px;
+  font-weight: 800;
+  color: #c8c09a;
+  line-height: 1;
+}
+.plan-qty-num:active { filter: brightness(1.15); }
+.plan-row { align-items: center; }
+@media (max-width: 360px) {
+  .plan-qty-step { width: 48px; min-width: 48px; }
+}
+
+.plan-screen:not(.is-picking) .plan-body {
+  padding-bottom: 20px;
+}
+.plan-screen:not(.is-picking) .plan-body::after {
+  content: '';
+  display: block;
+  height: 16px;
+}
+.plan-footer {
+  position: relative;
+  z-index: 3;
+  background: #101010;
+}

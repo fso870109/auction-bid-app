@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v102';
+const APP_VERSION = 'v103';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2970,11 +2970,8 @@ function bumpPlanQty(id, delta) {
   const snap = snapshotPlanItems();
   const next = planQtyOf(item) + (Number(delta) || 0);
   if (next <= 0) {
-    state.planItems = state.planItems.filter((p) => p.id !== item.id);
-    saveState();
-    offerPlanUndo(snap, `已刪除 ${item.text}`);
+    toast('要刪掉請把件數改成 0，或按刪');
     buzz(24);
-    render();
     return;
   }
   item.qty = Math.min(99, next);
@@ -3095,8 +3092,10 @@ function renderPlanScreen() {
     }
     const qtyCtrl = kind === 'done'
       ? `<span class="plan-qty-read">${qty}<span>件</span></span>`
-      : `<span class="plan-qty-row">
-        <button type="button" class="plan-qty-edit" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
+      : `<span class="plan-qty-step">
+        <button type="button" class="plan-qty-plus" data-act="plan-item-qty-inc" data-id="${escapeHtml(p.id)}" aria-label="增加一件">＋</button>
+        <button type="button" class="plan-qty-num" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
+        <button type="button" class="plan-qty-minus" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少一件">−</button>
       </span>`;
     const purpose = planPurposeOf(p);
     const purposeLbl = planPurposeLabel(p);
@@ -8107,14 +8106,6 @@ function render() {
         try { input.setSelectionRange(len, len); } catch { /* ignore */ }
       }
     }
-    if (modal?.type === 'plan-qty') {
-      const input = document.getElementById('plan-qty-input');
-      if (input && document.activeElement !== input) {
-        input.focus({ preventScroll: true });
-        const len = String(input.value || '').length;
-        try { input.setSelectionRange(len, len); } catch { /* ignore */ }
-      }
-    }
     if (state.tab === 'live' && !showSettings) {
       requestAnimationFrame(() => {
         fitLotCellNames();
@@ -8125,6 +8116,7 @@ function render() {
     if (paddleOpen) requestAnimationFrame(fitPaddleDigits);
     if (typeof paintSyncQr === 'function') requestAnimationFrame(paintSyncQr);
     requestAnimationFrame(fitItemBtnLabels);
+    requestAnimationFrame(fitKeypadSheet);
     maybeReloadForNewSW();
   };
 
@@ -8850,7 +8842,9 @@ function renderModal() {
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet plan-qty-sheet" data-stop="1">
         <h3>件數${item ? '　' + escapeHtml(item.text) : ''}</h3>
-        <input id="plan-qty-input" class="plan-qty-input" inputmode="numeric" pattern="[0-9]*" maxlength="2" value="${escapeHtml(val)}" data-act="plan-qty-type" autocomplete="off" />
+        <div class="lot-display plan-qty-display" aria-live="polite">
+          <div class="num${val ? '' : ' empty'}" id="plan-qty-readout">${val ? escapeHtml(val) : '--'}</div>
+        </div>
         <div class="keypad">${keypad}</div>
         <p class="empty-hint">輸入 0 再按確定會刪掉這一列，可再按復原。</p>
         <div class="sheet-actions">
@@ -10140,6 +10134,29 @@ function syncViewportHeight() {
   const top = Math.round((vv && vv.offsetTop) || 0);
   if (h > 0) root.style.setProperty('--app-h', h + 'px');
   root.style.setProperty('--app-top', top + 'px');
+  fitKeypadSheet();
+}
+
+function fitKeypadSheet() {
+  const vv = window.visualViewport;
+  const h = Math.round((vv && vv.height) || window.innerHeight || 0);
+  const top = Math.round((vv && vv.offsetTop) || 0);
+  const root = document.documentElement;
+  if (h > 0) root.style.setProperty('--app-h', h + 'px');
+  root.style.setProperty('--app-top', top + 'px');
+  document.querySelectorAll('#app > .overlay, .overlay').forEach((overlay) => {
+    if (!overlay) return;
+    overlay.style.top = (top || 0) + 'px';
+    if (h > 0) {
+      overlay.style.height = h + 'px';
+      overlay.style.maxHeight = h + 'px';
+    }
+    const focused = document.activeElement;
+    if (focused && focused.closest && focused.closest('.overlay') && overlay.querySelector('.keypad') && /^(INPUT|TEXTAREA)$/.test(focused.tagName)) {
+      const inSearch = focused.matches('input[type="search"], input[inputmode="search"], .item-search, #plan-input, #type-item-input, #edit-item-name, #sync-name-input, #sync-join-code, #sync-settings-name');
+      if (!inSearch) focused.blur();
+    }
+  });
 }
 
 
@@ -10817,13 +10834,14 @@ function bind() {
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
       requestAnimationFrame(() => {
+        fitKeypadSheet();
         layoutSegIndicators();
         placeActionToast();
       });
     });
   }
   document.addEventListener('contextmenu', (e) => {
-    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit, .jump-btn, .hold-btn')) {
+    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit, .jump-btn, .hold-btn, .plan-qty-step, .plan-qty-plus, .plan-qty-minus, .plan-qty-num')) {
       e.preventDefault();
     }
   });
