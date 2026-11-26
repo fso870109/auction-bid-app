@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v99';
+const APP_VERSION = 'v100';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -1108,7 +1108,6 @@ let resultFilter = 'all';
 let deferredInstall = null;
 let editCurrent = null; // { half, machineId, value }
 let editStart = null; // { half, machineId, value, jumpValue, focus }
-let editJump = null; // { half, machineId, value, fresh }
 let draftItem = '';
 let itemLocked = false;
 let rangeMode = false;
@@ -1262,7 +1261,8 @@ function normalizePlanItems(list) {
       createdOn: raw.createdOn || raw.forDay || today,
       qty: Number.isFinite(qtyNum) && qtyNum > 0 ? Math.min(99, qtyNum) : 1,
       doneBy: raw.doneBy === 'manual' || raw.doneBy === 'auto' ? raw.doneBy : '',
-      lockCount: Number(raw.lockCount) || 0
+      lockCount: Number(raw.lockCount) || 0,
+      purpose: raw.purpose === 'delivery' ? 'delivery' : 'retail'
     };
     if (item.done && item.doneOn && item.doneOn < cut) continue;
     out.push(item);
@@ -1280,6 +1280,58 @@ function lotPlanText(lot) {
 function planQtyOf(p) {
   const n = parseInt(p && p.qty, 10);
   return Number.isFinite(n) && n > 0 ? Math.min(99, n) : 1;
+}
+
+function planPurposeOf(p) {
+  return p && p.purpose === 'delivery' ? 'delivery' : 'retail';
+}
+
+function planPurposeLabel(p) {
+  return planPurposeOf(p) === 'delivery' ? '交貨' : '零賣';
+}
+
+function togglePlanPurpose(id) {
+  const item = (state.planItems || []).find((p) => p.id === id);
+  if (!item) return;
+  const snap = snapshotPlanItems();
+  item.purpose = planPurposeOf(item) === 'delivery' ? 'retail' : 'delivery';
+  saveState();
+  offerPlanUndo(snap, `${item.text}　改為${planPurposeLabel(item)}`);
+  buzz(24);
+  render();
+}
+
+function bestMatchingOpenPlan(item, size) {
+  if (!item) return null;
+  const lot = { item, size: size || '' };
+  const today = todayStr();
+  const plans = (state.planItems || []).filter((p) => p && !p.done && p.forDay <= today);
+  let best = null;
+  let bestScore = 0;
+  for (const p of plans) {
+    const sc = planLotMatchScore(p, lot);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = p;
+    } else if (sc === bestScore && sc > 0 && best && planPurposeOf(p) === 'delivery' && planPurposeOf(best) !== 'delivery') {
+      best = p;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function applyPlanPurposeToLot(lot) {
+  if (!lot || !lot.item) return;
+  const plan = bestMatchingOpenPlan(lot.item, lot.size);
+  if (plan && planPurposeOf(plan) === 'delivery') lot.priority = 'skip';
+}
+
+function applyPlanPurposeToDraft(item, size) {
+  const plan = bestMatchingOpenPlan(item, size);
+  if (plan && planPurposeOf(plan) === 'delivery') {
+    draftPriority = 'skip';
+    state.lastPriority = 'skip';
+  }
 }
 
 function lotQty(lot) {
@@ -2506,7 +2558,8 @@ function addOrBumpPlanItem(text, which, opts) {
     createdOn: today,
     qty,
     doneBy: '',
-    lockCount: 0
+    lockCount: 0,
+    purpose: 'retail'
   });
   saveState();
   if (parsed.explicit) {
@@ -3046,11 +3099,14 @@ function renderPlanScreen() {
         <button type="button" class="plan-qty-dec-lg" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少一件">−</button>
         <button type="button" class="plan-qty-edit" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
       </span>`;
+    const purpose = planPurposeOf(p);
+    const purposeLbl = planPurposeLabel(p);
+    const purposeBtn = `<button type="button" class="plan-purpose ${purpose}" data-act="plan-purpose" data-id="${escapeHtml(p.id)}" aria-label="用途 ${purposeLbl}，點一下改成${purpose === 'delivery' ? '零賣' : '交貨'}">${purposeLbl}</button>`;
     return `<div class="plan-row${kind === 'done' ? ' done' : ''}">
       <button type="button" class="plan-check${p.done ? ' on' : ''}" data-act="${p.done ? 'plan-undone' : 'plan-done'}" data-id="${escapeHtml(p.id)}" aria-label="${p.done ? '取消完成' : '完成'}">${p.done ? '✓' : ''}</button>
       <div class="plan-main">
         <div class="plan-text">${escapeHtml(p.text)}</div>
-        ${remainHtml}
+        <div class="plan-meta">${remainHtml}${purposeBtn}</div>
       </div>
       ${qtyCtrl}
       <button type="button" class="plan-del" data-act="plan-del" data-id="${escapeHtml(p.id)}" aria-label="刪除">刪</button>
@@ -3510,35 +3566,6 @@ function setJumpTarget(machineId, value, half) {
   return true;
 }
 
-function openEditJump(machineId) {
-  const half = state.currentHalf;
-  const cur = jumpTargetOf(machineId, half);
-  editJump = {
-    machineId,
-    half,
-    value: cur != null ? String(cur) : '',
-    fresh: cur != null
-  };
-  modal = { type: 'edit-jump' };
-  render();
-}
-
-function commitEditJump() {
-  if (!editJump) return;
-  const mid = editJump.machineId;
-  const half = editJump.half || state.currentHalf;
-  const raw = editJump.value;
-  if (!setJumpTarget(mid, raw, half)) {
-    render();
-    return;
-  }
-  const n = parseInt(raw, 10);
-  editJump = null;
-  modal = null;
-  toast('跳到改為 ' + n);
-  render();
-}
-
 function endOfSegmentToast(machineId, half) {
   const target = jumpTargetOf(machineId, half);
   toast(target
@@ -3555,7 +3582,6 @@ function jumpToNextSegment(machineId) {
   }
   modal = null;
   editCurrent = null;
-  editJump = null;
   const snap = snapshotProgress(machineId, half);
   setProgress(machineId, target, half, { silentAdopt: true });
   offerUndo(snap, '已跳到 ' + target + '，按復原可退回');
@@ -5432,6 +5458,7 @@ function applyItemToLot(lot, name) {
   if (!itemNeedsSize(name)) lot.size = '';
   else lot.size = normalizeSize(lot.size, name) || defaultSizeForItem(name);
   bumpItemUse(name, lot.half || state.currentHalf);
+  applyPlanPurposeToLot(lot);
   saveState();
   toast(withPlanToast(`${lot.number}　${name}`));
   buzz(12);
@@ -5519,6 +5546,7 @@ function lockItem(name, opts) {
   draftItem = name;
   itemLocked = true;
   itemTargetId = null;
+  applyPlanPurposeToDraft(name, draftSize);
   itemTargetAuto = false;
   variantPick = null;
   if (!opts.silent) toast('已鎖定 ' + itemDisplayName(name) + '，接著輸入號碼');
@@ -5697,6 +5725,7 @@ function commitLotRange(preview) {
       createdAt: now + i
     };
     if (lot.item) bumpItemUse(lot.item);
+    applyPlanPurposeToLot(lot);
     state.lots.push(lot);
     added.push(lot);
   }
@@ -6663,6 +6692,7 @@ function commitLot(num, machineId, half) {
     createdAt: Date.now()
   };
   if (lot.item) bumpItemUse(lot.item);
+  applyPlanPurposeToLot(lot);
   state.lots.push(lot);
   const keepItem = itemLocked && draftItem;
   const lockedName = draftItem;
@@ -7352,14 +7382,19 @@ function daySummaryData() {
     text: p.text,
     remain: planQtyOf(p) - planWonPieces(p, wonMap),
     qty: planQtyOf(p),
-    won: planWonPieces(p, wonMap)
+    won: planWonPieces(p, wonMap),
+    purpose: planPurposeOf(p),
+    purposeLabel: planPurposeLabel(p)
   }));
-  return { date: today, wonLots: won.length, pieces, unmovedPieces, grouped, remainPlans };
+  const deliveryRemain = remainPlans.filter((p) => p.purpose === 'delivery').reduce((n, p) => n + p.remain, 0);
+  const retailRemain = remainPlans.filter((p) => p.purpose !== 'delivery').reduce((n, p) => n + p.remain, 0);
+  const deliveryWonPieces = won.filter((l) => lotPriority(l) === 'skip').reduce((n, l) => n + lotQty(l), 0);
+  return { date: today, wonLots: won.length, pieces, unmovedPieces, grouped, remainPlans, deliveryRemain, retailRemain, deliveryWonPieces };
 }
 
 function daySummaryText() {
   const d = daySummaryData();
-  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`, `未搬 ${d.unmovedPieces} 件`];
+  const lines = [`【${formatDateLabel(d.date)} 今日總結】`, `標到 ${d.pieces} 件（${d.wonLots} 筆）`, `未搬 ${d.unmovedPieces} 件`, `交貨標到 ${d.deliveryWonPieces} 件`, `交貨還差 ${d.deliveryRemain} 件　零賣還差 ${d.retailRemain} 件`];
   for (const g of d.grouped) {
     lines.push('', g.group);
     for (const it of g.items) {
@@ -7375,7 +7410,7 @@ function daySummaryText() {
   if (!d.grouped.length) lines.push('', '今天還沒有標到的貨。');
   if (d.remainPlans.length) {
     lines.push('', '備註還差');
-    for (const p of d.remainPlans) lines.push(`  ${p.text}　還差 ${p.remain} 件`);
+    for (const p of d.remainPlans) lines.push(`  ${p.text}　${p.purposeLabel}　還差 ${p.remain} 件`);
   } else {
     lines.push('', '備註：今日預計都已買齊，或還沒有備註。');
   }
@@ -7395,7 +7430,7 @@ function renderDaySummary() {
       }).join('')
     : '<div class="sum-empty">今天還沒有標到的貨</div>';
   const remain = d.remainPlans.length
-    ? d.remainPlans.map((p) => `<div class="sum-row remain"><span class="sum-name">${escapeHtml(p.text)}</span><span class="sum-qty">還差 ${p.remain} 件</span></div>`).join('')
+    ? d.remainPlans.map((p) => `<div class="sum-row remain"><span class="sum-name">${escapeHtml(p.text)}</span><span class="sum-purpose ${p.purpose}">${escapeHtml(p.purposeLabel)}</span><span class="sum-qty">還差 ${p.remain} 件</span></div>`).join('')
     : '<div class="sum-empty">今日預計都已買齊，或還沒有備註</div>';
   return `<div class="plan-screen sum-screen" id="sum-screen">
     <header class="plan-bar">
@@ -7409,6 +7444,9 @@ function renderDaySummary() {
         <div class="tot"><b>${d.pieces}</b><span>標到件數</span></div>
         <div class="tot"><b>${d.wonLots}</b><span>標到筆數</span></div>
         <div class="tot"><b>${d.unmovedPieces}</b><span>未搬件數</span></div>
+        <div class="tot"><b>${d.deliveryWonPieces}</b><span>交貨標到</span></div>
+        <div class="tot"><b>${d.deliveryRemain}</b><span>交貨還差</span></div>
+        <div class="tot"><b>${d.retailRemain}</b><span>零賣還差</span></div>
         <div class="tot"><b>${d.remainPlans.length}</b><span>備註還差</span></div>
       </div>
       ${groups}
@@ -8461,10 +8499,7 @@ function renderLive() {
       const infoLabel = liveInfoLabel(startN);
       const jumpN = jumpTargetOf(m.id, half);
       const jumpBtn = jumpN != null
-        ? `<div class="jump-row">
-            <button type="button" class="jump-btn hold-btn" data-act="jump-next" data-hold="jump-next" data-id="${m.id}" aria-label="按住跳到 ${jumpN}"><span class="jump-btn-lbl">跳到</span><span class="jump-btn-num">${jumpN}</span></button>
-            <button type="button" class="jump-edit" data-act="edit-jump" data-id="${m.id}" aria-label="改跳到號碼">改</button>
-          </div>`
+        ? `<button type="button" class="jump-btn hold-btn" data-act="jump-next" data-hold="jump-next" data-id="${m.id}" aria-label="按住跳到 ${jumpN}"><span class="jump-btn-lbl">跳到</span><span class="jump-btn-num">${jumpN}</span></button>`
         : '';
       const cells = lots.length
         ? lots
@@ -8905,41 +8940,8 @@ function renderModal() {
       </div>
     </div>`;
   }
-  if (modal.type === 'edit-jump' || editJump) {
-    const ed = editJump;
-    if (!ed) return '';
-    const m = machineById(ed.machineId, ed.half);
-    const seg = upcomingJumpSegment(ed.machineId, ed.half);
-    if (!seg) {
-      editJump = null;
-      modal = null;
-      return '';
-    }
-    const jumpChips = `<div class="start-chips" role="group" aria-label="常用跳到"><button type="button" class="start-chip${String(ed.value) === String(seg.start) ? ' on' : ''}" data-act="jj-chip" data-v="${seg.start}">${seg.start}</button></div>`;
-    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
-    const keypad = keys
-      .map((k) => {
-        if (k === '⌫') return `<button type="button" class="key muted" data-act="jj-back">⌫</button>`;
-        if (k === 'C') return `<button type="button" class="key muted" data-act="jj-clear">清除</button>`;
-        return `<button type="button" class="key" data-act="jj-digit" data-v="${k}">${k}</button>`;
-      })
-      .join('');
-    const example = seg.key === '6xxx' ? '6150' : (seg.key === '5xxx' ? '5150' : String(seg.start));
-    return `<div class="overlay" data-act="jj-cancel">
-      <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
-        <h3>這台今天跳到幾號？</h3>
-        <p>${escapeHtml(m?.name || '')}　下一段是 ${seg.lo}–${seg.hi}，例如 ${seg.start} 或 ${example}。輸入完整四位數。</p>
-        <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
-        ${jumpChips}
-        <div class="keypad">${keypad}</div>
-        <div class="sheet-actions">
-          <button type="button" class="btn primary" data-act="jj-ok">確定</button>
-          <button type="button" class="btn" data-act="jj-cancel">取消</button>
-        </div>
-      </div>
-    </div>`;
-  }
-    if (modal.type === 'xfer') {
+  if (modal.type === 'xfer') {
+
     const half = modal.half || state.currentHalf;
     const srcId = modal.srcId;
     const cands = modal.candidates || [];
@@ -9267,7 +9269,6 @@ function onClick(e) {
     digit: 1, back: 1, clear: 1,
     'edit-cur': 1, 'open-start': 1,
     'ss-digit': 1, 'ss-back': 1, 'ss-clear': 1, 'ss-chip': 1, 'ss-jump-chip': 1, 'ss-focus': 1,
-    'edit-jump': 1, 'jj-digit': 1, 'jj-back': 1, 'jj-clear': 1, 'jj-chip': 1,
     'ec-digit': 1, 'ec-back': 1, 'ec-clear': 1,
     'plan-qty-digit': 1, 'plan-qty-back': 1, 'plan-qty-clear': 1, 'plan-qty-edit': 1,
     'setup-digit': 1, 'setup-back': 1, 'setup-clear': 1
@@ -9560,6 +9561,9 @@ function onClick(e) {
       break;
     case 'plan-del':
       deletePlanItem(btn.dataset.id);
+      break;
+    case 'plan-purpose':
+      togglePlanPurpose(btn.dataset.id);
       break;
     case 'plan-clear':
       confirmClearPlans(v || 'all');
@@ -9857,51 +9861,9 @@ function onClick(e) {
         render();
       }
       break;
-    case 'edit-jump':
-      openEditJump(btn.dataset.id);
-      break;
-    case 'jj-digit':
-      if (editJump && editJump.fresh) {
-        editJump.value = v;
-        editJump.fresh = false;
-        render();
-      } else if (editJump && String(editJump.value || '').length < 4) {
-        editJump.value = String(editJump.value || '') + v;
-        render();
-      }
-      break;
-    case 'jj-chip':
-      if (editJump && /^\d{4}$/.test(String(v || ''))) {
-        editJump.value = String(v);
-        editJump.fresh = true;
-        render();
-      }
-      break;
-    case 'jj-back':
-      if (editJump) {
-        editJump.fresh = false;
-        editJump.value = String(editJump.value || '').slice(0, -1);
-        render();
-      }
-      break;
-    case 'jj-clear':
-      if (editJump) {
-        editJump.fresh = false;
-        editJump.value = '';
-        render();
-      }
-      break;
-    case 'jj-ok':
-      commitEditJump();
-      break;
-    case 'jj-cancel':
-      editJump = null;
-      modal = null;
-      render();
-      break;
     case 'jump-next':
       if (ignoreHoldClick) { ignoreHoldClick = false; break; }
-      toast('按住不放才會跳');
+      toast('按住不放才會跳，號碼在『起始』裡改');
       break;
     case 'ec-jump':
       jumpToNextSegment(btn.dataset.id || (editCurrent && editCurrent.machineId));
@@ -10745,7 +10707,7 @@ function onPressEnd(e, pt) {
     pressOrigin.holdBtn.classList.remove('holding');
     if (!done) {
       ignoreHoldClick = true;
-      if (act === 'jump-next') toast('按住不放才會跳');
+      if (act === 'jump-next') toast('按住不放才會跳，號碼在『起始』裡改');
       else if (act === 'flow') toast('按住不放才會流標');
     }
     cancelPress();
@@ -10856,7 +10818,7 @@ function bind() {
     });
   }
   document.addEventListener('contextmenu', (e) => {
-    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit, .jump-btn, .jump-edit, .jump-row, .hold-btn')) {
+    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit, .jump-btn, .hold-btn')) {
       e.preventDefault();
     }
   });
@@ -10867,7 +10829,7 @@ function bind() {
     }, 30000);
   }
   document.addEventListener('selectstart', (e) => {
-    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list, .item-btn, .item-pick, .jump-btn, .jump-edit, .jump-row, .hold-btn')) e.preventDefault();
+    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list, .item-btn, .item-pick, .jump-btn, .hold-btn')) e.preventDefault();
   });
   document.addEventListener('touchstart', (e) => {
     if (e.target && e.target.closest && e.target.closest('.jump-btn')) {
@@ -11058,7 +11020,6 @@ if (typeof window !== 'undefined') {
   window.__upcomingJumpSegment = upcomingJumpSegment;
   window.__jumpTargetOf = jumpTargetOf;
   window.__setJumpTarget = setJumpTarget;
-  window.__openEditJump = openEditJump;
   window.__JUMP_HOLD_MS = JUMP_HOLD_MS;
   window.__commitLot = commitLot;
   window.__pickMachineForDraft = pickMachineForDraft;

@@ -5726,8 +5726,61 @@ html.is-dragging .item-pick {
   box-shadow: var(--inset-top), var(--raise-sm);
 }
 .plan-del:active { background: var(--bg-press); }
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.plan-purpose {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  border: 2px solid #5a5a64;
+  background: #22222a;
+  color: #f0ead8;
+  box-shadow: var(--inset-top), var(--raise-sm);
+}
+.plan-purpose.delivery {
+  background: #2f62e8;
+  border-color: #2f62e8;
+  color: #fff;
+}
+.plan-purpose.retail {
+  background: #2a2a32;
+  border-color: #6a6a74;
+  color: #f0ead8;
+}
+.plan-purpose:active { filter: brightness(1.15); }
+.sum-purpose {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 44px;
+  padding: 0 8px;
+  margin: 0 6px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  background: #2a2a32;
+  color: #f0ead8;
+}
+.sum-purpose.delivery { background: #2f62e8; color: #fff; }
 @media (max-width: 360px) {
   .plan-row { gap: 6px; padding: 6px 10px; }
+  .plan-purpose { min-width: 52px; padding: 0 10px; font-size: 16px; }
   .plan-del { padding: 0 8px; min-width: 40px; }
 }
 
@@ -5812,29 +5865,21 @@ html.is-dragging .item-pick {
 }
 
 
-/* ===== v96/v99: 下半場 跳到 — hold to jump, 改 chip sets the day's target ===== */
-.jump-row {
-  display: flex;
-  align-items: stretch;
-  width: 100%;
-  min-width: 0;
-  gap: 0;
-}
+/* ===== v100: full-width hold-to-jump; target is set in 起始 ===== */
 .jump-btn {
-  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 1px;
+  width: 100%;
   min-width: 0;
   height: 52px;
   min-height: 52px;
   padding: 2px 4px;
-  border-radius: 10px 0 0 10px;
+  border-radius: 10px;
   background: #221f00;
   border: 2px solid var(--yellow);
-  border-right-width: 0;
   color: var(--yellow);
   font-weight: 900;
   line-height: 1;
@@ -5865,30 +5910,9 @@ html.is-dragging .item-pick {
   color: var(--yellow);
 }
 .jump-btn:active { background: #3a3500; }
-.jump-edit {
-  flex: 0 0 42px;
-  width: 42px;
-  min-width: 40px;
-  height: 52px;
-  min-height: 52px;
-  padding: 0;
-  border-radius: 0 10px 10px 0;
-  background: #111000;
-  border: 2px solid var(--yellow);
-  color: var(--yellow);
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 1;
-  touch-action: manipulation;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-}
-.jump-edit:active { background: #3a3500; filter: brightness(1.15); }
 @media (max-width: 360px) {
   .jump-btn { height: 52px; min-height: 52px; padding: 2px 2px; }
   .jump-btn-num { font-size: 20px; }
-  .jump-edit { width: 40px; min-width: 40px; flex-basis: 40px; font-size: 18px; }
 }
 .start-jump-fields {
   display: grid;
