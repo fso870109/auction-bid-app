@@ -3492,7 +3492,17 @@ button.lot-cell {
 }
 .hold-btn.holding::after {
   transform: scaleX(1);
-  transition: transform 500ms linear;
+  transition: transform var(--hold-ms, 500ms) linear;
+}
+.hold-btn.hold-static.holding::after {
+  transition: none;
+  transform: scaleX(1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hold-btn.holding::after {
+    transition: none;
+    transform: scaleX(1);
+  }
 }
 .action-btn.flow.hold-btn::after { background: rgba(60, 170, 220, 0.4); }
 
@@ -5802,31 +5812,125 @@ html.is-dragging .item-pick {
 }
 
 
-/* ===== v96: 下半場 台別 — big jump to the next segment, quick start picks ===== */
-.jump-btn {
-  display: block;
+/* ===== v96/v99: 下半場 跳到 — hold to jump, 改 chip sets the day's target ===== */
+.jump-row {
+  display: flex;
+  align-items: stretch;
   width: 100%;
   min-width: 0;
-  height: 48px;
-  min-height: 48px;
-  padding: 0 4px;
-  border-radius: 10px;
+  gap: 0;
+}
+.jump-btn {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  height: 52px;
+  min-height: 52px;
+  padding: 2px 4px;
+  border-radius: 10px 0 0 10px;
   background: #221f00;
   border: 2px solid var(--yellow);
+  border-right-width: 0;
   color: var(--yellow);
-  font-size: clamp(18px, 5.2vw, 22px);
   font-weight: 900;
   line-height: 1;
   letter-spacing: 0;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: clip;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+}
+.jump-btn-lbl {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--yellow);
+}
+.jump-btn-num {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(20px, 5.6vw, 24px);
+  font-weight: 900;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--yellow);
 }
 .jump-btn:active { background: #3a3500; }
-@media (max-width: 360px) {
-  .jump-btn { font-size: 18px; padding: 0 2px; }
+.jump-edit {
+  flex: 0 0 42px;
+  width: 42px;
+  min-width: 40px;
+  height: 52px;
+  min-height: 52px;
+  padding: 0;
+  border-radius: 0 10px 10px 0;
+  background: #111000;
+  border: 2px solid var(--yellow);
+  color: var(--yellow);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
+.jump-edit:active { background: #3a3500; filter: brightness(1.15); }
+@media (max-width: 360px) {
+  .jump-btn { height: 52px; min-height: 52px; padding: 2px 2px; }
+  .jump-btn-num { font-size: 20px; }
+  .jump-edit { width: 40px; min-width: 40px; flex-basis: 40px; font-size: 18px; }
+}
+.start-jump-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.start-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  min-height: 72px;
+  padding: 8px 6px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  border: 2px solid var(--line);
+  color: var(--text);
+}
+.start-field.on {
+  border-color: var(--yellow);
+  background: #221f00;
+}
+.start-field-lbl {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1;
+}
+.start-field.on .start-field-lbl { color: var(--yellow); }
+.start-field .num {
+  font-size: clamp(26px, 8vw, 36px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: 1;
+  color: var(--text);
+}
+.start-field .num.empty { color: #5a5a5a; }
+.start-field.on .num { color: var(--yellow); }
 .live-info-lbl {
   font-size: 15px;
   height: 18px;

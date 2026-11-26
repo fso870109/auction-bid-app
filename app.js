@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v98';
+const APP_VERSION = 'v99';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -1107,7 +1107,8 @@ let dupFlash = false;
 let resultFilter = 'all';
 let deferredInstall = null;
 let editCurrent = null; // { half, machineId, value }
-let editStart = null; // { half, machineId, value }
+let editStart = null; // { half, machineId, value, jumpValue, focus }
+let editJump = null; // { half, machineId, value, fresh }
 let draftItem = '';
 let itemLocked = false;
 let rangeMode = false;
@@ -3445,25 +3446,119 @@ function nextSegmentOf(machineId, half) {
   return null;
 }
 
+/* Next segment even when this 台 has no 現在 yet (he sets 跳到 in the morning).
+   First listed range is the opening segment; the following range is the jump. */
+function upcomingJumpSegment(machineId, half) {
+  const h = half || state.currentHalf;
+  const m = machineById(machineId, h);
+  if (!m) return null;
+  const ranges = (m.ranges || []).filter((r) => r && r.start != null && Number.isFinite(Number(r.start)));
+  if (ranges.length < 2) return null;
+  const cur = currentOf(machineId, h);
+  const ser = cur != null ? seriesOf(cur, h) : null;
+  let idx = -1;
+  if (ser) {
+    for (let i = 0; i < ranges.length; i++) {
+      const rs = seriesOf(ranges[i].start, h);
+      if (rs && rs.key === ser.key) { idx = i; break; }
+    }
+  }
+  if (idx < 0) idx = 0;
+  for (let j = idx + 1; j < ranges.length; j++) {
+    const nser = seriesOf(ranges[j].start, h);
+    if (!nser || (ser && nser.key === ser.key)) continue;
+    const start = Number(ranges[j].start);
+    const lo = nser.lo;
+    const hi = nser.hi;
+    return { start, ser: nser, key: nser.key, lo, hi };
+  }
+  return null;
+}
+
+function jumpTargetValid(n, machineId, half) {
+  const seg = upcomingJumpSegment(machineId, half);
+  const num = Number(n);
+  if (!seg || !Number.isFinite(num)) return false;
+  if (num < seg.lo || num > seg.hi) return false;
+  return typeof inSeries === 'function' ? inSeries(num, seg.ser) : true;
+}
+
+function jumpTargetOf(machineId, half) {
+  const h = half || (state && state.currentHalf);
+  const seg = upcomingJumpSegment(machineId, h);
+  if (!seg) return null;
+  const day = state && state.day;
+  const stored = day && state.jumpTargets && state.jumpTargets[day] && state.jumpTargets[day][machineId];
+  const n = stored == null || stored === '' ? null : Number(stored);
+  if (n != null && jumpTargetValid(n, machineId, h)) return n;
+  return seg.start;
+}
+
+function setJumpTarget(machineId, value, half) {
+  const h = half || state.currentHalf;
+  const n = parseInt(value, 10);
+  const seg = upcomingJumpSegment(machineId, h);
+  if (!seg) return false;
+  if (!jumpTargetValid(n, machineId, h)) {
+    toast('請輸入 ' + seg.lo + ' 到 ' + seg.hi + ' 的號碼，例如 ' + seg.start);
+    return false;
+  }
+  if (!state.jumpTargets || typeof state.jumpTargets !== 'object') state.jumpTargets = {};
+  if (!state.jumpTargets[state.day] || typeof state.jumpTargets[state.day] !== 'object') state.jumpTargets[state.day] = {};
+  state.jumpTargets[state.day][machineId] = n;
+  saveState();
+  return true;
+}
+
+function openEditJump(machineId) {
+  const half = state.currentHalf;
+  const cur = jumpTargetOf(machineId, half);
+  editJump = {
+    machineId,
+    half,
+    value: cur != null ? String(cur) : '',
+    fresh: cur != null
+  };
+  modal = { type: 'edit-jump' };
+  render();
+}
+
+function commitEditJump() {
+  if (!editJump) return;
+  const mid = editJump.machineId;
+  const half = editJump.half || state.currentHalf;
+  const raw = editJump.value;
+  if (!setJumpTarget(mid, raw, half)) {
+    render();
+    return;
+  }
+  const n = parseInt(raw, 10);
+  editJump = null;
+  modal = null;
+  toast('跳到改為 ' + n);
+  render();
+}
+
 function endOfSegmentToast(machineId, half) {
-  const next = nextSegmentOf(machineId, half);
-  toast(next
-    ? '這段已到尾，按「跳到 ' + next.start + '」'
+  const target = jumpTargetOf(machineId, half);
+  toast(target
+    ? '這段已到尾，按住「跳到 ' + target + '」'
     : '這段已到尾，點「現在」輸入下一段號碼');
 }
 
 function jumpToNextSegment(machineId) {
   const half = state.currentHalf;
-  const next = nextSegmentOf(machineId, half);
-  if (!next) {
+  const target = jumpTargetOf(machineId, half);
+  if (target == null) {
     toast('這台沒有下一段');
     return;
   }
   modal = null;
   editCurrent = null;
+  editJump = null;
   const snap = snapshotProgress(machineId, half);
-  setProgress(machineId, next.start, half, { silentAdopt: true });
-  offerUndo(snap, '已跳到 ' + next.start + '，按復原可退回');
+  setProgress(machineId, target, half, { silentAdopt: true });
+  offerUndo(snap, '已跳到 ' + target + '，按復原可退回');
   render();
 }
 
@@ -3631,6 +3726,7 @@ function defaultState() {
     machinesMigratedAfternoonV98: true,
     v98ProgressCleaned: '',
     gpIgnoreBefore: 0,
+    jumpTargets: {},
     itemsMigratedV17: true,
     itemsMigratedV21: true,
     itemsMigratedV46: true,
@@ -3720,6 +3816,10 @@ function loadState() {
         : DEFAULT_LOTS_PER_MIN;
     }
     if (merged.skipAutoDay != null && typeof merged.skipAutoDay !== 'string') merged.skipAutoDay = '';
+    if (!merged.jumpTargets || typeof merged.jumpTargets !== 'object' || Array.isArray(merged.jumpTargets)) {
+      merged.jumpTargets = {};
+    }
+
     if (!Array.isArray(merged.lots)) merged.lots = [];
     if (!merged.alerted || typeof merged.alerted !== 'object') merged.alerted = {};
     if (!Array.isArray(merged.customItems)) merged.customItems = [];
@@ -4372,6 +4472,7 @@ function undoLast() {
     if (snap.seriesPath && typeof snap.seriesPath === 'object') state.seriesPath = snap.seriesPath;
     if (snap.seriesPlans && typeof snap.seriesPlans === 'object') state.seriesPlans = snap.seriesPlans;
     if (snap.machineMerges && typeof snap.machineMerges === 'object') state.machineMerges = snap.machineMerges;
+    if (snap.jumpTargets && typeof snap.jumpTargets === 'object') state.jumpTargets = snap.jumpTargets;
     if (typeof snap.autoAdvance === 'boolean') state.autoAdvance = snap.autoAdvance;
     state.alerted = snap.alerted && typeof snap.alerted === 'object' ? snap.alerted : {};
     if (Array.isArray(snap.boughtHistory)) state.boughtHistory = snap.boughtHistory;
@@ -5936,11 +6037,15 @@ function openSetStart(machineId) {
   const ser = cur != null ? seriesOf(cur, half) : null;
   const start = ser ? seriesStart(machineId, half, ser) : null;
   const prefill = start != null ? String(start) : (cur != null ? String(cur) : '');
+  const jumpN = jumpTargetOf(machineId, half);
   editStart = {
     machineId,
     half,
     value: prefill,
-    fresh: !!prefill
+    fresh: !!prefill,
+    jumpValue: jumpN != null ? String(jumpN) : '',
+    jumpFresh: jumpN != null,
+    focus: 'start'
   };
   modal = { type: 'set-start' };
   render();
@@ -5951,6 +6056,13 @@ function commitSetStart() {
   const n = parseInt(editStart.value, 10);
   const mid = editStart.machineId;
   const half = editStart.half || state.currentHalf;
+  const jumpRaw = editStart.jumpValue;
+  if (jumpRaw != null && String(jumpRaw).length && !jumpTargetValid(jumpRaw, mid, half) && upcomingJumpSegment(mid, half)) {
+    const seg = upcomingJumpSegment(mid, half);
+    toast('跳到請輸入 ' + seg.lo + ' 到 ' + seg.hi + ' 的號碼');
+    render();
+    return;
+  }
   editStart = null;
   modal = null;
   if (!Number.isFinite(n)) {
@@ -5961,6 +6073,7 @@ function commitSetStart() {
   const cur = currentOf(mid, half);
   setSeriesStart(mid, n, half);
   if (cur == null) setProgress(mid, n, half, { silentAdopt: true });
+  if (jumpTargetValid(jumpRaw, mid, half)) setJumpTarget(mid, jumpRaw, half);
   saveState();
   offerUndo(snap, '起點改為 ' + n);
   render();
@@ -7114,6 +7227,7 @@ function startNewDay(confirmed, opts) {
     seriesPath: structuredClone(state.seriesPath),
     seriesPlans: structuredClone(state.seriesPlans),
     machineMerges: structuredClone(state.machineMerges),
+    jumpTargets: structuredClone(state.jumpTargets || {}),
     autoAdvance: state.autoAdvance,
     alerted: { ...(state.alerted || {}) },
     boughtHistory: structuredClone(state.boughtHistory || []),
@@ -7129,6 +7243,7 @@ function startNewDay(confirmed, opts) {
   state.seriesPath = defaultSeriesPath(state.machines);
   state.seriesPlans = defaultSeriesPlans(state.machines);
   state.machineMerges = defaultMachineMerges(state.machines);
+  state.jumpTargets = {};
   applyFixedStartPrefills();
   state.v98ProgressCleaned = auctionDay;
   state.gpIgnoreBefore = Date.now();
@@ -8344,9 +8459,12 @@ function renderLive() {
       const ser = cur != null ? seriesOf(cur, half) : null;
       const startN = displayStartOf(m.id, half);
       const infoLabel = liveInfoLabel(startN);
-      const nextSeg = nextSegmentOf(m.id, half);
-      const jumpBtn = nextSeg
-        ? `<button type="button" class="jump-btn" data-act="jump-next" data-id="${m.id}" aria-label="這一段拍完，跳到下一段 ${nextSeg.start}">跳到 ${nextSeg.start}</button>`
+      const jumpN = jumpTargetOf(m.id, half);
+      const jumpBtn = jumpN != null
+        ? `<div class="jump-row">
+            <button type="button" class="jump-btn hold-btn" data-act="jump-next" data-hold="jump-next" data-id="${m.id}" aria-label="按住跳到 ${jumpN}"><span class="jump-btn-lbl">跳到</span><span class="jump-btn-num">${jumpN}</span></button>
+            <button type="button" class="jump-edit" data-act="edit-jump" data-id="${m.id}" aria-label="改跳到號碼">改</button>
+          </div>`
         : '';
       const cells = lots.length
         ? lots
@@ -8708,7 +8826,7 @@ function renderModal() {
     const m = machineById(ed.machineId);
     const nextSeg = nextSegmentOf(ed.machineId, state.currentHalf);
     const jumpRow = nextSeg
-      ? `<button type="button" class="btn jump-sheet-btn" data-act="ec-jump" data-id="${escapeHtml(ed.machineId)}">這段拍完　跳到 ${nextSeg.start}</button>`
+      ? `<button type="button" class="btn jump-sheet-btn" data-act="ec-jump" data-id="${escapeHtml(ed.machineId)}">這段拍完　跳到 ${jumpTargetOf(ed.machineId, state.currentHalf) ?? nextSeg.start}</button>`
       : '';
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
     const keypad = keys
@@ -8744,8 +8862,27 @@ function renderModal() {
     }
     const startChips = chipStarts.length
       ? `<div class="start-chips" role="group" aria-label="常用起點">${chipStarts.map((n) =>
-        `<button type="button" class="start-chip${String(ed.value) === String(n) ? ' on' : ''}" data-act="ss-chip" data-v="${n}">${n}</button>`).join('')}</div>`
+        `<button type="button" class="start-chip${ed.focus !== 'jump' && String(ed.value) === String(n) ? ' on' : ''}" data-act="ss-chip" data-v="${n}">${n}</button>`).join('')}</div>`
       : '';
+    const jumpSeg = upcomingJumpSegment(ed.machineId, ed.half);
+    const jumpChips = jumpSeg
+      ? `<div class="start-chips" role="group" aria-label="常用跳到">${[jumpSeg.start].map((n) =>
+        `<button type="button" class="start-chip${ed.focus === 'jump' && String(ed.jumpValue) === String(n) ? ' on' : ''}" data-act="ss-jump-chip" data-v="${n}">${n}</button>`).join('')}</div>`
+      : '';
+    const focus = ed.focus === 'jump' ? 'jump' : 'start';
+    const jumpField = jumpSeg
+      ? `<div class="start-jump-fields">
+          <button type="button" class="start-field${focus === 'start' ? ' on' : ''}" data-act="ss-focus" data-v="start">
+            <span class="start-field-lbl">起始</span>
+            <span class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</span>
+          </button>
+          <button type="button" class="start-field${focus === 'jump' ? ' on' : ''}" data-act="ss-focus" data-v="jump">
+            <span class="start-field-lbl">跳到</span>
+            <span class="num${ed.jumpValue ? '' : ' empty'}">${ed.jumpValue ? escapeHtml(String(ed.jumpValue)) : '----'}</span>
+          </button>
+        </div>
+        <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">跳到可設 ${jumpSeg.lo}–${jumpSeg.hi}，例如 ${jumpSeg.start} 或 ${jumpSeg.key === '6xxx' ? '6150' : (jumpSeg.key === '5xxx' ? '5150' : jumpSeg.start)}。輸入完整四位數。</p>`
+      : `<div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>`;
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
     const keypad = keys
       .map((k) => {
@@ -8758,8 +8895,8 @@ function renderModal() {
       <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
         <h3>這台今天從幾號開始？</h3>
         <p>${escapeHtml(m?.name || '')}　起點每天不一定，例如 5001 或 5150。起點前面的號碼會排在後面。</p>
-        <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
-        ${startChips}
+        ${jumpField}
+        ${focus === 'jump' ? jumpChips : startChips}
         <div class="keypad">${keypad}</div>
         <div class="sheet-actions">
           <button type="button" class="btn primary" data-act="ss-ok">確定</button>
@@ -8768,7 +8905,41 @@ function renderModal() {
       </div>
     </div>`;
   }
-  if (modal.type === 'xfer') {
+  if (modal.type === 'edit-jump' || editJump) {
+    const ed = editJump;
+    if (!ed) return '';
+    const m = machineById(ed.machineId, ed.half);
+    const seg = upcomingJumpSegment(ed.machineId, ed.half);
+    if (!seg) {
+      editJump = null;
+      modal = null;
+      return '';
+    }
+    const jumpChips = `<div class="start-chips" role="group" aria-label="常用跳到"><button type="button" class="start-chip${String(ed.value) === String(seg.start) ? ' on' : ''}" data-act="jj-chip" data-v="${seg.start}">${seg.start}</button></div>`;
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'];
+    const keypad = keys
+      .map((k) => {
+        if (k === '⌫') return `<button type="button" class="key muted" data-act="jj-back">⌫</button>`;
+        if (k === 'C') return `<button type="button" class="key muted" data-act="jj-clear">清除</button>`;
+        return `<button type="button" class="key" data-act="jj-digit" data-v="${k}">${k}</button>`;
+      })
+      .join('');
+    const example = seg.key === '6xxx' ? '6150' : (seg.key === '5xxx' ? '5150' : String(seg.start));
+    return `<div class="overlay" data-act="jj-cancel">
+      <div class="sheet cur-sheet hand-${thumbHand()}" data-stop="1">
+        <h3>這台今天跳到幾號？</h3>
+        <p>${escapeHtml(m?.name || '')}　下一段是 ${seg.lo}–${seg.hi}，例如 ${seg.start} 或 ${example}。輸入完整四位數。</p>
+        <div class="lot-display"><div class="num${ed.value ? '' : ' empty'}">${ed.value ? escapeHtml(ed.value) : '----'}</div></div>
+        ${jumpChips}
+        <div class="keypad">${keypad}</div>
+        <div class="sheet-actions">
+          <button type="button" class="btn primary" data-act="jj-ok">確定</button>
+          <button type="button" class="btn" data-act="jj-cancel">取消</button>
+        </div>
+      </div>
+    </div>`;
+  }
+    if (modal.type === 'xfer') {
     const half = modal.half || state.currentHalf;
     const srcId = modal.srcId;
     const cands = modal.candidates || [];
@@ -9095,7 +9266,8 @@ function onClick(e) {
   const DISMISS_TOAST_ON_INPUT = {
     digit: 1, back: 1, clear: 1,
     'edit-cur': 1, 'open-start': 1,
-    'ss-digit': 1, 'ss-back': 1, 'ss-clear': 1, 'ss-chip': 1,
+    'ss-digit': 1, 'ss-back': 1, 'ss-clear': 1, 'ss-chip': 1, 'ss-jump-chip': 1, 'ss-focus': 1,
+    'edit-jump': 1, 'jj-digit': 1, 'jj-back': 1, 'jj-clear': 1, 'jj-chip': 1,
     'ec-digit': 1, 'ec-back': 1, 'ec-clear': 1,
     'plan-qty-digit': 1, 'plan-qty-back': 1, 'plan-qty-clear': 1, 'plan-qty-edit': 1,
     'setup-digit': 1, 'setup-back': 1, 'setup-clear': 1
@@ -9623,8 +9795,22 @@ function onClick(e) {
     case 'open-start':
       openSetStart(btn.dataset.id);
       break;
+    case 'ss-focus':
+      if (editStart) {
+        editStart.focus = v === 'jump' ? 'jump' : 'start';
+        render();
+      }
+      break;
     case 'ss-digit':
-      if (editStart && editStart.fresh) {
+      if (editStart && editStart.focus === 'jump') {
+        if (editStart.jumpFresh) {
+          editStart.jumpValue = v;
+          editStart.jumpFresh = false;
+        } else if (String(editStart.jumpValue || '').length < 4) {
+          editStart.jumpValue = String(editStart.jumpValue || '') + v;
+        }
+        render();
+      } else if (editStart && editStart.fresh) {
         editStart.value = v;
         editStart.fresh = false;
         render();
@@ -9637,25 +9823,85 @@ function onClick(e) {
       if (editStart && /^\d{4}$/.test(String(v || ''))) {
         editStart.value = String(v);
         editStart.fresh = true;
+        editStart.focus = 'start';
+        render();
+      }
+      break;
+    case 'ss-jump-chip':
+      if (editStart && /^\d{4}$/.test(String(v || ''))) {
+        editStart.jumpValue = String(v);
+        editStart.jumpFresh = true;
+        editStart.focus = 'jump';
         render();
       }
       break;
     case 'ss-back':
-      if (editStart) {
+      if (editStart && editStart.focus === 'jump') {
+        editStart.jumpFresh = false;
+        editStart.jumpValue = String(editStart.jumpValue || '').slice(0, -1);
+        render();
+      } else if (editStart) {
         editStart.fresh = false;
         editStart.value = String(editStart.value || '').slice(0, -1);
         render();
       }
       break;
     case 'ss-clear':
-      if (editStart) {
+      if (editStart && editStart.focus === 'jump') {
+        editStart.jumpFresh = false;
+        editStart.jumpValue = '';
+        render();
+      } else if (editStart) {
         editStart.fresh = false;
         editStart.value = '';
         render();
       }
       break;
+    case 'edit-jump':
+      openEditJump(btn.dataset.id);
+      break;
+    case 'jj-digit':
+      if (editJump && editJump.fresh) {
+        editJump.value = v;
+        editJump.fresh = false;
+        render();
+      } else if (editJump && String(editJump.value || '').length < 4) {
+        editJump.value = String(editJump.value || '') + v;
+        render();
+      }
+      break;
+    case 'jj-chip':
+      if (editJump && /^\d{4}$/.test(String(v || ''))) {
+        editJump.value = String(v);
+        editJump.fresh = true;
+        render();
+      }
+      break;
+    case 'jj-back':
+      if (editJump) {
+        editJump.fresh = false;
+        editJump.value = String(editJump.value || '').slice(0, -1);
+        render();
+      }
+      break;
+    case 'jj-clear':
+      if (editJump) {
+        editJump.fresh = false;
+        editJump.value = '';
+        render();
+      }
+      break;
+    case 'jj-ok':
+      commitEditJump();
+      break;
+    case 'jj-cancel':
+      editJump = null;
+      modal = null;
+      render();
+      break;
     case 'jump-next':
-      jumpToNextSegment(btn.dataset.id);
+      if (ignoreHoldClick) { ignoreHoldClick = false; break; }
+      toast('按住不放才會跳');
       break;
     case 'ec-jump':
       jumpToNextSegment(btn.dataset.id || (editCurrent && editCurrent.machineId));
@@ -10323,8 +10569,13 @@ function endColDrag(pt) {
   render();
 }
 
-function armHoldFill(btn) {
+const JUMP_HOLD_MS = 1000;
+
+function armHoldFill(btn, ms) {
   if (!btn) return;
+  const reduced = typeof prefersReducedMotion === 'function' && prefersReducedMotion();
+  btn.classList.toggle('hold-static', !!reduced);
+  btn.style.setProperty('--hold-ms', (ms || 500) + 'ms');
   btn.classList.remove('holding');
   void btn.offsetWidth;
   btn.classList.add('holding');
@@ -10344,6 +10595,11 @@ function performHoldAction(act, btn) {
   if (act === 'set-start') {
     const id = btn && btn.dataset.id;
     if (id) openSetStart(id);
+    return;
+  }
+  if (act === 'jump-next') {
+    const id = btn && btn.dataset.id;
+    if (id) jumpToNextSegment(id);
   }
 }
 
@@ -10356,7 +10612,9 @@ function onPressStart(e, pt) {
   if (holdBtn && !target.closest('.del')) {
     pressOrigin.holdBtn = holdBtn;
     pressOrigin.holdAct = holdBtn.dataset.hold || holdBtn.dataset.act;
-    armHoldFill(holdBtn);
+    const holdMs = pressOrigin.holdAct === 'jump-next' ? JUMP_HOLD_MS : 500;
+    if (pressOrigin.holdAct === 'jump-next' && e.cancelable) e.preventDefault();
+    armHoldFill(holdBtn, holdMs);
     longPressTimer = setTimeout(() => {
       longPressTimer = null;
       if (!pressOrigin || pressOrigin.holdBtn !== holdBtn) return;
@@ -10364,7 +10622,7 @@ function onPressStart(e, pt) {
       holdBtn.classList.remove('holding');
       ignoreHoldClick = true;
       performHoldAction(pressOrigin.holdAct, holdBtn);
-    }, 500);
+    }, holdMs);
     return;
   }
   const recent = target && target.closest && target.closest('.recent-chip');
@@ -10487,7 +10745,8 @@ function onPressEnd(e, pt) {
     pressOrigin.holdBtn.classList.remove('holding');
     if (!done) {
       ignoreHoldClick = true;
-      toast('按住不放才會流標');
+      if (act === 'jump-next') toast('按住不放才會跳');
+      else if (act === 'flow') toast('按住不放才會流標');
     }
     cancelPress();
     return;
@@ -10597,7 +10856,7 @@ function bind() {
     });
   }
   document.addEventListener('contextmenu', (e) => {
-    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit')) {
+    if (dragState || e.target.closest('.key, #paddle, .nav, .btn-save, .mini-paddle, .step-btn, .item-btn, .recent-chip, .lot-cell, .live-col, .live-col-head, .prio-hit, .jump-btn, .jump-edit, .jump-row, .hold-btn')) {
       e.preventDefault();
     }
   });
@@ -10608,8 +10867,13 @@ function bind() {
     }, 30000);
   }
   document.addEventListener('selectstart', (e) => {
-    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list, .item-btn, .item-pick')) e.preventDefault();
+    if (dragState || e.target.closest('.lot-cell, .live-col-head, .live-col-list, .item-btn, .item-pick, .jump-btn, .jump-edit, .jump-row, .hold-btn')) e.preventDefault();
   });
+  document.addEventListener('touchstart', (e) => {
+    if (e.target && e.target.closest && e.target.closest('.jump-btn')) {
+      if (e.cancelable) e.preventDefault();
+    }
+  }, { passive: false, capture: true });
   document.addEventListener('touchstart', onTouchStart, { passive: true });
   document.addEventListener('touchmove', onTouchMove, { passive: false });
   document.addEventListener('touchend', onTouchEnd, { passive: false });
@@ -10791,6 +11055,11 @@ if (typeof window !== 'undefined') {
   window.__undoLast = undoLast;
   window.__commitSetStart = commitSetStart;
   window.__jumpToNextSegment = jumpToNextSegment;
+  window.__upcomingJumpSegment = upcomingJumpSegment;
+  window.__jumpTargetOf = jumpTargetOf;
+  window.__setJumpTarget = setJumpTarget;
+  window.__openEditJump = openEditJump;
+  window.__JUMP_HOLD_MS = JUMP_HOLD_MS;
   window.__commitLot = commitLot;
   window.__pickMachineForDraft = pickMachineForDraft;
   window.__writeAnchor = writeAnchor;
