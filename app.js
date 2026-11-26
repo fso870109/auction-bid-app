@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v104';
+const APP_VERSION = 'v105';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -6450,11 +6450,13 @@ function toast(msg, ms, action) {
     const node = document.getElementById('toast');
     if (node) {
       node.classList.add('hidden');
-      node.classList.remove('has-action');
+      node.classList.remove('has-action', 'dock-live');
       node.innerHTML = '';
       node.style.top = '';
       node.style.bottom = '';
+      node.style.height = '';
     }
+    clearToastDock();
   }, ms || (action ? 6000 : 1600));
 }
 
@@ -6473,10 +6475,20 @@ function dismissActionToast() {
   }
 }
 
+function clearToastDock() {
+  document.querySelectorAll('.live-screen.toast-docked').forEach((n) => n.classList.remove('toast-docked'));
+  const el = document.getElementById('toast');
+  if (el) {
+    el.classList.remove('dock-live');
+    el.style.height = '';
+  }
+}
+
 function placeActionToast() {
   const el = document.getElementById('toast');
-  if (!el || !toastMsg || !toastAction || el.classList.contains('hidden')) {
-    if (el && (!toastMsg || !toastAction)) {
+  clearToastDock();
+  if (!el || !toastMsg || el.classList.contains('hidden')) {
+    if (el) {
       el.style.top = '';
       el.style.bottom = '';
     }
@@ -6485,24 +6497,66 @@ function placeActionToast() {
   const gap = 8;
   const vv = window.visualViewport;
   const vh = vv ? vv.height : window.innerHeight;
-  const toastH = Math.max(el.getBoundingClientRect().height || 0, 64);
-  let top;
   const overlayKeypad = document.querySelector('#app > .overlay .keypad, .overlay .keypad');
   const sheet = overlayKeypad && overlayKeypad.closest('.sheet');
-  const liveBar = document.querySelector('.live-screen .live-bar');
+  const planOpen = !!(document.getElementById('plan-screen') || document.getElementById('sum-screen'));
+  const paddleOpenNow = !!document.getElementById('paddle');
+  const liveBar = document.querySelector('#main.live-mode .live-screen .live-bar');
+  const liveScreen = liveBar && liveBar.closest('.live-screen');
   const noteHead = document.querySelector('.note-screen .note-head') || document.querySelector('.note-screen .prio-toggle');
   const header = document.querySelector('#app > .header');
   const paddleBar = document.getElementById('paddle-bar');
+
   if (sheet && overlayKeypad) {
+    if (!toastAction) {
+      el.style.top = '';
+      el.style.bottom = '';
+      return;
+    }
+    const toastH = Math.max(el.getBoundingClientRect().height || 0, 64);
     const keyTop = overlayKeypad.getBoundingClientRect().top;
     const display = sheet.querySelector('.lot-display');
     const ceiling = display ? Math.min(display.getBoundingClientRect().top, keyTop) : keyTop;
-    top = ceiling - toastH - gap;
+    let top = ceiling - toastH - gap;
     if (top < gap) top = gap;
     if (top + toastH + gap > keyTop) top = Math.max(gap, keyTop - toastH - gap);
-  } else if (liveBar) {
-    top = liveBar.getBoundingClientRect().bottom + gap;
-  } else if (noteHead) {
+    const nav = document.querySelector('#app > .nav');
+    const navTop = nav ? nav.getBoundingClientRect().top : vh;
+    if (top + toastH + gap > navTop) top = Math.max(gap, navTop - toastH - gap);
+    el.style.top = Math.round(top) + 'px';
+    el.style.bottom = 'auto';
+    return;
+  }
+
+  if (planOpen || paddleOpenNow) {
+    el.style.top = '';
+    el.style.bottom = 'auto';
+    return;
+  }
+
+  if (liveBar && liveScreen) {
+    liveScreen.classList.add('toast-docked');
+    el.classList.add('dock-live');
+    const dock = () => {
+      if (!el.classList.contains('dock-live') || !toastMsg) return;
+      const bar = liveBar.getBoundingClientRect();
+      el.style.top = Math.round(bar.top) + 'px';
+      el.style.bottom = 'auto';
+    };
+    dock();
+    requestAnimationFrame(dock);
+    return;
+  }
+
+  if (!toastAction) {
+    el.style.top = '';
+    el.style.bottom = '';
+    return;
+  }
+
+  const toastH = Math.max(el.getBoundingClientRect().height || 0, 64);
+  let top;
+  if (noteHead) {
     const keypad = document.querySelector('.note-screen .keypad');
     top = noteHead.getBoundingClientRect().bottom + gap;
     if (keypad) {
@@ -6535,6 +6589,9 @@ function paintToast(el) {
     el.innerHTML = '';
     el.style.top = '';
     el.style.bottom = '';
+    el.style.height = '';
+    el.classList.remove('dock-live');
+    clearToastDock();
     return;
   }
   const text = escapeHtml(String(toastMsg || '').replace(/\s+/g, ' ').trim());
