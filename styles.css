@@ -6111,3 +6111,117 @@ html.is-dragging .item-pick {
   .toast.has-action span { font-size: 18px; }
   .toast.has-action button { min-width: 84px; height: 48px; min-height: 48px; font-size: 20px; padding: 0 14px; }
 }
+
+
+/* ===== v102: full 備註 names and 還差 line; compact centered 零賣/交貨; qty tap to edit ===== */
+.plan-body,
+.plan-mid .plan-body,
+.plan-screen:not(.is-picking) .plan-body,
+.sum-screen .plan-body {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.plan-row {
+  gap: 6px;
+  padding: 6px 4px;
+  align-items: center;
+}
+.plan-main {
+  min-width: 0;
+  overflow: visible;
+}
+.plan-text {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: unset;
+  font-size: clamp(20px, 5.2vw, 21px);
+  font-weight: 800;
+  line-height: 1.25;
+}
+.plan-meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+.plan-remain {
+  flex: 0 1 auto;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+  max-width: none;
+}
+.plan-remain .plan-frac {
+  display: inline;
+  padding-left: 4px;
+  color: #c8c09a;
+}
+.plan-purpose {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 52px;
+  width: 52px;
+  max-width: 56px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 4px;
+  font-size: 16px;
+  font-weight: 800;
+}
+.plan-qty-row {
+  gap: 0;
+}
+.plan-qty-edit,
+.plan-qty-read {
+  min-width: 48px;
+  width: 48px;
+  min-height: 40px;
+  height: 40px;
+  font-size: 18px;
+}
+.plan-del {
+  min-width: 36px;
+  width: 36px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 2px;
+  font-size: 16px;
+}
+@media (min-width: 390px) {
+  .plan-purpose {
+    min-width: 56px;
+    width: 56px;
+    max-width: 56px;
+    font-size: 17px;
+  }
+  .plan-remain { font-size: 15px; }
+  .plan-del { min-width: 40px; width: 40px; }
+}
+@media (max-width: 360px) {
+  .plan-body,
+  .plan-mid .plan-body,
+  .plan-screen:not(.is-picking) .plan-body {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .plan-row { gap: 4px; padding: 6px 2px; }
+  .plan-purpose {
+    min-width: 52px;
+    width: 52px;
+    max-width: 52px;
+    min-height: 40px;
+    height: 40px;
+    padding: 0 4px;
+    font-size: 16px;
+  }
+  .plan-remain .plan-frac { display: inline; }
+  .plan-del { min-width: 36px; width: 36px; padding: 0 2px; }
+}

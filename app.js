@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v101';
+const APP_VERSION = 'v102';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -3091,12 +3091,11 @@ function renderPlanScreen() {
     if (kind !== 'tomorrow' && qty >= 1) {
       remainHtml = p.done && remain === 0
         ? `<span class="plan-remain ok">已完成<span class="plan-frac">${qty} 件</span></span>`
-        : `<span class="plan-remain">還差 ${remain} 件<span class="plan-frac">${Math.min(won, qty)}/${qty}</span></span>`;
+        : `<span class="plan-remain">還差 ${remain} 件 <span class="plan-frac">${Math.min(won, qty)}/${qty}</span></span>`;
     }
     const qtyCtrl = kind === 'done'
       ? `<span class="plan-qty-read">${qty}<span>件</span></span>`
       : `<span class="plan-qty-row">
-        <button type="button" class="plan-qty-dec-lg" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少一件">−</button>
         <button type="button" class="plan-qty-edit" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
       </span>`;
     const purpose = planPurposeOf(p);
