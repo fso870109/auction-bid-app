@@ -6387,3 +6387,189 @@ html.is-dragging .item-pick {
   z-index: 3;
   background: #101010;
 }
+
+/* ===== v104: horizontal － 件數 ＋ in 備註 rows; 刪 moved into 件數 sheet ===== */
+.plan-row {
+  box-sizing: border-box;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  overflow: hidden;
+}
+.plan-main {
+  min-width: 0;
+  overflow: hidden;
+}
+.plan-text {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: unset;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.plan-remain {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  max-width: 100%;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.plan-remain-lbl { display: inline; }
+.plan-del { display: none !important; }
+
+.plan-qty-step {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: stretch;
+  align-self: center;
+  position: relative;
+  box-sizing: border-box;
+  width: auto;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: #171717;
+  box-shadow: inset 0 0 0 1px var(--line), var(--inset-top), var(--raise-sm);
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.plan-qty-plus,
+.plan-qty-minus,
+.plan-qty-num {
+  position: static;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  z-index: auto;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  line-height: 1;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.plan-qty-plus,
+.plan-qty-minus {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  background: transparent;
+  color: #f0ead8;
+  font-size: 22px;
+  font-weight: 900;
+}
+.plan-qty-plus:active,
+.plan-qty-minus:active { background: var(--bg-press); }
+.plan-qty-num {
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 1px;
+  width: auto;
+  min-width: 48px;
+  padding: 0 4px;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: #111;
+  color: #f8f1d4;
+  font-size: 18px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.plan-qty-num span {
+  font-size: 13px;
+  font-weight: 800;
+  color: #c8c09a;
+  line-height: 1;
+  margin: 0;
+}
+.plan-qty-num:active { filter: brightness(1.15); }
+.plan-qty-read {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 48px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 4px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #171717;
+  color: #f8f1d4;
+  font-size: 18px;
+  font-weight: 900;
+}
+.plan-qty-read span {
+  font-size: 13px;
+  font-weight: 800;
+  color: #c8c09a;
+  margin-left: 1px;
+}
+
+.overlay:has(.keypad) .sheet > .plan-qty-delete {
+  flex: 0 0 auto;
+}
+.plan-qty-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  margin-top: 10px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  background: #c62828;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  box-shadow: var(--raise-sm, none);
+}
+.plan-qty-delete:active { filter: brightness(1.12); }
+
+@media (max-width: 360px) {
+  .plan-body,
+  .plan-mid .plan-body,
+  .plan-screen:not(.is-picking) .plan-body {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .plan-row { gap: 4px; padding: 8px 2px; }
+  .plan-purpose {
+    min-width: 52px;
+    width: 52px;
+    max-width: 52px;
+    padding: 0 4px;
+    font-size: 16px;
+  }
+}
+@media (max-width: 359px) {
+  .plan-row { gap: 3px; padding: 8px 2px; }
+  .plan-remain-lbl { display: none; }
+}

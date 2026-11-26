@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v103';
+const APP_VERSION = 'v104';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -2970,7 +2970,7 @@ function bumpPlanQty(id, delta) {
   const snap = snapshotPlanItems();
   const next = planQtyOf(item) + (Number(delta) || 0);
   if (next <= 0) {
-    toast('要刪掉請把件數改成 0，或按刪');
+    toast('要刪掉請把件數改成 0，或到件數裡按刪除這一列');
     buzz(24);
     return;
   }
@@ -3088,14 +3088,14 @@ function renderPlanScreen() {
     if (kind !== 'tomorrow' && qty >= 1) {
       remainHtml = p.done && remain === 0
         ? `<span class="plan-remain ok">已完成<span class="plan-frac">${qty} 件</span></span>`
-        : `<span class="plan-remain">還差 ${remain} 件 <span class="plan-frac">${Math.min(won, qty)}/${qty}</span></span>`;
+        : `<span class="plan-remain"><span class="plan-remain-lbl">還差 </span>${remain} 件 <span class="plan-frac">${Math.min(won, qty)}/${qty}</span></span>`;
     }
     const qtyCtrl = kind === 'done'
-      ? `<span class="plan-qty-read">${qty}<span>件</span></span>`
+      ? `<button type="button" class="plan-qty-read" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>`
       : `<span class="plan-qty-step">
-        <button type="button" class="plan-qty-plus" data-act="plan-item-qty-inc" data-id="${escapeHtml(p.id)}" aria-label="增加一件">＋</button>
-        <button type="button" class="plan-qty-num" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
         <button type="button" class="plan-qty-minus" data-act="plan-item-qty-dec" data-id="${escapeHtml(p.id)}" aria-label="減少一件">−</button>
+        <button type="button" class="plan-qty-num" data-act="plan-qty-edit" data-id="${escapeHtml(p.id)}" aria-label="輸入件數 ${qty} 件">${qty}<span>件</span></button>
+        <button type="button" class="plan-qty-plus" data-act="plan-item-qty-inc" data-id="${escapeHtml(p.id)}" aria-label="增加一件">＋</button>
       </span>`;
     const purpose = planPurposeOf(p);
     const purposeLbl = planPurposeLabel(p);
@@ -3109,7 +3109,6 @@ function renderPlanScreen() {
       </div>
       ${purposeBtn}
       ${qtyCtrl}
-      <button type="button" class="plan-del" data-act="plan-del" data-id="${escapeHtml(p.id)}" aria-label="刪除">刪</button>
     </div>`;
   };
   const section = (title, hint, list, kind) => {
@@ -8847,6 +8846,7 @@ function renderModal() {
         </div>
         <div class="keypad">${keypad}</div>
         <p class="empty-hint">輸入 0 再按確定會刪掉這一列，可再按復原。</p>
+        <button type="button" class="plan-qty-delete" data-act="plan-qty-delete" data-id="${escapeHtml(modal.id)}">刪除這一列</button>
         <div class="sheet-actions">
           <button type="button" class="btn" data-act="modal-cancel">取消</button>
           <button type="button" class="btn primary" data-act="plan-qty-ok">確定</button>
@@ -9552,6 +9552,13 @@ function onClick(e) {
     case 'plan-qty-ok':
       commitPlanQtyEdit();
       break;
+    case 'plan-qty-delete': {
+      const id = (modal && modal.type === 'plan-qty' && modal.id) || btn.dataset.id;
+      modal = null;
+      if (id) deletePlanItem(id);
+      else render();
+      break;
+    }
     case 'plan-done':
       setPlanDone(btn.dataset.id, true);
       break;
