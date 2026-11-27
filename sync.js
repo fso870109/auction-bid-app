@@ -243,8 +243,64 @@ function syncAgoText() {
   } catch { return ''; }
 }
 
+/* v114: browser network errors are English ("Failed to fetch", "Load failed").
+   Say in plain Chinese what is going on. */
+function friendlySyncError(err, fallback) {
+  const msg = String((err && err.message) || '');
+  const name = String((err && err.name) || '');
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return '沒有網路，請確認有訊號再試';
+  if (name === 'TimeoutError' || name === 'AbortError' || /timeout|timed out|aborted/i.test(msg)) {
+    return '同步伺服器沒回應（可能在睡覺，約 1 分鐘會醒），請等一下再按一次';
+  }
+  if (/failed to fetch|load failed|networkerror|network request failed|network error|fetch/i.test(msg)) {
+    return '連不上同步伺服器（可能在睡覺，約 1 分鐘會醒），請等一下再按一次';
+  }
+  if (msg && /[\u4e00-\u9fff]/.test(msg)) return msg;
+  return fallback;
+}
+
+/* v114: when sync is not working, say why and how many lots wait on this phone. */
+let syncBadSince = 0;
+let syncBannerShown = '';
+let syncBannerTimer = 0;
+function syncPendingCount() {
+  const q = (state && state.syncQueue) || [];
+  const ids = new Set();
+  for (const op of q) if (op && op.id) ids.add((op.kind || '') + ':' + op.id);
+  return ids.size || q.length;
+}
+function syncBannerText() {
+  if (!state || !state.syncRoom || state.syncPending || isLegacyRoom(state.syncRoom)) return '';
+  const s = currentStatus();
+  if (s === 'online' || s === 'off' || s === 'pending') { syncBadSince = 0; return ''; }
+  if (s === 'syncing' && syncWs && syncWs.readyState === 1) return '';
+  if (!syncBadSince) syncBadSince = Date.now();
+  const n = syncPendingCount();
+  // Short enough for one line on a 320 px phone; the count is what matters.
+  if (!navigator.onLine) return n ? `沒有網路，號碼先存手機（待送 ${n} 筆）` : '沒有網路，抄的號會先存在手機';
+  if (Date.now() - syncBadSince < 5000) return '';
+  return n ? `同步伺服器喚醒中，約 1 分鐘（待送 ${n} 筆）` : '同步伺服器喚醒中，約 1 分鐘，號碼先存手機';
+}
+function renderSyncBanner() {
+  const t = syncBannerText();
+  syncBannerShown = t;
+  if (!t) return '';
+  return `<div class="sync-banner${navigator.onLine ? '' : ' no-net'}" data-act="settings" role="status">${escapeHtml(t)}</div>`;
+}
+function refreshSyncBanner() {
+  const t = syncBannerText();
+  if (t !== syncBannerShown && typeof render === 'function') render();
+  if (syncBadSince && !syncBannerTimer) {
+    syncBannerTimer = setTimeout(() => { syncBannerTimer = 0; refreshSyncBanner(); }, 5200);
+  }
+}
+
 function syncShortLabel() {
   const s = currentStatus();
+  if (s !== 'online' && s !== 'off' && s !== 'pending') {
+    const n = syncPendingCount();
+    if (n) return '待送' + n;
+  }
   if (s === 'online') return '同步';
   if (s === 'connecting' || s === 'syncing') return '連線';
   if (s === 'pending') return '等待';
@@ -306,6 +362,7 @@ function paintSyncDot(el) {
 function setSyncStatus(s) {
   if (syncStatus !== s) syncStatus = s;
   paintSyncDot(document.getElementById('sync-pill'));
+  try { refreshSyncBanner(); } catch { /* ignore */ }
 }
 
 function markSyncOk() {
@@ -658,6 +715,31 @@ function applySnapshot(snap, flash) {
   if (typeof render === 'function') render();
 }
 
+/* v114: a teammate typing fast sends a batch every ~100 ms. Applying and repainting
+   each one kept this phone busy ~74% of the time (taps felt slow during a burst).
+   Collect what arrives in 150 ms and apply it in one go, one repaint. */
+const REMOTE_BATCH_MS = 150;
+let remoteBuf = null;
+let remoteBufTimer = 0;
+function queueRemoteOps(ops, flashes, from) {
+  if (!ops || !ops.length) return;
+  if (!remoteBuf) remoteBuf = { ops: [], flashes: [], from: '' };
+  for (const op of ops) remoteBuf.ops.push(op);
+  const foreign = from && from !== ensureDeviceId() && from !== ensurePeerId();
+  if (foreign) {
+    remoteBuf.from = from;
+    if (Array.isArray(flashes)) for (const id of flashes) remoteBuf.flashes.push(id);
+  }
+  if (!remoteBufTimer) remoteBufTimer = setTimeout(flushRemoteOps, REMOTE_BATCH_MS);
+}
+function flushRemoteOps() {
+  if (remoteBufTimer) { clearTimeout(remoteBufTimer); remoteBufTimer = 0; }
+  const buf = remoteBuf;
+  remoteBuf = null;
+  if (!buf || !buf.ops.length) return;
+  applyRemoteOps(buf.ops, buf.flashes.length ? buf.flashes : null, buf.from);
+}
+
 function applyRemoteOps(ops, flashes, from) {
   if (!ops || !ops.length || typeof BidSyncCore === 'undefined') return;
   syncApplying = true;
@@ -1005,6 +1087,7 @@ function openSyncSocket() {
       syncServerVersion = msg.serverVersion || '';
       maybeWarnOldPeer();
       if (msg.snapshot) {
+        flushRemoteOps();
         mergeSnapshotOnHello(msg.snapshot);
         reconcileWithServer(msg.snapshot);
       } else if (typeof render === 'function') render();
@@ -1020,6 +1103,7 @@ function openSyncSocket() {
       markSyncOk();
       persistSyncState();
       if (msg.snapshot) {
+        flushRemoteOps();
         mergeSnapshotOnHello(msg.snapshot);
         reconcileWithServer(msg.snapshot);
       }
@@ -1028,7 +1112,7 @@ function openSyncSocket() {
       flushSync();
     } else if (msg.type === 'ops') {
       if (msg.from && msg.from !== state.syncDeviceId) syncLastRemoteAt = Date.now();
-      applyRemoteOps(msg.ops, msg.flashes, msg.from);
+      queueRemoteOps(msg.ops, msg.flashes, msg.from);
     } else if (msg.type === 'ack') {
       /* v112: only drop the batch this ack is for. The old code dropped the whole
          queue when an extra ack came in (e.g. a batch sent twice on login), so lots
@@ -1169,7 +1253,7 @@ async function approveJoin(requestId, accept) {
     toast(accept ? '已允許加入' : '已拒絕加入');
     render();
   } catch (err) {
-    lastSyncError = err.message || '處理失敗';
+    lastSyncError = friendlySyncError(err, '處理失敗');
     toast(lastSyncError);
     render();
   }
@@ -1196,7 +1280,7 @@ async function kickDevice(targetDeviceId) {
     toast('已移除那支手機');
     render();
   } catch (err) {
-    lastSyncError = err.message || '無法移除';
+    lastSyncError = friendlySyncError(err, '無法移除');
     toast(lastSyncError);
     render();
   }
@@ -1222,11 +1306,11 @@ async function createSyncRoom() {
     syncApplying = true;
     try { saveState(); } finally { syncApplying = false; }
     connectSync();
-    toast('已建立房間' + (data.label ? ' ' + data.label : '') + '，請把邀請給另一支手機');
+    toast('已建立房間' + (data.label ? ' ' + data.label : '') + '，請把邀請給隊友的手機');
     render();
   } catch (err) {
-    lastSyncError = err.message || '建立房間失敗';
-    toast(lastSyncError + '。若第一次連線，伺服器可能要醒一下再試。');
+    lastSyncError = friendlySyncError(err, '建立房間失敗');
+    toast(lastSyncError + (/伺服器|網路/.test(lastSyncError) ? '' : '。若第一次連線，伺服器可能要醒一下再試。'));
     render();
   }
 }
@@ -1284,8 +1368,8 @@ async function joinSyncRoom(code, opts) {
     toast('已加入房間' + (data.label ? ' ' + data.label : ''));
     render();
   } catch (err) {
-    lastSyncError = err.message || '加入失敗';
-    toast(lastSyncError + (/無法加入|請稍後/.test(lastSyncError) ? '' : '。若第一次連線，伺服器可能要醒一下再試。'));
+    lastSyncError = friendlySyncError(err, '加入失敗');
+    toast(lastSyncError + (/無法加入|請稍後|伺服器|網路/.test(lastSyncError) ? '' : '。若第一次連線，伺服器可能要醒一下再試。'));
     render();
   }
 }
@@ -1366,7 +1450,7 @@ function renderSyncSettings() {
   if (!joined) {
     return `<div class="setting-block" id="sync-settings">
       <h2>團隊同步</h2>
-      <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">兩支手機看同一份抄號、標到和備註，不用再口頭對。建立房間後，用「複製邀請連結」或畫面中的 QR 碼分享給另一支手機。加入時要先輸入自己的名稱。沒加入房間時，這個手機還是只存在自己這裡、離線也能用。</p>
+      <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">團隊的手機看同一份抄號、標到和備註，不用再口頭對。建立房間後，用「複製邀請連結」或畫面中的 QR 碼分享給隊友的手機。加入時要先輸入自己的名稱。沒加入房間時，這個手機還是只存在自己這裡、離線也能用。</p>
       <label class="sync-name-label" for="sync-settings-name">我的名稱</label>
       <input id="sync-settings-name" class="sync-name-input" maxlength="20" autocomplete="name" value="${escapeHtml(currentSyncName())}" data-act="sync-name-input" placeholder="例如：小美" />
       <button type="button" class="btn primary" style="width:100%;margin:10px 0 8px" data-act="sync-create">建立房間</button>
@@ -1412,7 +1496,7 @@ function renderSyncSettings() {
     const ver = (me ? syncAppVersion() : (d.appVersion || '')) + ((me ? syncPlatform() : (d.platform || '')) ? '・' + (me ? syncPlatform() : d.platform) : '');
     const old = !me && peerVersionTooOld(d);
     const seen = !online && d.lastSeen ? '，最後上線 ' + syncClock(d.lastSeen) : '';
-    return `<div class="sync-device${old ? ' old' : ''}"><span class="sync-dev-main"><span><i class="sync-dev-dot ${online ? 'on' : 'off'}"></i>${escapeHtml(name + role + (me && !/這支/.test(name) ? '（這支）' : ''))}</span><small>${escapeHtml((online ? '在線' : '離線') + ' · ' + (ver || '版本不明') + seen)}${old ? '<b>　版本太舊，請重開</b>' : ''}</small></span>${kick}</div>`;
+    return `<div class="sync-device${old ? ' old' : ''}"><span class="sync-dev-main"><span><i class="sync-dev-dot ${online ? 'on' : 'off'}"></i>${escapeHtml(name + role + (me && !/這支/.test(name) ? '（這支）' : ''))}</span><small>${escapeHtml((online ? '在線' : '離線') + ' · ' + (ver || '版本不明') + seen)}${old ? '<b>　版本太舊，請更新（看下面步驟）</b>' : ''}</small></span>${kick}</div>`;
   }).join('');
   const pending = (state.syncJoinRequests || []).map((r) =>
     `<div class="sync-pending">
@@ -1435,7 +1519,7 @@ function renderSyncSettings() {
       <div class="sync-qr" id="sync-qr" aria-label="邀請 QR 碼"></div>
       <div class="sync-pill ${currentStatus()}" id="sync-detail-status" style="position:static;margin:8px auto 0">${escapeHtml(syncDetailLabel())}</div>
     </div>
-    <p class="empty-hint" style="text-align:left;padding:10px 0 0;line-height:1.45">另一支手機掃描上面的 QR 碼，或打開邀請連結即可加入。請妥善保管邀請，知道連結的人才能申請加入。</p>
+    <p class="empty-hint" style="text-align:left;padding:10px 0 0;line-height:1.45">隊友的手機掃描上面的 QR 碼，或打開邀請連結即可加入。請妥善保管邀請，知道連結的人才能申請加入。</p>
     <div class="row-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
       <button type="button" class="btn primary" data-act="sync-copy-link">複製邀請連結</button>
       <button type="button" class="btn" data-act="sync-copy-code">複製邀請碼</button>
@@ -1456,7 +1540,7 @@ function maybeWarnOldPeer() {
   const old = syncPeersTooOld();
   if (!old.length || Date.now() - oldPeerWarnedAt < 60000) return;
   oldPeerWarnedAt = Date.now();
-  if (typeof toast === 'function') toast('對方版本太舊，請重開（' + old.map(devicePublicName).join('、') + '）');
+  if (typeof toast === 'function') toast('對方版本太舊，請他更新（' + old.map(devicePublicName).join('、') + '）：設定 → 檢查更新');
 }
 
 function syncClock(ts) {
@@ -1500,10 +1584,16 @@ function renderSyncDiag() {
     ['待送出', q ? q + ' 筆' : '沒有'],
     ['這支版本', syncAppVersion() + (syncServerVersion ? '（伺服器 ' + syncServerVersion + '）' : '')]
   ];
+  const steps = `<ol class="sync-steps">
+          <li>打開 App 的「設定」（右上齒輪），按最上面的「<b>檢查更新</b>」，等它重開。</li>
+          <li>還是舊版：從螢幕底部往上滑，把 App <b>完全滑掉</b>，再點主畫面圖示打開，做兩次。</li>
+          <li>iPhone 還是舊版：先看這裡「待送出」是<b>沒有</b>（號碼都送出去了），再長按主畫面圖示刪掉，用 <b>Safari</b> 打開 App 網址，按分享鈕「加入主畫面」，打開後用邀請碼重新加入房間。</li>
+        </ol>
+        <p class="sync-steps-note">設定最上面的大字是版本號，和這支（${escapeHtml(syncAppVersion())}）一樣就好了。</p>`;
   const old = syncPeersTooOld();
   const warn = old.length
-    ? `<p class="sync-warn">${escapeHtml(old.map(devicePublicName).join('、'))} 的版本太舊。請在那支手機打開「設定」按「檢查更新」；iPhone 若還是舊版，刪掉主畫面圖示，用 Safari 打開連結重新加入主畫面。</p>`
-    : '';
+    ? `<div class="sync-warn"><p>${escapeHtml(old.map(devicePublicName).join('、'))} 的版本太舊，請在那支手機照做：</p>${steps}</div>`
+    : `<div class="sync-howto"><button type="button" class="btn sync-howto-btn" data-act="sync-howto">${syncHowtoOpen ? '▾' : '▸'} 手機版本太舊、更新不了怎麼辦</button>${syncHowtoOpen ? steps : ''}</div>`;
   return `<h3 class="sync-sub">同步檢查</h3>
     <div class="sync-diag">${rows.map(([k, v]) => `<div><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`).join('')}</div>${warn}`;
 }
@@ -1562,6 +1652,7 @@ function initSync() {
     maybePromptMissingName();
   }
   setInterval(() => {
+    if (document.hidden) return; // v114: no repaint work in the background
     const now = Date.now();
     let expired = false;
     for (const id of Object.keys(remoteFlash)) {
@@ -1592,7 +1683,9 @@ function initSync() {
   }, 3000);
 }
 
+let syncHowtoOpen = false;
 function handleSyncAction(act, v, ev) {
+  if (act === 'sync-howto') { syncHowtoOpen = !syncHowtoOpen; if (typeof render === 'function') render(); return true; }
   if (act === 'sync-create' || act === 'sync-upgrade') { createSyncRoom(); return true; }
   if (act === 'sync-join') {
     const input = document.getElementById('sync-join-code');

@@ -3,3 +3,5 @@ screenshot-*.png
 p2.txt
 node_modules/
 sync-server/node_modules/
+dump.rdb
+*.rdb

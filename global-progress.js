@@ -337,6 +337,8 @@ function initGlobalProgress() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) gpConnect(); });
   setInterval(() => {
     if (!gpReady()) return;
+    if (document.hidden && gpWs && gpWs.readyState === 1) return; // v114: quiet in the background; visibilitychange reconnects
+
     if (gpWs && gpWs.readyState === 1) {
       if (gpSubDay !== state.day) gpSubscribe();
       else if (Object.keys(gpPendingMap()).length) gpFlush();

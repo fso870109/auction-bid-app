@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v113';
+const APP_VERSION = 'v114';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -513,7 +513,7 @@ function renderItemOrderSettings() {
   const any = itemOrderHasCustom();
   return `<div class="setting-block item-order-block">
     <h2>品項按鈕順序</h2>
-    <p class="sub">在抄號長按約 0.4 秒後拖曳，可改同一個分類裡的按鈕位置。會同步到另一支手機。還沒拖過的新品項會依交易量插入。</p>
+    <p class="sub">在抄號長按約 0.4 秒後拖曳，可改同一個分類裡的按鈕位置。會同步到隊友的手機。還沒拖過的新品項會依交易量插入。</p>
     <button type="button" class="btn item-order-reset-all" data-act="reset-item-order" ${any ? '' : 'disabled'}>全部恢復交易量排序</button>
     ${rows}
   </div>`;
@@ -2157,9 +2157,10 @@ function planLotMatchScoreRaw(plan, lot) {
 function todayWonLots() {
   const today = todayStr();
   const day = (state && state.day) || today;
-  const yest = addDaysIso(today, -1);
+  /* v114: only today's 標到 count toward 今日預計 / 買超過 (yesterday's used to be
+     added too, so 買超過 could show more pieces than were bought today). */
   return (state.lots || []).filter((l) => (
-    isWon(l) && l.item && (l.day === today || l.day === day || l.day === yest)
+    isWon(l) && l.item && (l.day === today || l.day === day)
   ));
 }
 
@@ -2180,11 +2181,10 @@ let renderPassActive = false;
 function planAssignSignature() {
   const today = todayStr();
   const day = (state && state.day) || today;
-  const yest = addDaysIso(today, -1);
   const parts = [today, day];
   for (const l of state.lots || []) {
     if (!l || !l.item || !(l.status === 'won' || l.status === 'moved')) continue;
-    if (l.day !== today && l.day !== day && l.day !== yest) continue;
+    if (l.day !== today && l.day !== day) continue;
     parts.push(l.id, l.item, l.size || '', l.qty == null ? '' : l.qty);
   }
   parts.push('|');
@@ -3112,15 +3112,15 @@ function confirmClearPlans(kind) {
     all: '全部清除？'
   };
   const bodies = {
-    today: '會刪掉今日預計 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。',
-    tomorrow: '會刪掉明日預計 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。',
-    done: '會刪掉今天的已完成 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。',
-    all: '會刪掉全部備註，共 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。'
+    today: '會刪掉今日預計 ' + list.length + ' 筆。房間裡的手機都會一起刪掉。可再按復原。',
+    tomorrow: '會刪掉明日預計 ' + list.length + ' 筆。房間裡的手機都會一起刪掉。可再按復原。',
+    done: '會刪掉今天的已完成 ' + list.length + ' 筆。房間裡的手機都會一起刪掉。可再按復原。',
+    all: '會刪掉全部備註，共 ' + list.length + ' 筆。房間裡的手機都會一起刪掉。可再按復原。'
   };
   modal = {
     type: 'confirm',
     title: titles[kind] || '清除備註？',
-    body: bodies[kind] || ('會刪掉 ' + list.length + ' 筆。兩支手機都會一起刪掉。可再按復原。'),
+    body: bodies[kind] || ('會刪掉 ' + list.length + ' 筆。房間裡的手機都會一起刪掉。可再按復原。'),
     ok: '清除 ' + list.length + ' 筆',
     cancel: '取消',
     danger: true,
@@ -6768,8 +6768,18 @@ function tickAutoProgress() {
   }
 }
 
+/* v114: nothing to show while the app is in the background, so the per-second
+   clock stops; on return it catches up at once (the numbers come from the time). */
+let progressVisHooked = false;
 function syncProgressTimer() {
-  const need = anyAutoRunning();
+  if (!progressVisHooked) {
+    progressVisHooked = true;
+    document.addEventListener('visibilitychange', () => {
+      syncProgressTimer();
+      if (!document.hidden && anyAutoRunning()) tickAutoProgress();
+    });
+  }
+  const need = anyAutoRunning() && !document.hidden;
   if (need && !progressTimer) {
     progressTimer = setInterval(tickAutoProgress, 1000);
   } else if (!need && progressTimer) {
@@ -6899,12 +6909,16 @@ function placeActionToast() {
   }
 
   if (liveBar && liveScreen) {
+    /* v114: the stats row (美／標到／未搬…) stays readable; the message sits over the
+       column names instead (they are only labels), never over the lot cards. */
     liveScreen.classList.add('toast-docked');
     el.classList.add('dock-live');
     const dock = () => {
       if (!el.classList.contains('dock-live') || !toastMsg) return;
+      const head = liveScreen.querySelector('.live-col-head');
       const bar = liveBar.getBoundingClientRect();
-      el.style.top = Math.round(bar.top) + 'px';
+      const top = head ? head.getBoundingClientRect().top - 2 : bar.bottom + 2;
+      el.style.top = Math.round(top) + 'px';
       el.style.bottom = 'auto';
     };
     dock();
@@ -8580,8 +8594,25 @@ function patchLiveMain(main, prev, next, grabColors) {
     const changed = [];
     if (!a.cells || !b.cells) {
       mode = 'rebuild';
-    } else if (a.ids.length !== b.ids.length || list.children.length !== a.ids.length) {
+    } else if (list.children.length !== a.ids.length) {
       mode = 'rebuild';
+    } else if (a.ids.length !== b.ids.length || a.ids.some((id, j) => id !== b.ids[j])) {
+      /* v114: a lot added or removed (often a teammate's): move only the cells that
+         changed instead of rebuilding the whole column (~45 ms each at a busy time). */
+      mode = 'keyed';
+      const oldIdx = new Map();
+      a.ids.forEach((id, j) => oldIdx.set(id, j));
+      let last = -1;
+      let work = 0;
+      for (let j = 0; j < b.ids.length; j += 1) {
+        const k = oldIdx.get(b.ids[j]);
+        if (k == null) { work += 1; continue; }
+        if (k < last) { mode = 'rebuild'; break; }
+        last = k;
+        if (a.cells[k] !== b.cells[j]) { work += 1; changed.push(j); }
+      }
+      if (mode === 'keyed') changed.oldIdx = oldIdx;
+      if (work > 40) mode = 'rebuild';
     } else {
       for (let j = 0; j < b.ids.length; j += 1) {
         if (a.ids[j] !== b.ids[j]) { mode = 'rebuild'; break; }
@@ -8594,7 +8625,8 @@ function patchLiveMain(main, prev, next, grabColors) {
   // Everything checked: now the DOM work, which cannot fail half way for shape reasons.
   const ids = new Set();
   for (const pl of plans) {
-    if (pl.mode === 'cells') for (const j of pl.changed) ids.add(pl.b.ids[j]);
+    if (pl.mode === 'cells' || pl.mode === 'keyed') for (const j of pl.changed) ids.add(pl.b.ids[j]);
+    if (pl.mode === 'keyed') for (const id of pl.b.ids) if (!pl.changed.oldIdx.has(id)) ids.add(id);
   }
   grabColors(plans.some((pl) => pl.mode === 'rebuild') ? null : ids);
   if (prev.bar !== next.bar) {
@@ -8604,6 +8636,28 @@ function patchLiveMain(main, prev, next, grabColors) {
   for (const pl of plans) {
     if (pl.a.head !== pl.b.head) replaceNode(pl.head, pl.b.head);
     if (pl.a.foot !== pl.b.foot) replaceNode(pl.foot, pl.b.foot);
+    if (pl.mode === 'keyed') {
+      const top = pl.list.scrollTop;
+      const oldNodes = Array.from(pl.list.children);
+      const oldIdx = pl.changed.oldIdx;
+      const keep = new Set();
+      const changedSet = new Set(pl.changed);
+      const want = pl.b.ids.map((id, j) => {
+        const k = oldIdx.get(id);
+        if (k == null || changedSet.has(j)) return firstElFromHtml(pl.b.cells[j]);
+        keep.add(k);
+        return oldNodes[k];
+      });
+      oldNodes.forEach((n, k) => { if (!keep.has(k)) n.remove(); });
+      for (let j = 0; j < want.length; j += 1) {
+        const node = want[j];
+        if (!node) continue;
+        const at = pl.list.children[j] || null;
+        if (at !== node) pl.list.insertBefore(node, at);
+      }
+      pl.list.scrollTop = top;
+      continue;
+    }
     if (pl.mode === 'rebuild') {
       const top = pl.list.scrollTop;
       pl.list.innerHTML = pl.b.cells ? pl.b.cells.join('') : '<div class="col-empty">還沒抄號</div>';
@@ -8856,11 +8910,14 @@ function iconSvg(name) {
 
 function renderHeader() {
   const half = state.currentHalf;
+  const banner = typeof renderSyncBanner === 'function' ? renderSyncBanner() : '';
+  const [, dm, dd] = String(state.day || '').split('-').map(Number);
+  const wd = WEEKDAYS[new Date(String(state.day) + 'T12:00:00').getDay()] || '';
   return `
-    <header class="header">
+    <header class="header${banner ? ' has-banner' : ''}">
       <div class="header-left">
         <img class="app-logo" src="icons/icon-192.png" alt="拍賣標貨助手" width="24" height="24" />
-        <div class="header-date">${escapeHtml(formatDateLabel(state.day))}</div>
+        <div class="header-date" aria-label="${escapeHtml(formatDateLabel(state.day))}"><span class="hd-md">${dm}/${dd}</span><span class="hd-wd">（${escapeHtml(wd)}）</span></div>
       </div>
       <div class="header-right">
         <div class="half-switch" role="tablist">
@@ -8870,6 +8927,7 @@ function renderHeader() {
         ${typeof renderSyncPill === 'function' ? renderSyncPill() : ''}
         <button type="button" class="gear-btn${showSettings ? ' on' : ''}" data-act="settings" aria-label="設定">${showSettings ? iconSvg('close') : iconSvg('gear')}</button>
       </div>
+      ${banner}
     </header>`;
 }
 
@@ -9237,7 +9295,7 @@ function renderLive() {
                 </span>
                 <span class="cell-main">
                   <span class="cell-top">
-                    ${lotNumHtml(l, { edit: true, numClass: 'cell-num' })}
+                    ${lotNumHtml(l, { numClass: 'cell-num' })}
                     ${etaHtml}
                   </span>
                   <span class="cell-item-row">${item}<span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span></span>
@@ -9295,8 +9353,8 @@ function renderLive() {
           <span class="must-count${mustLeft ? ' on' : ''}"><b>${mustLeft}</b>美</span>
           <span><b>${won}</b>標到</span>
           ${unmovedPieces ? `<span class="unmoved-count"><b>${unmovedPieces}</b>未搬</span>` : ''}
-          <span><b>${lost}</b>沒標到</span>
-          <span><b>${second.length}</b>二市</span>
+          <span${lost ? '' : ' class="zero-count"'}><b>${lost}</b>沒標到</span>
+          <span${second.length ? '' : ' class="zero-count"'}><b>${second.length}</b>二市</span>
         </div>
         ${half === 'fruit' && (state.machines.fruit || []).length < 2
           ? '<button type="button" class="live-sheet-btn" data-act="add-machine" data-half="fruit">＋第二台</button>'
@@ -9722,14 +9780,14 @@ function renderModal() {
       : '';
     const flowBtn = lot.status === 'flow'
       ? ''
-      : `<button type="button" class="action-btn flow hold-btn" data-act="mark-flow" data-hold="flow" data-id="${escapeHtml(lot.id)}">按住流標・二市</button>`;
+      : `<button type="button" class="action-btn flow hold-btn" data-act="mark-flow" data-hold="flow" data-id="${escapeHtml(lot.id)}">流標（按住）<small>沒人買，算流標並轉二市</small></button>`;
     const secondBtn = lot.status === 'flow'
       ? ''
       : lot.secondMarket
         ? `<button type="button" class="action-btn" data-act="from-second" data-id="${escapeHtml(lot.id)}">移回（取消轉二市）</button>`
         : isWon(lot)
           ? ''
-          : `<button type="button" class="action-btn" data-act="to-second" data-id="${escapeHtml(lot.id)}">轉二市</button>`;
+          : `<button type="button" class="action-btn" data-act="to-second" data-id="${escapeHtml(lot.id)}">直接轉二市<small>不算流標，只是先放二市</small></button>`;
     const qty = lotQty(lot);
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet action-sheet" data-stop="1">
@@ -9844,8 +9902,8 @@ function renderModal() {
         <h3>二市與今日摘要</h3>
         <div class="live-counts sheet-counts">
           <span><b>${won}</b>標到</span>
-          <span><b>${lost}</b>沒標到</span>
-          <span><b>${second.length}</b>二市</span>
+          <span${lost ? '' : ' class="zero-count"'}><b>${lost}</b>沒標到</span>
+          <span${second.length ? '' : ' class="zero-count"'}><b>${second.length}</b>二市</span>
         </div>
         <div class="second-list">${list}</div>
         <div class="share-row" style="margin-top:12px">

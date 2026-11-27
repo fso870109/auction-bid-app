@@ -6800,3 +6800,224 @@ html.is-dragging .item-pick {
 .version-new { margin: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ff8a8a; }
 .version-ok { margin: 0; text-align: center; font-size: 15px; color: var(--muted, #aaa); }
 .version-check-btn { width: 100%; min-height: 48px; font-size: 18px; }
+
+/* ===== v114: bigger text and tap targets for poor eyesight; 轉台/起始 in a column menu;
+   sync banner. Lot numbers and the three side-by-side columns stay as they are. ===== */
+html body #app .header {
+  gap: 6px;
+}
+html body #app .header.has-banner {
+  height: auto;
+  min-height: var(--header-h);
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding-bottom: 6px;
+}
+html body #app .header.has-banner > .header-left,
+html body #app .header.has-banner > .header-right { height: var(--header-h); }
+html body #app .header-date {
+  font-size: 16px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+html body #app .header-date .hd-wd { font-size: 14px; }
+html body #app .half-switch button,
+html body #app .half-switch button.sess-fruit,
+html body #app .half-switch button.sess-morning,
+html body #app .half-switch button.sess-afternoon {
+  min-height: 44px;
+  height: 44px;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0;
+  padding: 0 7px;
+}
+html body #app .gear-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+}
+html body #app .gear-btn .ico-svg { width: 22px; height: 22px; }
+@media (max-width: 420px) {
+  html body #app .app-logo { display: none; }
+  html body #app .header-date { padding: 6px 8px; }
+}
+@media (max-width: 380px) {
+  html body #app .header { gap: 4px; padding-left: 6px; padding-right: 6px; }
+  html body #app .header-date .hd-wd { display: none; }
+  html body #app .half-switch { padding: 2px; gap: 1px; }
+  html body #app .half-switch button,
+  html body #app .half-switch button.sess-fruit,
+  html body #app .half-switch button.sess-morning,
+  html body #app .half-switch button.sess-afternoon { padding: 0 4px; font-size: 16px; }
+}
+.sync-banner {
+  flex: 1 0 100%;
+  order: 10;
+  margin-top: 0;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: #4a3a00;
+  border: 2px solid #ffcc33;
+  color: #fff3c4;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.sync-banner.no-net { background: #4a1616; border-color: #ff7a7a; color: #ffe1e1; }
+
+/* Column head and 轉台／起始 buttons (kept visible under each column). */
+html body #app .live-col-head { min-height: 40px; align-items: center; }
+html body #app .live-col-head .col-name { font-size: 16px; }
+html body #app .xfer-btn,
+html body #app .start-btn {
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  font-size: 17px;
+  font-weight: 900;
+}
+#app .action-btn small {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #e0e0e8;
+}
+#app .action-btn.flow small { color: inherit; opacity: 0.95; }
+
+/* Stats row above the columns. */
+html body #app .live-bar { min-height: 44px; padding-top: 0; padding-bottom: 0; align-items: center; }
+html body #app .live-counts { font-size: 16px; gap: 8px; flex-wrap: nowrap; white-space: nowrap; min-width: 0; overflow: hidden; }
+html body #app .live-counts span { font-size: 16px; }
+html body #app .live-counts b { font-size: 19px; }
+html body #app .live-sheet-btn { min-height: 44px; height: 44px; min-width: 52px; font-size: 16px; }
+@media (max-width: 400px) {
+  html body #app .live-counts { gap: 6px; letter-spacing: -0.03em; }
+  html body #app .live-counts span,
+  html body #app .live-counts { font-size: 14px; }
+  html body #app .live-counts b { font-size: 18px; margin-right: 1px; }
+  html body #app .live-counts .zero-count { display: none; }
+}
+
+/* Inside the column cards. */
+html body #app .cur-now-lbl { font-size: 14px; color: #e2e2ea; }
+html body #app .jump-btn-lbl { font-size: 15px; }
+html body #app .prio-tag { font-size: 16px; }
+html body #app .moved-mark { font-size: 13px; }
+html body #app .size-badge {
+  min-width: 28px;
+  min-height: 26px;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+html body #app .size-badge::after { content: ''; position: absolute; inset: -8px -6px; }
+
+/* 抄號 screen. */
+html body #app .recent-chip { min-height: 44px; }
+html body #app .recent-chip .ln-num { font-size: 17px; }
+html body #app .recent-chip .itm { font-size: 15px; }
+html body #app .recent-chip .mch { font-size: 13px; color: #d0d0d8; }
+html body #app .recent-chip .del {
+  min-width: 40px;
+  min-height: 40px;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+html body #app .item-search { min-height: 44px; height: 44px; font-size: 16px; }
+html body #app .item-pick-label { font-size: 14px; color: #dcdce4; }
+html body #app .item-group-h { font-size: 15px; }
+html body #app .prio-toggle button { min-height: 44px; font-size: 18px; }
+html body #app [data-act="pick-machine"] { min-height: 44px; font-size: 16px; }
+html body #app .machine-chip-txt { font-size: 16px; }
+
+/* 今日預計 */
+html body #app .plan-target { min-height: 44px; font-size: 17px; }
+html body #app .plan-check { min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
+html body #app .plan-purpose,
+html body #app .plan-qty-read,
+html body #app .plan-qty-num { min-height: 44px; }
+html body #app .plan-qty-minus,
+html body #app .plan-qty-plus { min-width: 44px; min-height: 44px; }
+html body #app .plan-remain,
+html body #app .plan-remain-lbl,
+html body #app .plan-frac { font-size: 16px; }
+
+/* Lot sheet 件數 −／＋ */
+html body #app .lot-qty-row button { min-width: 52px; min-height: 52px; font-size: 24px; }
+
+/* Brighter gray hint text. */
+html body #app .empty-hint,
+html body #app .hint,
+html body #app .sum-sec h2 small,
+html body #app .setting-block p { color: #d2d2da; }
+html body #app .empty-hint { font-size: 16px; }
+html body #app .setting-block h2 { font-size: 16px; }
+.sync-warn ol.sync-steps,
+.sync-howto ol.sync-steps { margin: 8px 0 4px; padding-left: 22px; font-size: 16px; line-height: 1.5; color: #f0f0f4; }
+.sync-steps li { margin-bottom: 8px; }
+.sync-steps-note { font-size: 15px; color: #d2d2da; margin: 4px 0 0; }
+.sync-howto { margin-top: 10px; }
+.sync-howto .sync-howto-btn { width: 100%; min-height: 48px; font-size: 16px; text-align: left; justify-content: flex-start; }
+
+html body #app .cur-now-lbl { font-size: 15px; }
+html body #app .jump-btn-lbl { font-size: 16px; }
+html body #app .move-lot-label,
+html body #app .size-lbl { font-size: 16px; }
+html body #app .size-chip { min-height: 44px; }
+html body #app .need-badge { font-size: 13px; }
+html body #app .item-pick-label { font-size: 15px; }
+html body #app .version-ok,
+html body #app .version-new { font-size: 16px; }
+
+/* v114: the toast no longer hides the stats row; it sits just below it, over the column names. */
+html body .live-screen.toast-docked .live-bar { height: auto; min-height: 44px; overflow: visible; }
+html body .live-screen.toast-docked .live-bar > * { visibility: visible; pointer-events: auto; }
+html body #app#app #toast.toast.dock-live,
+html body #app#app #toast.toast.has-action.dock-live {
+  height: 46px;
+  min-height: 46px;
+  max-height: 46px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+html body #app#app #toast.toast.has-action.dock-live button { height: 42px; min-height: 42px; max-height: 42px; }
+
+/* Header: date + 場次 + gear always on the first line; the sync banner gets its own. */
+html body #app .header > .header-left { flex: 0 0 auto; min-width: 0; }
+html body #app .header > .header-right { flex: 1 1 0; min-width: 0; justify-content: flex-end; }
+html body #app .header > .sync-banner { flex: 1 0 100%; }
+@media (max-width: 380px) {
+  html body #app .header-date { padding: 6px 7px; }
+  html body #app .half-switch button,
+  html body #app .half-switch button.sess-fruit,
+  html body #app .half-switch button.sess-morning,
+  html body #app .half-switch button.sess-afternoon { padding: 0 3px; }
+}
+/* v114: tighter spacing in the column footer so the bigger buttons do not cost a row of lots. */
+html body #app .live-col-foot { gap: 5px; padding-top: 6px; padding-bottom: 6px; }
+html body #app .live-col-head { min-height: 34px; padding-top: 2px; padding-bottom: 2px; }
+html body #app .live-cur-row .cur-step { height: 44px; min-height: 44px; max-height: 44px; }
+html body #app#app #toast.toast.dock-live,
+html body #app#app #toast.toast.has-action.dock-live { height: 44px; min-height: 44px; max-height: 44px; }
+html body #app#app #toast.toast.has-action.dock-live button { height: 40px; min-height: 40px; max-height: 40px; }
+/* v114: remaining small labels up to 16px. */
+html body #app .header-date .hd-wd { font-size: 16px; }
+html body #app .cur-now-lbl { font-size: 16px; }
+html body #app .size-badge { font-size: 16px; }
+html body #app .recent-chip .itm { font-size: 16px; }
+html body #app .recent-chip .mch { font-size: 15px; }
+html body #app .item-group-h,
+html body #app .item-pick-label { font-size: 16px; }
+html body #app .need-badge { font-size: 14px; }
+html body #app .moved-mark { font-size: 14px; }
+html body #app .nav-btn > span:last-child { font-size: 16px; }
