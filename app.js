@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v108';
+const APP_VERSION = 'v109';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -74,7 +74,7 @@ function canonicalItemName(name) {
   return ITEM_CANON_V85[raw] || raw;
 }
 
-function findCrop(name, half) {
+function findCropRaw(name, half) {
   name = canonicalItemName(name);
   if (!name) return null;
   const pools = half ? catalogCrops(half) : (typeof ITEM_CATALOG !== 'undefined' ? ITEM_CATALOG : []);
@@ -123,7 +123,7 @@ function everydayItemLabel(name) {
   return named ? named.l : '';
 }
 
-function itemDisplayName(name) {
+function itemDisplayNameRaw(name) {
   if (!name) return '';
   name = canonicalItemName(name);
   if (LEGACY_ITEM_DISPLAY[name]) return LEGACY_ITEM_DISPLAY[name];
@@ -1341,9 +1341,10 @@ function lotQty(lot) {
 
 function planWonPieces(p, wonMap) {
   const ids = (wonMap && p && wonMap.get(p.id)) || [];
+  const byId = wonMap && wonMap._byId;
   let n = 0;
   for (const id of ids) {
-    const lot = (state.lots || []).find((l) => l.id === id);
+    const lot = byId ? byId.get(id) : (state.lots || []).find((l) => l.id === id);
     n += lotQty(lot);
   }
   return n;
@@ -2109,7 +2110,23 @@ function lotMatchLabels(lot, lotRes) {
   return out;
 }
 
+/* v109: the score only depends on the plan text and the lot's item+size, and
+   the catalog never changes while the app runs, so remember it. Matching every
+   won lot against every plan row used to cost ~150 ms per call on a busy day. */
+const planScoreMemo = new Map();
 function planLotMatchScore(plan, lot) {
+  if (!plan || !lot || !lot.item) return 0;
+  const key = String(plan.text) + '\u0001' + String(lot.item) + '\u0001' + String(lot.size || '');
+  let hit = planScoreMemo.get(key);
+  if (hit === undefined) {
+    if (planScoreMemo.size > 20000) planScoreMemo.clear();
+    hit = planLotMatchScoreRaw(plan, lot);
+    planScoreMemo.set(key, hit);
+  }
+  return hit;
+}
+
+function planLotMatchScoreRaw(plan, lot) {
   if (!plan || !lot || !lot.item) return 0;
   const parsed = parsePlanItemText(foldPlanText(plan.text));
   const lotItem = foldPlanText(lot.item);
@@ -2153,35 +2170,74 @@ function autoManagedPlans() {
   });
 }
 
+let planAssignCache = null; // { sig, map, badges, badgesToday }
+let renderPassActive = false;
+
+/* Everything assignWonToPlans / planRemainBadgeMap read, as one short string.
+   Same string => same answer, so the heavy work can be skipped. */
+function planAssignSignature() {
+  const today = todayStr();
+  const day = (state && state.day) || today;
+  const yest = addDaysIso(today, -1);
+  const parts = [today, day];
+  for (const l of state.lots || []) {
+    if (!l || !l.item || !(l.status === 'won' || l.status === 'moved')) continue;
+    if (l.day !== today && l.day !== day && l.day !== yest) continue;
+    parts.push(l.id, l.item, l.size || '', l.qty == null ? '' : l.qty);
+  }
+  parts.push('|');
+  for (const p of state.planItems || []) {
+    if (!p) continue;
+    parts.push(p.id, p.text, p.qty == null ? '' : p.qty, p.forDay || '', p.done ? 1 : 0, p.doneOn || '');
+  }
+  return parts.join('\u0002');
+}
+
 function assignWonToPlans() {
+  const sig = planAssignSignature();
+  if (planAssignCache && planAssignCache.sig === sig) return planAssignCache.map;
   const plans = autoManagedPlans();
   const lots = todayWonLots();
   const map = new Map();
+  const byId = new Map();
+  for (const l of lots) byId.set(l.id, l);
   for (const p of plans) map.set(p.id, []);
+  const have = (id) => map.get(id).reduce((sum, lid) => sum + lotQty(byId.get(lid)), 0);
   for (const lot of lots) {
     let best = null;
     let bestScore = 0;
     for (const p of plans) {
-      const s = planLotMatchScore(p, lot);
-      if (s > bestScore) {
-        bestScore = s;
+      const sc = planLotMatchScore(p, lot);
+      if (sc > bestScore) {
+        bestScore = sc;
         best = p;
-      } else if (s === bestScore && s > 0 && best) {
-        const needB = Math.max(0, planQtyOf(best) - map.get(best.id).reduce((s, id) => s + lotQty((state.lots || []).find((l) => l.id === id)), 0));
-        const needP = Math.max(0, planQtyOf(p) - map.get(p.id).reduce((s, id) => s + lotQty((state.lots || []).find((l) => l.id === id)), 0));
+      } else if (sc === bestScore && sc > 0 && best) {
+        const needB = Math.max(0, planQtyOf(best) - have(best.id));
+        const needP = Math.max(0, planQtyOf(p) - have(p.id));
         if (needP > 0 && needB === 0) best = p;
       }
     }
     if (best && bestScore > 0) map.get(best.id).push(lot.id);
   }
+  map._byId = byId;
+  planAssignCache = { sig, map, badges: null, badgesToday: '', renderPass: 0 };
   return map;
 }
 
 
+let renderPassId = 0;
 function planRemainBadgeMap() {
-  const map = {};
+  /* Inside one render() nothing changes, so every item button can share one map. */
+  if (renderPassActive && planAssignCache && planAssignCache.badges && planAssignCache.renderPass === renderPassId) {
+    return planAssignCache.badges;
+  }
   const wonMap = assignWonToPlans();
   const today = todayStr();
+  if (planAssignCache && planAssignCache.badges && planAssignCache.badgesToday === today) {
+    if (renderPassActive) planAssignCache.renderPass = renderPassId;
+    return planAssignCache.badges;
+  }
+  const map = {};
   for (const p of state.planItems || []) {
     if (!p || p.done || p.forDay > today) continue;
     const remain = Math.max(0, planQtyOf(p) - planWonPieces(p, wonMap));
@@ -2202,6 +2258,11 @@ function planRemainBadgeMap() {
       if (!k) continue;
       map[k] = (map[k] || 0) + remain;
     }
+  }
+  if (planAssignCache) {
+    planAssignCache.badges = map;
+    planAssignCache.badgesToday = today;
+    if (renderPassActive) planAssignCache.renderPass = renderPassId;
   }
   return map;
 }
@@ -3974,16 +4035,46 @@ function loadState() {
   }
 }
 
+/* v109: serialising the whole state (hundreds of lots) and writing it to
+   localStorage took ~30 ms on a mid-range phone, on every single tap. The
+   write now happens once the taps pause (and always when the page is hidden
+   or closed), so rapid taps stay quick and nothing is lost. */
+let stateWriteTimer = null;
+let stateWriteFailedToasted = false;
+function writeStateNow() {
+  if (stateWriteTimer) {
+    clearTimeout(stateWriteTimer);
+    stateWriteTimer = null;
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    stateWriteFailedToasted = false;
+  } catch (err) {
+    if (!stateWriteFailedToasted) {
+      stateWriteFailedToasted = true;
+      toast('儲存失敗，空間可能不足');
+    }
+  }
+}
+let stateDirtySince = 0;
+function writeStateSoon() {
+  // Wait for a pause in the tapping (trailing debounce), but never hold a change
+  // back for more than 3 seconds.
+  const now = Date.now();
+  if (!stateWriteTimer) stateDirtySince = now;
+  else clearTimeout(stateWriteTimer);
+  const wait = Math.max(0, Math.min(700, 3000 - (now - stateDirtySince)));
+  stateWriteTimer = setTimeout(writeStateNow, wait);
+}
+['pagehide', 'beforeunload', 'freeze'].forEach((ev) => window.addEventListener(ev, () => { if (stateWriteTimer) writeStateNow(); }));
+document.addEventListener('visibilitychange', () => { if (stateWriteTimer && document.visibilityState !== 'visible') writeStateNow(); });
+
 function saveState() {
   if (!planProgressLock) {
     planProgressLock = true;
     try { applyPlanProgressFromLots(); } finally { planProgressLock = false; }
   }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (err) {
-    toast('儲存失敗，空間可能不足');
-  }
+  writeStateSoon();
   if (typeof onLocalStateSaved === 'function') onLocalStateSaved();
   if (typeof onGlobalProgressSaved === 'function') onGlobalProgressSaved();
 }
@@ -4357,9 +4448,10 @@ function captureLiveScroll() {
   });
 }
 
-function restoreLiveScroll() {
+function restoreLiveScroll(onlyFollow) {
   document.querySelectorAll('.live-col-list').forEach((el) => {
     const id = el.dataset.id;
+    if (onlyFollow && !(typeof liveScrollFollow === 'object' && liveScrollFollow[id])) return;
     if (typeof liveScrollFollow === 'object' && liveScrollFollow[id]) {
       const next = el.querySelector('.lot-cell.next');
       if (next) el.scrollTop = Math.max(0, next.offsetTop - 8);
@@ -5425,13 +5517,39 @@ function pruneItemUseLog(st) {
   }
 }
 
+
+/* v109: these catalog lookups only depend on the item text, yet ran thousands of
+   times per tap (every lot, every render). Remember the answers. */
+const itemLookupMemo = { crop: new Map(), key: new Map(), disp: new Map() };
+function memoGet(map, k, fn) {
+  let v = map.get(k);
+  if (v === undefined) {
+    if (map.size > 5000) map.clear();
+    v = fn();
+    map.set(k, v);
+  }
+  return v;
+}
+function findCrop(name, half) {
+  if (half || typeof name !== 'string') return findCropRaw(name, half);
+  return memoGet(itemLookupMemo.crop, name, () => findCropRaw(name));
+}
+function canonicalItemKey(name) {
+  if (typeof name !== 'string') return canonicalItemKeyRaw(name);
+  return memoGet(itemLookupMemo.key, name, () => canonicalItemKeyRaw(name));
+}
+function itemDisplayName(name) {
+  if (typeof name !== 'string') return itemDisplayNameRaw(name);
+  return memoGet(itemLookupMemo.disp, name, () => itemDisplayNameRaw(name));
+}
+
 function halfOfItemName(name, fallback) {
   const crop = typeof findCrop === 'function' ? findCrop(name) : null;
   if (crop) return halfFromCatalogKey(crop.h);
   return fallback || '';
 }
 
-function canonicalItemKey(name) {
+function canonicalItemKeyRaw(name) {
   const raw = String(name || '').trim();
   if (!raw) return '';
   const parsed = (typeof parsePlanItemText === 'function') ? parsePlanItemText(raw) : { name: raw };
@@ -6611,7 +6729,11 @@ function dismissActionToast() {
   }
 }
 
-function clearToastDock() {
+function clearToastDock(keep) {
+  /* keep: the toast is about to be docked on the live bar again, so leave the
+     classes alone. Removing and re-adding them made the browser re-lay-out the
+     whole live screen (hundreds of cells) on every tap. */
+  if (keep) return;
   document.querySelectorAll('.live-screen.toast-docked').forEach((n) => n.classList.remove('toast-docked'));
   const el = document.getElementById('toast');
   if (el) {
@@ -6622,7 +6744,16 @@ function clearToastDock() {
 
 function placeActionToast() {
   const el = document.getElementById('toast');
-  clearToastDock();
+  const keepLiveDock = !!(
+    el && toastMsg && !el.classList.contains('hidden') &&
+    el.classList.contains('dock-live') &&
+    document.querySelector('.live-screen.toast-docked') &&
+    !document.querySelector('.overlay .keypad') &&
+    !document.getElementById('plan-screen') && !document.getElementById('sum-screen') &&
+    !document.getElementById('paddle') &&
+    document.querySelector('#main.live-mode .live-screen .live-bar')
+  );
+  clearToastDock(keepLiveDock);
   if (!el || !toastMsg || el.classList.contains('hidden')) {
     if (el) {
       el.style.top = '';
@@ -7923,17 +8054,37 @@ function restoreItemPickScroll() {
 
 /* ---------- Render ---------- */
 
+/* v109: the one-line fit was done button by button with a layout read after every
+   style write (~70 ms for the item grid on a phone, after every tap). Now every
+   button is reset first, measured in one pass, and the answer is remembered per
+   (label, width, font), so a re-render with the same buttons costs almost nothing. */
+const itemFitCache = new Map();
 function fitItemBtnLabels() {
-  document.querySelectorAll('.item-btn, .plan-pick').forEach((btn) => {
+  const btns = Array.from(document.querySelectorAll('.item-btn, .plan-pick'));
+  if (!btns.length) return;
+  for (const btn of btns) {
     btn.style.fontSize = '';
     btn.style.whiteSpace = '';
+  }
+  const meta = btns.map((btn) => {
     const cs = getComputedStyle(btn);
     const inPlan = !!(btn.closest && btn.closest('.plan-grid-list, .plan-yest-list'));
-    if (inPlan) {
+    const base = parseFloat(cs.fontSize) || 18;
+    const key = btn.className + '\u0001' + btn.textContent + '\u0001' + btn.clientWidth + '\u0001' + base + '\u0001' + cs.paddingLeft + cs.paddingRight + cs.letterSpacing;
+    return { btn, inPlan, base, key, hit: inPlan ? null : itemFitCache.get(key) };
+  });
+  for (const m of meta) {
+    const { btn } = m;
+    if (m.inPlan) {
       btn.style.whiteSpace = 'normal';
-      return;
+      continue;
     }
-    let size = parseFloat(cs.fontSize) || 18;
+    if (m.hit) {
+      btn.style.whiteSpace = m.hit.ws;
+      if (m.hit.size !== m.base) btn.style.fontSize = m.hit.size + 'px';
+      continue;
+    }
+    let size = m.base;
     const oneLineMin = 14;
     btn.style.whiteSpace = 'nowrap';
     while (size > oneLineMin && btn.scrollWidth > btn.clientWidth + 0.5) {
@@ -7943,7 +8094,9 @@ function fitItemBtnLabels() {
     if (btn.scrollWidth > btn.clientWidth + 0.5) {
       btn.style.whiteSpace = 'normal';
     }
-  });
+    if (itemFitCache.size > 3000) itemFitCache.clear();
+    itemFitCache.set(m.key, { size, ws: btn.style.whiteSpace || 'nowrap' });
+  }
 }
 
 function fitLotCellNames() {
@@ -8040,9 +8193,10 @@ function captureSegAnim() {
   segAnimFrom = Object.keys(map).length ? map : null;
 }
 
-function captureLotColors() {
+function captureLotColors(onlyIds) {
   const map = {};
   document.querySelectorAll('.lot-cell[data-id]').forEach((el) => {
+    if (onlyIds && !onlyIds.has(el.dataset.id)) return;
     const s = getComputedStyle(el);
     const tag = el.querySelector('.prio-tag');
     const ts = tag ? getComputedStyle(tag) : null;
@@ -8151,7 +8305,9 @@ function playLotColorAnim() {
   lotColorFrom = null;
   if (!from || reducedMotion()) return;
   applyLotColorFrom(from);
-  document.querySelectorAll('.lot-cell[data-id]').forEach((el) => { void el.offsetWidth; });
+  document.querySelectorAll('.lot-cell[data-id]').forEach((el) => {
+    if (from[el.dataset.id]) void el.offsetWidth;
+  });
   clearLotColorInline();
 }
 
@@ -8267,6 +8423,89 @@ function startPressFlash(e) {
   }, 2000);
 }
 
+/* The CSS used  #app:has(...)  to restyle the toast. A :has() on the app root is
+   re-checked on every DOM change under it and made the browser restyle every cell
+   span on each tap (~80 ms on a phone). Plain classes say the same thing for free. */
+function syncAppFlags(app) {
+  const want = {
+    'has-live': !!document.querySelector('#main.live-mode'),
+    'has-plan': !!document.getElementById('plan-screen'),
+    'has-sum': !!document.getElementById('sum-screen'),
+    'has-paddle': !!document.getElementById('paddle'),
+    'has-keypad': !!document.querySelector('.overlay .keypad'),
+  };
+  for (const k of Object.keys(want)) {
+    if (app.classList.contains(k) !== want[k]) app.classList.toggle(k, want[k]);
+  }
+}
+
+function liveSig(parts) {
+  return !!(parts && parts.cols);
+}
+
+/* Update the live screen in place: only the cells / footers / bar whose HTML
+   changed are swapped, so the 300-cell lists keep their DOM, scroll position
+   and layout. Returns false (and touches nothing) when the shape differs, so
+   the caller falls back to the old full rebuild. */
+function patchLiveMain(main, prev, next, grabColors) {
+  if (prev.n !== next.n || prev.empty !== next.empty || prev.cols.length !== next.cols.length) return false;
+  const screen = main.firstElementChild;
+  if (!screen || !screen.classList.contains('live-screen')) return false;
+  const colsEl = screen.querySelector(':scope > .live-cols');
+  if (!colsEl || colsEl.children.length !== next.cols.length) return false;
+  const plans = [];
+  for (let i = 0; i < next.cols.length; i += 1) {
+    const a = prev.cols[i];
+    const b = next.cols[i];
+    if (a.id !== b.id) return false;
+    const sec = colsEl.children[i];
+    if (!sec || !sec.classList.contains('live-col') || sec.dataset.id !== b.id) return false;
+    const list = sec.querySelector(':scope > .live-col-list');
+    const head = sec.querySelector(':scope > .live-col-head');
+    const foot = sec.querySelector(':scope > .live-col-foot');
+    if (!list || !head || !foot) return false;
+    let mode = 'cells';
+    const changed = [];
+    if (!a.cells || !b.cells) {
+      mode = 'rebuild';
+    } else if (a.ids.length !== b.ids.length || list.children.length !== a.ids.length) {
+      mode = 'rebuild';
+    } else {
+      for (let j = 0; j < b.ids.length; j += 1) {
+        if (a.ids[j] !== b.ids[j]) { mode = 'rebuild'; break; }
+        if (a.cells[j] !== b.cells[j]) changed.push(j);
+      }
+      if (mode === 'cells' && changed.length > 60) mode = 'rebuild';
+    }
+    plans.push({ a, b, sec, list, head, foot, mode, changed });
+  }
+  // Everything checked: now the DOM work, which cannot fail half way for shape reasons.
+  const ids = new Set();
+  for (const pl of plans) {
+    if (pl.mode === 'cells') for (const j of pl.changed) ids.add(pl.b.ids[j]);
+  }
+  grabColors(plans.some((pl) => pl.mode === 'rebuild') ? null : ids);
+  if (prev.bar !== next.bar) {
+    const bar = screen.querySelector(':scope > .live-bar');
+    if (bar) replaceNode(bar, next.bar);
+  }
+  for (const pl of plans) {
+    if (pl.a.head !== pl.b.head) replaceNode(pl.head, pl.b.head);
+    if (pl.a.foot !== pl.b.foot) replaceNode(pl.foot, pl.b.foot);
+    if (pl.mode === 'rebuild') {
+      const top = pl.list.scrollTop;
+      pl.list.innerHTML = pl.b.cells ? pl.b.cells.join('') : '<div class="col-empty">還沒抄號</div>';
+      pl.list.scrollTop = top;
+    } else {
+      for (const j of pl.changed) {
+        const old = pl.list.children[j];
+        if (old) replaceNode(old, pl.b.cells[j]);
+      }
+    }
+  }
+  return true;
+}
+
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -8289,18 +8528,27 @@ function render() {
     segAnimFrom = null;
     lotColorFrom = null;
     app.innerHTML = renderSetup();
+    syncAppFlags(app);
     restoreActiveField(activeField);
     return;
   }
 
   if (segAnimPending) captureSegAnim();
-  if (lotColorPending) captureLotColors();
+  /* On the live tab only the cells that actually change need their old colours,
+     so the capture is done inside paint(), once the changed cells are known. */
+  let lotColorDeferred = false;
+  if (lotColorPending) {
+    if (state.tab === 'live' && !showSettings && paintedLive) lotColorDeferred = true;
+    else captureLotColors();
+  }
   const doSegAnim = segAnimPending && !!segAnimFrom;
-  const doLotAnim = lotColorPending && !!lotColorFrom;
+  const doLotAnim = lotColorPending && (lotColorDeferred || !!lotColorFrom);
   segAnimPending = false;
   lotColorPending = false;
 
-  captureLiveScroll();
+  /* The live lists are only captured/restored when their DOM is rebuilt (see paint),
+     because patched lists keep their own scroll position and reading scrollTop
+     forces a full layout. */
   captureItemPickScroll();
   capturePlanGridScroll();
   capturePlanListScroll();
@@ -8313,18 +8561,41 @@ function render() {
   const noteCls = state.tab === 'note' && !showSettings ? ' note-mode' : '';
 
   const paint = () => {
-    const headerHtml = renderHeader();
-    const mainInner = renderTab();
+    let headerHtml, mainInner, navHtml, paddleHtml, modalHtml, planHtml, sumHtml;
+    renderPassId += 1;
+    renderPassActive = true;
+    try {
+      headerHtml = renderHeader();
+      mainInner = renderTab();
+      navHtml = renderNav();
+      paddleHtml = paddleOpen ? renderPaddle() : '';
+      modalHtml = modal ? renderModal() : '';
+      planHtml = renderPlanScreen();
+      sumHtml = renderDaySummary();
+    } finally {
+      renderPassActive = false;
+    }
+    const nextLive = liveParts && liveParts.html === mainInner ? liveParts : null;
+    let livePatched = false;
+    let liveRebuilt = false;
+    const grabColors = (onlyIds) => {
+      if (lotColorDeferred) {
+        captureLotColors(onlyIds);
+        lotColorDeferred = false;
+      }
+    };
     const mainCls = `main${noteCls}${liveCls}`;
     const mainHtml = `<main class="${mainCls}" id="main">${mainInner}</main>`;
-    const navHtml = renderNav();
-    const paddleHtml = paddleOpen ? renderPaddle() : '';
-    const modalHtml = modal ? renderModal() : '';
-    const planHtml = renderPlanScreen();
-    const sumHtml = renderDaySummary();
     const shell = document.querySelector('#app > .header') && document.getElementById('main') && document.querySelector('#app > .nav');
 
-    if (!shell || shouldPageAnim || !samePage) {
+    /* Opening or closing an overlay screen (paddle, plan, summary) leaves the main
+       screen exactly as it is, so keep its DOM and only swap the sections that
+       changed instead of rebuilding hundreds of lot cells underneath. */
+    const mainUntouched = !!(shell && lastPaintHtml.main === mainInner && document.getElementById('main') && document.getElementById('main').className === mainCls);
+    if (!shell || (!mainUntouched && (shouldPageAnim || !samePage))) {
+      grabColors(null);
+      captureLiveScroll();
+      liveRebuilt = true;
       app.innerHTML =
         headerHtml +
         mainHtml +
@@ -8334,6 +8605,7 @@ function render() {
         planHtml +
         sumHtml +
         `<div id="toast" class="toast${toastMsg ? '' : ' hidden'}"></div>`;
+      paintedLive = nextLive;
       lastPaintHtml = {
         header: headerHtml,
         nav: navHtml,
@@ -8358,7 +8630,16 @@ function render() {
       if (main) {
         if (main.className !== mainCls) main.className = mainCls;
         if (lastPaintHtml.main !== mainInner) {
-          main.innerHTML = mainInner;
+          if (nextLive && paintedLive && liveSig(paintedLive) && lastPaintHtml.main === paintedLive.html) {
+            livePatched = patchLiveMain(main, paintedLive, nextLive, grabColors);
+          }
+          if (!livePatched) {
+            grabColors(null);
+            captureLiveScroll();
+            liveRebuilt = true;
+            main.innerHTML = mainInner;
+          }
+          paintedLive = nextLive;
           lastPaintHtml.main = mainInner;
         }
       }
@@ -8380,10 +8661,12 @@ function render() {
       }
     }
 
+    syncAppFlags(app);
     paintToast(document.getElementById('toast'));
     requestAnimationFrame(fitToastText);
     restoreActiveField(activeField);
-    restoreLiveScroll();
+    if (liveRebuilt) restoreLiveScroll();
+    else if (typeof liveScrollFollow === 'object' && Object.keys(liveScrollFollow).length) restoreLiveScroll(true);
     restoreItemPickScroll();
     restorePlanGridScroll();
     restorePlanListScroll();
@@ -8753,6 +9036,9 @@ function refreshNoteHead() {
   render();
 }
 
+let liveParts = null; // structured copy of the last renderLive(), used to patch the DOM cell by cell
+let paintedLive = null; // liveParts that are currently on screen
+
 function renderLive() {
   const half = state.currentHalf;
   const gapN = state.alertGap || 3;
@@ -8771,8 +9057,9 @@ function renderLive() {
   const activeMachines = state.machines[half] || [];
 
   const anyJump = activeMachines.some((m) => jumpTargetOf(m.id, half) != null);
-  const cols = activeMachines
-    .map((m) => {
+  const colParts = [];
+  activeMachines
+    .forEach((m) => {
       const cur = currentOf(m.id);
       const lots = columnLots(m.id, half);
       const upcoming = lots.filter(
@@ -8791,7 +9078,7 @@ function renderLive() {
       const jumpSlot = anyJump
         ? `<div class="jump-slot">${jumpBtn}</div>`
         : '';
-      const cells = lots.length
+      const cellHtmls = lots.length
         ? lots
             .map((l) => {
               const over = isPassed(l, cur) || (l.status === 'pending' && l.secondMarket && cur != null && isPassed({ ...l, secondMarket: false }, cur));
@@ -8842,14 +9129,11 @@ function renderLive() {
                 </span>
               </button>`;
             })
-            .join('')
-        : '<div class="col-empty">還沒抄號</div>';
-      return `<section class="live-col" data-id="${m.id}">
-        <div class="live-col-head">
+        : null;
+      const head = `<div class="live-col-head">
           <div class="col-name">${escapeHtml(title)}</div>
-        </div>
-        <div class="live-col-list" data-id="${m.id}">${cells}</div>
-        <div class="live-col-foot hand-${thumbHand()}" data-stop="1">
+        </div>`;
+      const foot = `<div class="live-col-foot hand-${thumbHand()}" data-stop="1">
           <button type="button" class="live-cur hold-btn" data-act="edit-cur" data-hold="set-start" data-id="${m.id}" aria-label="輸入現在進度，長按設定這段起點">
             <span class="cur-now-row">
               <span class="cur-now-lbl">現在</span>
@@ -8866,7 +9150,22 @@ function renderLive() {
             <button type="button" class="start-btn" data-act="open-start" data-id="${m.id}">起始</button>
           </div>
           ${jumpSlot}
-        </div>
+        </div>`;
+      colParts.push({
+        id: m.id,
+        head,
+        ids: lots.map((l) => l.id),
+        cells: cellHtmls,
+        foot,
+      });
+    });
+  const cols = colParts
+    .map((c) => {
+      const cells = c.cells ? c.cells.join('') : '<div class="col-empty">還沒抄號</div>';
+      return `<section class="live-col" data-id="${c.id}">
+        ${c.head}
+        <div class="live-col-list" data-id="${c.id}">${cells}</div>
+        ${c.foot}
       </section>`;
     })
     .join('');
@@ -8876,9 +9175,7 @@ function renderLive() {
     ? '<div class="live-empty">到「抄號」把紙上的號碼存進來，各台會並排顯示。</div>'
     : '';
 
-  return `
-    <div class="live-screen">
-      <div class="live-bar">
+  const barHtml = `<div class="live-bar">
         <div class="live-counts">
           <span class="must-count${mustLeft ? ' on' : ''}"><b>${mustLeft}</b>美</span>
           <span><b>${won}</b>標到</span>
@@ -8890,10 +9187,15 @@ function renderLive() {
           ? '<button type="button" class="live-sheet-btn" data-act="add-machine" data-half="fruit">＋第二台</button>'
           : ''}
         <button type="button" class="live-sheet-btn" data-act="open-second">清單</button>
-      </div>
+      </div>`;
+  const html = `
+    <div class="live-screen">
+      ${barHtml}
       <div class="live-cols" data-n="${activeMachines.length}">${cols || '<div class="empty-hint">請先在設定裡確認台別</div>'}</div>
       ${empty}
     </div>`;
+  liveParts = { html, bar: barHtml, n: activeMachines.length, empty, cols: colParts };
+  return html;
 }
 
 function renderSettings() {

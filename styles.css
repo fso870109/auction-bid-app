@@ -3159,8 +3159,8 @@ button.lot-cell {
   box-shadow: 0 4px 18px rgba(255, 229, 0, 0.22);
 }
 .plan-back-lg:active { filter: brightness(0.94); }
-#app:has(#plan-screen) .toast,
-#app:has(#sum-screen) .toast {
+#app#app.has-plan .toast,
+#app#app.has-sum .toast {
   top: var(--safe-t);
   bottom: auto;
 }
@@ -6089,13 +6089,13 @@ html.is-dragging .item-pick {
   letter-spacing: 0.04em;
 }
 .toast.has-action button:active { filter: brightness(1.25); }
-#app:has(#plan-screen) .toast.has-action,
-#app:has(#sum-screen) .toast.has-action,
-#app:has(#paddle) .toast.has-action {
+#app#app.has-plan .toast.has-action,
+#app#app.has-sum .toast.has-action,
+#app#app.has-paddle .toast.has-action {
   top: calc(var(--safe-t) + 12px);
   bottom: auto;
 }
-#app:has(.overlay .keypad) .toast.has-action {
+#app#app.has-keypad .toast.has-action {
   top: calc(var(--safe-t) + 12px);
   bottom: auto;
 }
@@ -6576,8 +6576,8 @@ html.is-dragging .item-pick {
 
 
 /* ===== v105: main-screen toast docks over the stats row; compact; never covers lot cards ===== */
-#app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast,
-#app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast.has-action,
+#app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast,
+#app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast.has-action,
 #toast.toast.dock-live,
 #toast.toast.has-action.dock-live {
   left: 8px;
@@ -6600,8 +6600,8 @@ html.is-dragging .item-pick {
   pointer-events: none;
   box-sizing: border-box;
 }
-#app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast span,
-#app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast.has-action span,
+#app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast span,
+#app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast.has-action span,
 #toast.toast.dock-live span,
 #toast.toast.has-action.dock-live span {
   overflow: hidden;
@@ -6612,7 +6612,7 @@ html.is-dragging .item-pick {
   line-height: 1.2;
   color: #111;
 }
-#app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast.has-action button,
+#app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast.has-action button,
 #toast.toast.has-action.dock-live button {
   pointer-events: auto;
   height: 44px;
@@ -6628,7 +6628,7 @@ html.is-dragging .item-pick {
   letter-spacing: 0.04em;
 }
 @media (max-width: 360px) {
-  #app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast.has-action,
+  #app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast.has-action,
   #toast.toast.has-action.dock-live {
     font-size: 18px;
     height: 52px;
@@ -6636,9 +6636,9 @@ html.is-dragging .item-pick {
     max-height: 52px;
     padding: 4px 6px 4px 10px;
   }
-  #app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast.has-action span,
+  #app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast.has-action span,
   #toast.toast.has-action.dock-live span { font-size: 18px; }
-  #app:has(#main.live-mode):not(:has(#plan-screen)):not(:has(#sum-screen)):not(:has(#paddle)):not(:has(.overlay .keypad)) .toast.has-action button,
+  #app#app.has-live:not(.has-plan):not(.has-sum):not(.has-paddle):not(.has-keypad) .toast.has-action button,
   #toast.toast.has-action.dock-live button {
     min-width: 72px;
     height: 44px;

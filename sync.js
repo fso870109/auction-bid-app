@@ -459,7 +459,8 @@ function writeStampsToState(next) {
 }
 
 function persistSyncState() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+  if (typeof writeStateSoon === 'function') writeStateSoon();
+  else { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* ignore */ } }
 }
 
 function applyMembership(data) {
@@ -491,6 +492,46 @@ function clearMembership() {
   shownJoinRequestId = '';
 }
 
+/* v109: diffState compares every field of every lot with JSON.stringify, which on
+   a day with thousands of saved lots cost ~25 ms (phone speed) on every tap. Lots
+   and plan rows that did not change at all are taken out of both sides first
+   (a === b is checked before the old JSON compare), so the result is the same
+   op list, found by looking at only the few rows that did change. */
+function sameFieldValues(a, b, fields) {
+  for (const f of fields) {
+    const x = a[f];
+    const y = b[f];
+    if (x === y) continue;
+    if (JSON.stringify(x) !== JSON.stringify(y)) return false;
+  }
+  return true;
+}
+function slimList(prevList, nextList, fields) {
+  const byId = new Map();
+  for (const it of prevList || []) {
+    if (it && it.id) byId.set(it.id, it);
+  }
+  const same = new Set();
+  const nextOut = [];
+  for (const it of nextList || []) {
+    if (!it || !it.id) { nextOut.push(it); continue; }
+    const a = byId.get(it.id);
+    if (a && sameFieldValues(a, it, fields)) same.add(it.id);
+    else nextOut.push(it);
+  }
+  const prevOut = (prevList || []).filter((it) => !(it && it.id && same.has(it.id)));
+  return { prev: prevOut, next: nextOut };
+}
+function slimForDiff(prev, next) {
+  if (!BidSyncCore.LOT_FIELDS || !BidSyncCore.PLAN_FIELDS) return { prev, next };
+  const lots = slimList(prev.lots, next.lots, BidSyncCore.LOT_FIELDS);
+  const plans = slimList(prev.planItems, next.planItems, BidSyncCore.PLAN_FIELDS);
+  return {
+    prev: Object.assign({}, prev, { lots: lots.prev, planItems: plans.prev }),
+    next: Object.assign({}, next, { lots: lots.next, planItems: plans.next })
+  };
+}
+
 function onLocalStateSaved() {
   if (syncApplying || !state || !state.syncRoom || state.syncPending) return;
   if (isLegacyRoom(state.syncRoom)) return;
@@ -505,7 +546,8 @@ function onLocalStateSaved() {
     }
   }
   next.kv = BidSyncCore.kvFromState(state);
-  const ops = BidSyncCore.diffState(prev, next, ensurePeerId(), now);
+  const slim = slimForDiff(prev, next);
+  const ops = BidSyncCore.diffState(slim.prev, slim.next, ensurePeerId(), now);
   writeStampsToState(next);
   if (!state.syncTombstones || typeof state.syncTombstones !== 'object') {
     state.syncTombstones = { lots: {}, plan: {} };
@@ -588,6 +630,9 @@ function applyRemoteOps(ops, flashes, from) {
     noteSeenOps(ops);
     const snap = BidSyncCore.snapshotFromState(state);
     const result = BidSyncCore.applyOps(snap, ops);
+    // Nothing in the batch changed our data (an echo or an old op): no need to
+    // rebuild the lot list or repaint the screen.
+    if (!result.applied) return;
     syncKvTsFromSnap(snap.kv);
     state.lots = BidSyncCore.mapToLots(snap.lots);
     state.planItems = BidSyncCore.mapToPlans(snap.planItems);
