@@ -33,7 +33,7 @@ if (!process.env.SYNC_SECRET) {
   console.log('SYNC_SECRET not set; using a process-local key (restore tickets will not survive restarts)');
 }
 
-const SERVER_VERSION = 'v113';
+const SERVER_VERSION = 'v116';
 const rooms = new Map();
 let redis = null;
 

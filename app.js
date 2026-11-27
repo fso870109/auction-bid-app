@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v115';
+const APP_VERSION = 'v116';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -4140,6 +4140,277 @@ function detectMachineId(num, half) {
   return null;
 }
 
+/* v116 號碼防呆: warn (never block) when a 抄號 number does not look like the
+   item's usual 號段. Expected leading digits come from data only:
+   1) 台 whose name carries the item's 類別 (e.g. 第二台・水菜 3001–3499 → 水菜 = 3 開頭),
+   2) numbers this 類別 really used in the kept days (≥3 lots and ≥25% share, or ≥2 confirmed),
+   3) the picked 台's own 號段 when the lot has no 類別 match.
+   No confident data → no warning. Confirmed lots (rangeOk) never warn again. */
+let rangeGuardMemo = { key: '', model: null };
+
+function numLead(n) {
+  const s = String(Math.abs(parseInt(n, 10) || 0));
+  return { digits: s.length, lead: s.charAt(0) };
+}
+
+function rangeLeads(ranges) {
+  const out = new Set();
+  for (const r of ranges || []) {
+    if (r == null || r.start == null) continue;
+    const a = numLead(r.start);
+    const endN = r.end == null ? r.start : r.end;
+    const b = numLead(endN);
+    if (a.digits !== b.digits) { out.add(a.digits + ':' + a.lead); continue; }
+    for (let d = parseInt(a.lead, 10); d <= parseInt(b.lead, 10); d++) out.add(a.digits + ':' + d);
+  }
+  return out;
+}
+
+function machineGroupTag(m) {
+  const name = String((m && m.name) || '');
+  for (const g of ['大宗', '水菜', '瓜果', '醃製', '水果']) if (name.includes(g)) return g;
+  return '';
+}
+
+function buildRangeGuardModel() {
+  const lots = state.lots || [];
+  const model = {};
+  for (const h of HALVES) {
+    const ms = state.machines[h] || [];
+    const digits = new Set();
+    const byGroupCfg = {};
+    for (const m of ms) {
+      for (const r of m.ranges || []) if (r && r.start != null) digits.add(numLead(r.start).digits);
+      const g = machineGroupTag(m);
+      if (!g || !(m.ranges || []).length) continue;
+      const set = byGroupCfg[g] || (byGroupCfg[g] = new Set());
+      for (const k of rangeLeads(m.ranges)) set.add(k);
+    }
+    model[h] = { digits, groups: {}, cfg: byGroupCfg, counts: {} };
+  }
+  for (const l of lots) {
+    if (!l || !l.item || !model[l.half] || !Number.isFinite(l.number)) continue;
+    const g = cropGroupOfName(l.item);
+    if (!g || g === '其他') continue;
+    const c = model[l.half].counts[g] || (model[l.half].counts[g] = { total: 0, by: {}, ok: {} });
+    const k = numLead(l.number);
+    const key = k.digits + ':' + k.lead;
+    c.total += 1;
+    c.by[key] = (c.by[key] || 0) + 1;
+    if (l.rangeOk) c.ok[key] = (c.ok[key] || 0) + 1;
+  }
+  for (const h of HALVES) {
+    const hm = model[h];
+    const names = new Set([...Object.keys(hm.cfg), ...Object.keys(hm.counts)]);
+    for (const g of names) {
+      const cfg = hm.cfg[g];
+      const c = hm.counts[g] || { total: 0, by: {}, ok: {} };
+      const allowed = new Set(cfg ? [...cfg] : []);
+      const learned = new Set();
+      for (const key of Object.keys(c.by)) {
+        const n = c.by[key];
+        const okN = c.ok[key] || 0;
+        if (cfg) {
+          if ((n >= 3 && n / Math.max(1, c.total) >= 0.25) || okN >= 2) learned.add(key);
+        } else if (c.total >= 8 && n >= 2) learned.add(key);
+      }
+      for (const k of learned) allowed.add(k);
+      if (!allowed.size) continue;
+      hm.groups[g] = { allowed, fromCfg: !!cfg };
+    }
+  }
+  return model;
+}
+
+function rangeGuardModel() {
+  /* One check per task: a render asks for every cell, so reuse it until the task ends. */
+  if (rangeGuardMemo.fresh && rangeGuardMemo.model) return rangeGuardMemo.model;
+  const lots = state.lots || [];
+  let sum = 0;
+  for (const l of lots) sum = (sum + (Number(l.number) || 0) * 7 + (l.rangeOk ? 3 : 0) + String(l.item || '').length) % 1000000007;
+  const key = lots.length + '|' + sum + '|' + JSON.stringify(state.machines || {});
+  if (rangeGuardMemo.key !== key || !rangeGuardMemo.model) rangeGuardMemo = { key, model: buildRangeGuardModel() };
+  rangeGuardMemo.fresh = true;
+  queueMicrotask(() => { rangeGuardMemo.fresh = false; });
+  return rangeGuardMemo.model;
+}
+
+function leadsText(allowed) {
+  const leads = [...new Set([...allowed].map((k) => k.split(':')[1]))].sort();
+  const digits = [...new Set([...allowed].map((k) => parseInt(k.split(':')[0], 10)))];
+  const pad = digits.length === 1 ? Math.max(0, digits[0] - 1) : 3;
+  return leads.map((d) => d + '0'.repeat(pad)).join('、');
+}
+
+/* Returns null when fine, else { title, expect, typed } for the reminder card. */
+function lotRangeIssue(lot) {
+  if (!lot || lot.rangeOk || !Number.isFinite(lot.number) || !isHalf(lot.half)) return null;
+  const hm = rangeGuardModel()[lot.half];
+  if (!hm) return null;
+  const k = numLead(lot.number);
+  const key = k.digits + ':' + k.lead;
+  const typed = String(lot.number);
+  if (hm.digits.size && !hm.digits.has(k.digits)) {
+    const want = [...hm.digits].sort().join(' 或 ');
+    return { title: `貨號通常是 ${want} 位數`, expect: `你打的是 ${typed}（${k.digits} 位）`, typed, want: `${want} 位數` };
+  }
+  const g = lot.item ? cropGroupOfName(lot.item) : '';
+  const grp = g && hm.groups[g];
+  if (grp) {
+    if (grp.allowed.has(key)) return null;
+    const lead = leadsText(grp.allowed);
+    return { title: `${g}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭`, group: g };
+  }
+  const m = lot.machineId ? machineById(lot.machineId, lot.half) : null;
+  if (m && (m.ranges || []).length) {
+    const leads = rangeLeads(m.ranges);
+    if (leads.size && !leads.has(key)) {
+      const lead = leadsText(leads);
+      return { title: `${m.name}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭` };
+    }
+  }
+  return null;
+}
+
+function lotRangeWarn(lot) {
+  if (!lot || lot.status !== 'pending' || lot.day !== state.day) return null;
+  return lotRangeIssue(lot);
+}
+
+function maybeRangeAlert(lot) {
+  if (!lot || modal) return false;
+  const issue = lotRangeWarn(lot);
+  if (!issue) return false;
+  modal = { type: 'range-warn', id: lot.id };
+  dismissActionToast();
+  buzz([180, 80, 180]);
+  buzzHoldUntil = Date.now() + 500;
+  return true;
+}
+
+function confirmLotRange(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  modal = null;
+  if (lot) {
+    lot.rangeOk = true;
+    saveState();
+    toast(`${lot.number} 已確認沒錯`);
+    buzz(20);
+  }
+  render();
+}
+
+function openRangeFix(id) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) { modal = null; render(); return; }
+  modal = { type: 'range-fix', id, value: '' };
+  dismissActionToast();
+  buzz(12);
+  render();
+}
+
+function typeRangeFixDigit(d) {
+  if (!modal || modal.type !== 'range-fix') return;
+  let v = String(modal.value || '');
+  if (v.length >= 5) v = '';
+  modal.value = (v + String(d)).replace(/\D/g, '').slice(0, 5);
+  render();
+}
+
+function backspaceRangeFix() {
+  if (!modal || modal.type !== 'range-fix') return;
+  modal.value = String(modal.value || '').slice(0, -1);
+  render();
+}
+
+function applyRangeFix() {
+  if (!modal || modal.type !== 'range-fix') return;
+  const lot = state.lots.find((l) => l.id === modal.id);
+  const num = parseInt(modal.value, 10);
+  if (!lot || !Number.isFinite(num) || num <= 0) {
+    toast('請先輸入正確號碼');
+    buzz(30);
+    return;
+  }
+  if (num === lot.number) { modal = null; render(); return; }
+  const dup = state.lots.find((l) => l.id !== lot.id && l.day === lot.day && l.number === num);
+  if (dup) {
+    toast(`${num} 已經抄過（${machineNameOf(dup)}）`);
+    buzz([40, 50, 40, 50, 40]);
+    return;
+  }
+  const prev = { id: lot.id, number: lot.number, machineId: lot.machineId, rangeOk: !!lot.rangeOk };
+  const hits = machinesMatching(num, lot.half);
+  let mid = lot.machineId;
+  if (hits.length === 1) mid = hits[0].id;
+  else if (hits.length > 1 && !hits.some((m) => m.id === lot.machineId)) mid = hits[0].id;
+  lot.number = num;
+  lot.machineId = mid;
+  lot.rangeOk = false;
+  modal = null;
+  saveState();
+  offerUndo({ kind: 'renumber', prev }, `已改成 ${num}`);
+  buzz(26);
+  if (!maybeRangeAlert(lot)) render();
+  else render();
+}
+
+function rangeTypedHtml(issue) {
+  const t = escapeHtml(issue.typed);
+  if (!issue.group && !/開頭/.test(issue.want || '')) return t;
+  return `<span class="rg-bad">${t.charAt(0)}</span>${t.slice(1)}`;
+}
+
+function rangeWarnSheetHtml(lot) {
+  const issue = lotRangeWarn(lot);
+  if (!issue) return '';
+  return `<div class="rg-sheet-warn" role="alert">
+      <div class="rg-sheet-title">⚠ 號碼可能打錯：${escapeHtml(issue.title)}，你打的是 ${escapeHtml(issue.typed)}</div>
+      <div class="rg-acts"><button type="button" class="rg-btn fix" data-act="rg-fix" data-id="${escapeHtml(lot.id)}">改號</button><button type="button" class="rg-btn ok" data-act="rg-ok" data-id="${escapeHtml(lot.id)}">確定沒錯</button></div>
+    </div>`;
+}
+
+function rangeModalHtml() {
+  const lot = state.lots.find((l) => l.id === modal.id);
+  if (!lot) return '';
+  const meta = [lot.item ? itemDisplayName(lot.item) : '', machineNameOf(lot)].filter(Boolean).join('　');
+  if (modal.type === 'range-fix') {
+    const val = String(modal.value || '');
+    const issue = lotRangeIssue(lot);
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
+    const keypad = keys
+      .map((k) => {
+        if (k === '⌫') return `<button type="button" class="key muted" data-act="rg-back">⌫</button>`;
+        if (k === 'OK') return `<button type="button" class="key rg-key-save" data-act="rg-save">存</button>`;
+        return `<button type="button" class="key" data-act="rg-digit" data-v="${k}">${k}</button>`;
+      })
+      .join('');
+    return `<div class="overlay" data-act="modal-cancel">
+      <div class="sheet subcode-sheet hand-${thumbHand()}" data-stop="1">
+        <h3>改號：原本 ${escapeHtml(String(lot.number))}</h3>
+        <p>${escapeHtml(meta)}</p>
+        ${issue ? `<div class="rg-fix-hint">${escapeHtml(issue.title)}</div>` : ''}
+        <div class="lot-display"><div class="num${val ? '' : ' empty'}">${val ? escapeHtml(val) : '----'}</div></div>
+        <div class="keypad">${keypad}</div>
+        <div class="sheet-actions"><button type="button" class="btn" data-act="modal-cancel">取消</button></div>
+      </div>
+    </div>`;
+  }
+  const issue = lotRangeIssue(lot);
+  if (!issue) return '';
+  return `<div class="overlay rg-overlay" data-act="modal-cancel">
+      <div class="rg-card" data-stop="1" role="alertdialog" aria-label="號碼可能打錯">
+        <div class="rg-head">⚠ 號碼可能打錯</div>
+        <div class="rg-title">${escapeHtml(issue.title)}</div>
+        <div class="rg-typed-lbl">你打的是</div>
+        <div class="rg-typed">${rangeTypedHtml(issue)}</div>
+        ${meta ? `<div class="rg-meta">${escapeHtml(meta)}</div>` : ''}
+        <div class="rg-acts"><button type="button" class="rg-btn fix" data-act="rg-fix" data-id="${escapeHtml(lot.id)}">改號</button><button type="button" class="rg-btn ok" data-act="rg-ok" data-id="${escapeHtml(lot.id)}">確定沒錯</button></div>
+        <div class="rg-hint">號碼已先存好。沒確認前，格子上會一直顯示紅色「號?」</div>
+      </div>
+    </div>`;
+}
+
 function addSessionMachine(half) {
   const h = half || state.currentHalf;
   if (!isHalf(h)) return;
@@ -4535,6 +4806,19 @@ function undoLast() {
   if (snap.kind === 'delete' && snap.lot) {
     if (!state.lots.some((l) => l.id === snap.lot.id)) state.lots.push(snap.lot);
     restoreCurrent(snap);
+    saveState();
+    toast('已復原');
+    buzz(24);
+    render();
+    return;
+  }
+  if (snap.kind === 'renumber' && snap.prev) {
+    const lot = (state.lots || []).find((l) => l.id === snap.prev.id);
+    if (lot) {
+      lot.number = snap.prev.number;
+      lot.machineId = snap.prev.machineId;
+      lot.rangeOk = !!snap.prev.rangeOk;
+    }
     saveState();
     toast('已復原');
     buzz(24);
@@ -5715,7 +5999,7 @@ function applyItemToLot(lot, name) {
   applyPlanPurposeToLot(lot);
   saveState();
   toast(withPlanToast(`${lot.number}　${name}`));
-  buzz(12);
+  if (!maybeRangeAlert(lot)) buzz(12);
 }
 
 function setLotSize(id, size) {
@@ -5998,7 +6282,8 @@ function commitLotRange(preview) {
     { kind: 'range-add', lots: added.map((l) => ({ ...l })) },
     '已加入 ' + added.length + ' 筆　' + itemDisplayName(draftItem)
   );
-  buzz(26);
+  const warnLot = added.find((l) => lotRangeWarn(l));
+  if (!(warnLot && maybeRangeAlert(warnLot))) buzz(26);
   render();
 }
 
@@ -6787,8 +7072,11 @@ function syncProgressTimer() {
   }
 }
 
+let buzzHoldUntil = 0;
 function buzz(pattern) {
   if (!state.vibrate) return;
+  /* v116: a short tap buzz right after the 號碼防呆 alert must not cut its long vibration. */
+  if (typeof pattern === 'number' && Date.now() < buzzHoldUntil) return;
   try {
     navigator.vibrate?.(pattern);
   } catch {
@@ -7161,7 +7449,7 @@ function commitLot(num, machineId, half) {
     ? `已存 ${lot.number}　${lot.item}`
     : `已存 ${num}　${machineNameOf(lot)}`;
   offerUndo({ kind: 'range-add', lots: [lot] }, savedLabel);
-  buzz(26);
+  if (!maybeRangeAlert(lot)) buzz(26);
   render();
 }
 
@@ -9082,7 +9370,7 @@ function renderNote() {
     ? `<div class="recent-row">${recent
         .map(
           (l) => {
-            const on = itemTargetId === l.id ? ' on' : '';
+            const on = (itemTargetId === l.id ? ' on' : '') + (lotRangeWarn(l) ? ' range-warn' : '');
             const item = l.item ? `<span class="itm">${escapeHtml(itemDisplayName(l.item))}</span>` : '';
             return `<button type="button" class="recent-chip${on}" data-act="select-lot" data-id="${escapeHtml(l.id)}">
               ${lotNumHtml(l, { numClass: 'ln-num' })}
@@ -9263,6 +9551,8 @@ function renderLive() {
               else if (over) cls += ' passed';
               if (isNext) cls += ' next';
               if (l.status === 'lost') cls += ' strike';
+              const rgWarn = lotRangeWarn(l);
+              if (rgWarn) cls += ' range-warn';
               let badge = '';
               if (d === 0) badge = '<span class="cell-badge now">到</span>';
               const eta = lotEtaLabel(l, cur);
@@ -9290,7 +9580,7 @@ function renderLive() {
                     ${etaHtml}
                   </span>
                   <span class="cell-item-row">${item}<span class="cell-end">${size}<span class="cell-flags">${badge}${er}</span></span></span>
-                </span>
+                </span>${rgWarn ? `<span class="rg-badge" data-act="rg-open" data-id="${escapeHtml(l.id)}" aria-label="${escapeHtml(l.number + ' 號碼可能打錯，點一下檢查')}">號?</span>` : ''}
               </button>`;
             })
         : null;
@@ -9784,6 +10074,7 @@ function renderModal() {
       <div class="sheet action-sheet" data-stop="1">
         <h3>${lotLabelHtml(lot)}</h3>
         <p>${escapeHtml(machineNameOf(lot))}${lot.item ? '　' + escapeHtml(itemDisplayName(lot.item)) : ''}${lotByHtml(lot)}</p>
+        ${rangeWarnSheetHtml(lot)}
         <div class="lot-qty-row" aria-label="件數">
           <span class="lot-qty-label">件數</span>
           <button type="button" class="plan-qty-btn" data-act="lot-qty-dec" data-id="${escapeHtml(lot.id)}" aria-label="減少件數">−</button>
@@ -9843,6 +10134,12 @@ function renderModal() {
         </div>
       </div>
     </div>`;
+  }
+  if (modal.type === 'range-warn' || modal.type === 'range-fix') {
+    const html = rangeModalHtml();
+    if (html) return html;
+    modal = null;
+    return '';
   }
   if (modal.type === 'subcode') {
     const lot = state.lots.find((l) => l.id === modal.id);
@@ -10411,6 +10708,34 @@ function onClick(e) {
         break;
       }
       openSubCodeEditor(btn.dataset.id);
+      break;
+    case 'rg-open':
+      e.stopPropagation();
+      if (ignoreLotClick || dragState) {
+        ignoreLotClick = false;
+        break;
+      }
+      modal = { type: 'range-warn', id: btn.dataset.id };
+      dismissActionToast();
+      buzz([180, 80, 180]);
+      buzzHoldUntil = Date.now() + 500;
+      render();
+      break;
+    case 'rg-ok':
+      confirmLotRange(btn.dataset.id);
+      break;
+    case 'rg-fix':
+      openRangeFix(btn.dataset.id);
+      break;
+    case 'rg-digit':
+      typeRangeFixDigit(v);
+      buzz(8);
+      break;
+    case 'rg-back':
+      backspaceRangeFix();
+      break;
+    case 'rg-save':
+      applyRangeFix();
       break;
     case 'sc-digit':
       typeSubCodeDigit(v);
