@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v116';
+const APP_VERSION = 'v117';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -4140,12 +4140,15 @@ function detectMachineId(num, half) {
   return null;
 }
 
-/* v116 號碼防呆: warn (never block) when a 抄號 number does not look like the
-   item's usual 號段. Expected leading digits come from data only:
-   1) 台 whose name carries the item's 類別 (e.g. 第二台・水菜 3001–3499 → 水菜 = 3 開頭),
-   2) numbers this 類別 really used in the kept days (≥3 lots and ≥25% share, or ≥2 confirmed),
-   3) the picked 台's own 號段 when the lot has no 類別 match.
-   No confident data → no warning. Confirmed lots (rangeOk) never warn again. */
+/* 號碼防呆 (v116, v117 stricter): warn (never block) when a 抄號 number does not
+   match the item's 類別 號段. Expected leading digits come from the 台 settings:
+   1) 台 whose name carries the item's 類別 (第一台・大宗 1001–1999 → 大宗 = 1 開頭,
+      第二台・水菜 3001–3499 → 水菜 = 3 開頭, 瓜果台 → 2–6 開頭),
+   2) otherwise every 台 of that 場 together (e.g. 醃製 in 下半場 → 2–6 開頭),
+   3) the picked 台's own 號段 for items with no 類別.
+   v117: no longer learned from past lots (a few earlier typos must not silence it),
+   and it fires whichever 台 the number got routed to. Only a 確定 on that lot
+   (rangeOk) stops the reminder for that lot. */
 let rangeGuardMemo = { key: '', model: null };
 
 function numLead(n) {
@@ -4173,62 +4176,40 @@ function machineGroupTag(m) {
 }
 
 function buildRangeGuardModel() {
-  const lots = state.lots || [];
   const model = {};
   for (const h of HALVES) {
     const ms = state.machines[h] || [];
     const digits = new Set();
-    const byGroupCfg = {};
+    const all = new Set();
+    const groups = {};
     for (const m of ms) {
-      for (const r of m.ranges || []) if (r && r.start != null) digits.add(numLead(r.start).digits);
+      if (!(m.ranges || []).length) continue;
+      for (const r of m.ranges) if (r && r.start != null) digits.add(numLead(r.start).digits);
+      const leads = rangeLeads(m.ranges);
+      for (const k of leads) all.add(k);
       const g = machineGroupTag(m);
-      if (!g || !(m.ranges || []).length) continue;
-      const set = byGroupCfg[g] || (byGroupCfg[g] = new Set());
-      for (const k of rangeLeads(m.ranges)) set.add(k);
+      if (!g) continue;
+      const set = groups[g] || (groups[g] = new Set());
+      for (const k of leads) set.add(k);
     }
-    model[h] = { digits, groups: {}, cfg: byGroupCfg, counts: {} };
-  }
-  for (const l of lots) {
-    if (!l || !l.item || !model[l.half] || !Number.isFinite(l.number)) continue;
-    const g = cropGroupOfName(l.item);
-    if (!g || g === '其他') continue;
-    const c = model[l.half].counts[g] || (model[l.half].counts[g] = { total: 0, by: {}, ok: {} });
-    const k = numLead(l.number);
-    const key = k.digits + ':' + k.lead;
-    c.total += 1;
-    c.by[key] = (c.by[key] || 0) + 1;
-    if (l.rangeOk) c.ok[key] = (c.ok[key] || 0) + 1;
-  }
-  for (const h of HALVES) {
-    const hm = model[h];
-    const names = new Set([...Object.keys(hm.cfg), ...Object.keys(hm.counts)]);
-    for (const g of names) {
-      const cfg = hm.cfg[g];
-      const c = hm.counts[g] || { total: 0, by: {}, ok: {} };
-      const allowed = new Set(cfg ? [...cfg] : []);
-      const learned = new Set();
-      for (const key of Object.keys(c.by)) {
-        const n = c.by[key];
-        const okN = c.ok[key] || 0;
-        if (cfg) {
-          if ((n >= 3 && n / Math.max(1, c.total) >= 0.25) || okN >= 2) learned.add(key);
-        } else if (c.total >= 8 && n >= 2) learned.add(key);
-      }
-      for (const k of learned) allowed.add(k);
-      if (!allowed.size) continue;
-      hm.groups[g] = { allowed, fromCfg: !!cfg };
+    /* 台 renamed without the 類別 word: fall back to the default 台 of that 類別
+       (same id), still using this phone's own 號段 for it. */
+    for (const dm of (DEFAULT_MACHINES[h] || [])) {
+      const g = machineGroupTag(dm);
+      if (!g || groups[g]) continue;
+      const m = ms.find((x) => x.id === dm.id);
+      if (!m || machineGroupTag(m) || !(m.ranges || []).length) continue;
+      groups[g] = rangeLeads(m.ranges);
     }
+    model[h] = { digits, all, groups };
   }
   return model;
 }
 
 function rangeGuardModel() {
-  /* One check per task: a render asks for every cell, so reuse it until the task ends. */
+  /* One build per task: a render asks for every cell, so reuse it until the task ends. */
   if (rangeGuardMemo.fresh && rangeGuardMemo.model) return rangeGuardMemo.model;
-  const lots = state.lots || [];
-  let sum = 0;
-  for (const l of lots) sum = (sum + (Number(l.number) || 0) * 7 + (l.rangeOk ? 3 : 0) + String(l.item || '').length) % 1000000007;
-  const key = lots.length + '|' + sum + '|' + JSON.stringify(state.machines || {});
+  const key = JSON.stringify(state.machines || {});
   if (rangeGuardMemo.key !== key || !rangeGuardMemo.model) rangeGuardMemo = { key, model: buildRangeGuardModel() };
   rangeGuardMemo.fresh = true;
   queueMicrotask(() => { rangeGuardMemo.fresh = false; });
@@ -4255,10 +4236,11 @@ function lotRangeIssue(lot) {
     return { title: `貨號通常是 ${want} 位數`, expect: `你打的是 ${typed}（${k.digits} 位）`, typed, want: `${want} 位數` };
   }
   const g = lot.item ? cropGroupOfName(lot.item) : '';
-  const grp = g && hm.groups[g];
-  if (grp) {
-    if (grp.allowed.has(key)) return null;
-    const lead = leadsText(grp.allowed);
+  const hasGroup = !!g && g !== '其他';
+  const allowed = hasGroup ? (hm.groups[g] || (hm.all.size ? hm.all : null)) : null;
+  if (allowed) {
+    if (allowed.has(key)) return null;
+    const lead = leadsText(allowed);
     return { title: `${g}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭`, group: g };
   }
   const m = lot.machineId ? machineById(lot.machineId, lot.half) : null;
