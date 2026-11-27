@@ -14,6 +14,11 @@ let syncStatus = 'off'; // off | connecting | online | offline | syncing | pendi
 let syncTimer = null;
 let syncPingTimer = null;
 let syncNeedJoin = false;
+let syncSeq = 0;          // v112: id of the ops batch waiting for its ack
+let syncSentSeq = 0;
+let syncLastRemoteAt = 0; // last time another phone's change reached this phone
+let syncServerVersion = '';
+let syncReconciledAt = 0;
 let syncApplying = false;
 let syncSentCount = 0;
 let syncConnecting = false;
@@ -376,11 +381,21 @@ function compactSyncQueue(q) {
   });
 }
 
+function utf8Len(str) {
+  // v112: count real bytes (a Chinese character is 3 bytes on the wire), so a batch
+  // never goes over the server's frame limit.
+  try { return new Blob([str]).size; } catch { return str.length * 3; }
+}
+
+function syncAppVersion() {
+  return typeof APP_VERSION === 'string' ? APP_VERSION : '';
+}
+
 function nextSyncChunk(q) {
   const out = [];
   let bytes = 0;
   for (const op of q) {
-    const n = JSON.stringify(op).length;
+    const n = utf8Len(JSON.stringify(op));
     if (out.length && (out.length >= SYNC_CHUNK_OPS || bytes + n > SYNC_CHUNK_BYTES)) break;
     out.push(op);
     bytes += n;
@@ -588,16 +603,20 @@ function flushSync() {
   setSyncStatus('syncing');
   const chunk = nextSyncChunk(q);
   syncSentCount = chunk.length;
+  syncSentSeq = ++syncSeq;
   syncWs._sentAt = Date.now();
   try {
     syncWs.send(JSON.stringify({
       type: 'ops',
       ops: chunk,
+      seq: syncSentSeq,
+      appVersion: syncAppVersion(),
       deviceId: state.syncDeviceId,
       token: state.syncDeviceToken
     }));
   } catch {
     syncSentCount = 0;
+    syncSentSeq = 0;
     setSyncStatus('offline');
   }
 }
@@ -627,8 +646,10 @@ function applySnapshot(snap, flash) {
 function applyRemoteOps(ops, flashes, from) {
   if (!ops || !ops.length || typeof BidSyncCore === 'undefined') return;
   syncApplying = true;
+  let prevIdsForToast = null;
   try {
     noteSeenOps(ops);
+    prevIdsForToast = new Set((state.lots || []).map((l) => l && l.id));
     const snap = BidSyncCore.snapshotFromState(state);
     const result = BidSyncCore.applyOps(snap, ops);
     // Nothing in the batch changed our data (an echo or an old op): no need to
@@ -659,7 +680,33 @@ function applyRemoteOps(ops, flashes, from) {
       if (msg && typeof toast === 'function') toast(msg);
     }
   }
+  if (from && from !== ensureDeviceId() && from !== ensurePeerId() && prevIdsForToast) noteRemoteElsewhere(prevIdsForToast);
   if (typeof render === 'function') render();
+}
+
+/* v112: a teammate's new lot in another 場次 (or another day) is not on this screen;
+   say so instead of letting it look like nothing came in. */
+let elsewhereToastAt = 0;
+function noteRemoteElsewhere(prevIds) {
+  if (typeof toast !== 'function' || typeof halfLabel !== 'function') return;
+  const fresh = (state.lots || []).filter((l) => l && !prevIds.has(l.id));
+  if (!fresh.length) return;
+  const otherHalf = {};
+  let otherDay = '';
+  for (const l of fresh) {
+    if (l.day && l.day !== state.day) { otherDay = l.day; continue; }
+    if (l.half && l.half !== state.currentHalf) otherHalf[l.half] = (otherHalf[l.half] || 0) + 1;
+  }
+  const now = Date.now();
+  if (now - elsewhereToastAt < 4000) return;
+  const halves = Object.keys(otherHalf);
+  if (halves.length) {
+    elsewhereToastAt = now;
+    toast('隊友在' + halves.map((h) => halfLabel(h) + ' 抄了 ' + otherHalf[h] + ' 筆').join('、') + '（切到該場次看）');
+  } else if (otherDay) {
+    elsewhereToastAt = now;
+    toast('隊友抄的是 ' + otherDay + ' 的號，和這支日期不同');
+  }
 }
 
 function mergeSnapshotOnHello(incoming) {
@@ -696,6 +743,64 @@ function mergeSnapshotOnHello(incoming) {
     }
   }
   if (typeof render === 'function') render();
+}
+
+/* v112: after logging in, send the server everything this phone has that the
+   server is missing or has older. Before v110 the big join upload did this on every
+   connect; v110 dropped that upload, so a lot that once missed its live send stayed
+   on one phone forever (各自抄各自的). Merging is per field by time, so this is safe
+   to repeat. */
+function syncRecordDiffers(a, b, fields) {
+  if (!a || !b) return true;
+  for (const f of fields) {
+    const x = a[f];
+    const y = b[f];
+    if (x === y) continue;
+    if ((x == null || x === '') && (y == null || y === '')) continue;
+    if (JSON.stringify(x) !== JSON.stringify(y)) return true;
+    if (JSON.stringify((a.fieldTs || {})[f]) !== JSON.stringify((b.fieldTs || {})[f])) return true;
+  }
+  return false;
+}
+function reconcileWithServer(incoming) {
+  if (!incoming || typeof BidSyncCore === 'undefined' || !state || !state.syncRoom) return 0;
+  const local = stampedSnapshot();
+  const peer = ensurePeerId();
+  const now = Date.now();
+  const ops = [];
+  const inLots = incoming.lots || {};
+  const inPlans = incoming.planItems || {};
+  const inTomb = incoming.tombstones || {};
+  const inKv = incoming.kv || {};
+  for (const [id, lot] of Object.entries(local.lots || {})) {
+    if (!syncRecordDiffers(inLots[id], lot, BidSyncCore.LOT_FIELDS)) continue;
+    ops.push({ kind: 'lot-upsert', ts: Number(lot.updatedAt) || now, peer: lot.updatedBy || peer, payload: lot });
+  }
+  for (const [id, item] of Object.entries(local.planItems || {})) {
+    if (!syncRecordDiffers(inPlans[id], item, BidSyncCore.PLAN_FIELDS)) continue;
+    ops.push({ kind: 'plan-upsert', ts: Number(item.updatedAt) || now, peer: item.updatedBy || peer, payload: item });
+  }
+  const lt = local.tombstones || {};
+  for (const [id, ts] of Object.entries(lt.lots || {})) {
+    if (inLots[id] && !(inTomb.lots || {})[id]) ops.push({ kind: 'lot-delete', ts: Number(ts) || now, peer, id });
+  }
+  for (const [id, ts] of Object.entries(lt.plan || {})) {
+    if (inPlans[id] && !(inTomb.plan || {})[id]) ops.push({ kind: 'plan-delete', ts: Number(ts) || now, peer, id });
+  }
+  for (const [key, e] of Object.entries(local.kv || {})) {
+    const r = inKv[key];
+    if (!e) continue;
+    if (!r || (Number(e.ts) || 0) > (Number(r.ts) || 0)) {
+      ops.push({ kind: 'kv', ts: Number(e.ts) || now, peer: e.peer || peer, key, value: e.v });
+    }
+  }
+  syncReconciledAt = now;
+  if (!ops.length) return 0;
+  if (!Array.isArray(state.syncQueue)) state.syncQueue = [];
+  state.syncQueue.push.apply(state.syncQueue, ops);
+  if (!syncSentCount) state.syncQueue = compactSyncQueue(state.syncQueue);
+  persistSyncState();
+  return ops.length;
 }
 
 async function ensureRoomOnServer() {
@@ -830,6 +935,7 @@ function openSyncSocket() {
   ws._openedAt = Date.now();
   ws._authed = false;
   syncSentCount = 0;
+  syncSentSeq = 0;
   ws.onopen = () => {
     if (syncWs !== ws) return;
     startSyncPing(ws);
@@ -838,7 +944,9 @@ function openSyncSocket() {
         type: 'auth',
         code: state.syncRoom,
         deviceId: state.syncDeviceId,
-        token: state.syncDeviceToken
+        token: state.syncDeviceToken,
+        appVersion: syncAppVersion(),
+        name: currentSyncName()
       }));
     } catch { /* ignore */ }
   };
@@ -878,13 +986,16 @@ function openSyncSocket() {
       });
       markSyncOk();
       persistSyncState();
-      if (msg.snapshot) mergeSnapshotOnHello(msg.snapshot);
-      else if (typeof render === 'function') render();
+      syncServerVersion = msg.serverVersion || '';
+      maybeWarnOldPeer();
+      if (msg.snapshot) {
+        mergeSnapshotOnHello(msg.snapshot);
+        reconcileWithServer(msg.snapshot);
+      } else if (typeof render === 'function') render();
       if (msg.pending && msg.pending.length && state.syncRole === 'owner') {
         maybePromptJoin(msg.pending[0]);
       }
       setSyncStatus((state.syncQueue || []).length ? 'syncing' : 'online');
-      syncSentCount = 0;
       flushSync();
     } else if (msg.type === 'approved') {
       ws._authed = true;
@@ -892,20 +1003,29 @@ function openSyncSocket() {
       applyMembership({ status: 'approved', role: msg.role || 'member', devices: msg.devices });
       markSyncOk();
       persistSyncState();
-      if (msg.snapshot) mergeSnapshotOnHello(msg.snapshot);
+      if (msg.snapshot) {
+        mergeSnapshotOnHello(msg.snapshot);
+        reconcileWithServer(msg.snapshot);
+      }
       toast('已加入房間' + (state.syncLabel ? ' ' + state.syncLabel : ''));
       setSyncStatus((state.syncQueue || []).length ? 'syncing' : 'online');
-      syncSentCount = 0;
       flushSync();
     } else if (msg.type === 'ops') {
+      if (msg.from && msg.from !== state.syncDeviceId) syncLastRemoteAt = Date.now();
       applyRemoteOps(msg.ops, msg.flashes, msg.from);
     } else if (msg.type === 'ack') {
-      const sent = syncSentCount || (Array.isArray(state.syncQueue) ? state.syncQueue.length : 0);
+      /* v112: only drop the batch this ack is for. The old code dropped the whole
+         queue when an extra ack came in (e.g. a batch sent twice on login), so lots
+         typed in that moment never reached the other phone. */
+      if (msg.seq != null && msg.seq !== syncSentSeq) return;
+      if (!syncSentCount) return;
+      const sent = syncSentCount;
       if (Array.isArray(state.syncQueue) && sent) {
         state.syncQueue = state.syncQueue.slice(sent);
         persistSyncState();
       }
       syncSentCount = 0;
+      syncSentSeq = 0;
       if ((state.syncQueue || []).length) flushSync();
       else setSyncStatus('online');
     } else if (msg.type === 'join-request') {
@@ -917,7 +1037,10 @@ function openSyncSocket() {
       maybePromptJoin(msg.request);
       if (typeof render === 'function') render();
     } else if (msg.type === 'devices') {
-      if (Array.isArray(msg.devices)) state.syncDevices = msg.devices;
+      if (Array.isArray(msg.devices)) {
+        state.syncDevices = msg.devices;
+        maybeWarnOldPeer();
+      }
       if (Array.isArray(msg.pending)) state.syncJoinRequests = msg.pending;
       persistSyncState();
       if (typeof render === 'function') render();
@@ -936,8 +1059,10 @@ function openSyncSocket() {
     }
   };
   ws.onclose = (ev) => {
-    if (syncWs === ws) syncWs = null;
+    if (syncWs !== ws) return; // an old socket closing must not touch the new one
+    syncWs = null;
     syncSentCount = 0;
+    syncSentSeq = 0;
     clearInterval(syncPingTimer);
     if (ws._gone) return;
     if (state && state.syncRoom && !isLegacyRoom(state.syncRoom)) {
@@ -962,6 +1087,7 @@ function closeSyncSocket() {
   syncProbeTimer = null;
   clearTimeout(syncTimer);
   syncSentCount = 0;
+  syncSentSeq = 0;
   const ws = syncWs;
   syncWs = null;
   if (ws) {
@@ -989,7 +1115,7 @@ function maybePromptJoin(request) {
   modal = {
     type: 'confirm',
     title: request.name ? (normalizeSyncName(request.name) + ' 想加入房間？') : '有人要加入房間？',
-    body: (request.name ? (normalizeSyncName(request.name) + ' 想加入你的房間') : '另一支裝置想加入你的房間') + (state.syncLabel ? '（' + state.syncLabel + '）' : '') + '。一個房間最多兩支手機。允許後就可以一起看、一起改抄號和備註。',
+    body: (request.name ? (normalizeSyncName(request.name) + ' 想加入你的房間') : '另一支裝置想加入你的房間') + (state.syncLabel ? '（' + state.syncLabel + '）' : '') + '。允許後就可以一起看、一起改抄號和備註。',
     ok: '允許加入',
     cancel: '拒絕',
     _syncRequestId: request.requestId,
@@ -1223,7 +1349,7 @@ function renderSyncSettings() {
   const joined = !!(state && state.syncRoom);
   if (!joined) {
     return `<div class="setting-block" id="sync-settings">
-      <h2>兩人同步</h2>
+      <h2>團隊同步</h2>
       <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">兩支手機看同一份抄號、標到和備註，不用再口頭對。建立房間後，用「複製邀請連結」或畫面中的 QR 碼分享給另一支手機。加入時要先輸入自己的名稱。沒加入房間時，這個手機還是只存在自己這裡、離線也能用。</p>
       <label class="sync-name-label" for="sync-settings-name">我的名稱</label>
       <input id="sync-settings-name" class="sync-name-input" maxlength="20" autocomplete="name" value="${escapeHtml(currentSyncName())}" data-act="sync-name-input" placeholder="例如：小美" />
@@ -1235,7 +1361,7 @@ function renderSyncSettings() {
   }
   if (isLegacyRoom(state.syncRoom)) {
     return `<div class="setting-block" id="sync-settings">
-      <h2>兩人同步</h2>
+      <h2>團隊同步</h2>
       <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45;color:#f0c35a">舊的 6 位數房號已無法讓新手機加入。請由其中一支手機點「更新邀請」，再把新的連結或 QR 碼傳給另一支手機。</p>
       <div class="sync-code-box">
         <div class="sync-code-label">舊房號</div>
@@ -1248,8 +1374,8 @@ function renderSyncSettings() {
   }
   if (state.syncPending) {
     return `<div class="setting-block" id="sync-settings">
-      <h2>兩人同步</h2>
-      <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">已送出加入申請，等待房間建立者在他的手機上允許。最多兩支手機同時使用。</p>
+      <h2>團隊同步</h2>
+      <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">已送出加入申請，等待房間建立者在他的手機上允許。</p>
       <div class="sync-code-box">
         <div class="sync-code-label">房間</div>
         <div class="sync-code">${escapeHtml(state.syncLabel || '……')}</div>
@@ -1262,10 +1388,15 @@ function renderSyncSettings() {
   const devices = (state.syncDevices || []).map((d) => {
     const name = devicePublicName(d);
     const role = d.role === 'owner' ? ' · 建立者' : '';
-    const kick = state.syncRole === 'owner' && !d.isMe
+    const me = d.isMe || d.deviceId === state.syncDeviceId;
+    const kick = state.syncRole === 'owner' && !me
       ? `<button type="button" class="btn danger sync-kick-btn" data-act="sync-kick" data-v="${escapeHtml(d.deviceId)}">移除</button>`
       : '';
-    return `<div class="sync-device">${escapeHtml(name + role)}${kick}</div>`;
+    const online = me ? syncSocketAlive() : !!d.online;
+    const ver = me ? syncAppVersion() : (d.appVersion || '');
+    const old = !me && peerVersionTooOld(d);
+    const seen = !online && d.lastSeen ? '，最後上線 ' + syncClock(d.lastSeen) : '';
+    return `<div class="sync-device${old ? ' old' : ''}"><span class="sync-dev-main"><span><i class="sync-dev-dot ${online ? 'on' : 'off'}"></i>${escapeHtml(name + role + (me ? '（這支）' : ''))}</span><small>${escapeHtml((online ? '在線' : '離線') + ' · ' + (ver || '版本不明') + seen)}${old ? '<b>　版本太舊，請重開</b>' : ''}</small></span>${kick}</div>`;
   }).join('');
   const pending = (state.syncJoinRequests || []).map((r) =>
     `<div class="sync-pending">
@@ -1275,8 +1406,8 @@ function renderSyncSettings() {
     </div>`
   ).join('');
   return `<div class="setting-block" id="sync-settings">
-    <h2>兩人同步</h2>
-    <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">兩支手機都可以改抄號、標到和備註。離線先記在手機，連上再同步。承銷人代號只留在自己手機；第三支要先經你允許。</p>
+    <h2>團隊同步</h2>
+    <p class="empty-hint" style="text-align:left;padding:0 0 8px;line-height:1.45">房間裡每支手機抄的號、標到和備註，大家都看得到、都能改。離線先記在手機，連上再同步。承銷人代號只留在自己手機；第三支起要先經你允許。</p>
     <label class="sync-name-label" for="sync-settings-name">我的名稱</label>
     <div class="sync-name-row">
       <input id="sync-settings-name" class="sync-name-input" maxlength="20" autocomplete="name" value="${escapeHtml(currentSyncName())}" data-act="sync-name-input" placeholder="例如：小美" />
@@ -1297,10 +1428,68 @@ function renderSyncSettings() {
     <p class="empty-hint" style="text-align:left;padding:4px 0 0;line-height:1.45;word-break:break-all">${escapeHtml(roomShareUrl())}</p>
     <h3 class="sync-sub">已加入的手機</h3>
     <div class="sync-devices">${devices || '<div class="sync-device">這支手機 · 建立者</div>'}</div>
+    ${renderSyncDiag()}
     ${pending}
     ${lastSyncError ? `<p class="empty-hint" style="text-align:left;color:#ff8a8a">${escapeHtml(lastSyncError)}</p>` : ''}
     <button type="button" class="btn danger" style="width:100%;margin-top:8px" data-act="sync-leave">離開房間</button>
   </div>`;
+}
+
+let oldPeerWarnedAt = 0;
+function maybeWarnOldPeer() {
+  const old = syncPeersTooOld();
+  if (!old.length || Date.now() - oldPeerWarnedAt < 60000) return;
+  oldPeerWarnedAt = Date.now();
+  if (typeof toast === 'function') toast('對方版本太舊，請重開（' + old.map(devicePublicName).join('、') + '）');
+}
+
+function syncClock(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return (sameDay ? '' : (d.getMonth() + 1) + '/' + d.getDate() + ' ') + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+function versionNum(v) {
+  const m = /^v(\d+)/.exec(String(v || ''));
+  return m ? Number(m[1]) : 0;
+}
+
+// A teammate's phone that is online but runs a version older than v112 (or one that
+// does not tell its version at all, i.e. v111 and older).
+function peerVersionTooOld(d) {
+  if (!d || d.isMe || d.deviceId === state.syncDeviceId || !d.online) return false;
+  return versionNum(d.appVersion) < 112;
+}
+
+function syncPeersTooOld() {
+  return (state && Array.isArray(state.syncDevices) ? state.syncDevices : []).filter(peerVersionTooOld);
+}
+
+/* v112: 設定→同步 diagnostic, so it is plain whether both phones really share one room. */
+function renderSyncDiag() {
+  const room = String(state.syncRoom || '');
+  const shortCode = room ? room.slice(0, 4) + '…' + room.slice(-4) : '—';
+  const peers = (state.syncDevices || []).filter((d) => !(d.isMe || d.deviceId === state.syncDeviceId));
+  const onlinePeers = peers.filter((d) => d.online).length;
+  const q = (state.syncQueue || []).length;
+  const rows = [
+    ['房間', (state.syncLabel || '') + '（' + shortCode + '）'],
+    ['連線', syncSocketAlive() ? '已連上' : '未連上'],
+    ['隊友在線', peers.length ? onlinePeers + ' / ' + peers.length + ' 支' : '還沒有隊友加入'],
+    ['最後收到隊友資料', syncLastRemoteAt ? syncClock(syncLastRemoteAt) : '這次開啟後還沒有'],
+    ['最後和伺服器通訊', syncLastRxAt ? syncClock(syncLastRxAt) : '—'],
+    ['待送出', q ? q + ' 筆' : '沒有'],
+    ['這支版本', syncAppVersion() + (syncServerVersion ? '（伺服器 ' + syncServerVersion + '）' : '')]
+  ];
+  const old = syncPeersTooOld();
+  const warn = old.length
+    ? `<p class="sync-warn">${escapeHtml(old.map(devicePublicName).join('、'))} 的版本太舊，請把那支手機的 App 完全關掉再打開。</p>`
+    : '';
+  return `<h3 class="sync-sub">同步檢查</h3>
+    <div class="sync-diag">${rows.map(([k, v]) => `<div><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`).join('')}</div>${warn}`;
 }
 
 function renderSyncPill() {

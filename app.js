@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v111';
+const APP_VERSION = 'v112';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -5975,7 +5975,8 @@ function commitLotRange(preview) {
       status: 'pending',
       priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
       qty: 1,
-      createdAt: now + i
+      createdAt: now + i,
+      ...lotByField()
     };
     if (lot.item) bumpItemUse(lot.item);
     applyPlanPurposeToLot(lot);
@@ -7093,6 +7094,19 @@ function saveLot() {
   commitLot(num, machineId, half);
 }
 
+/* v112: who copied this lot (the room name of this phone), shown on the lot sheet. */
+function lotByField() {
+  if (!state || !state.syncRoom || typeof currentSyncName !== 'function') return {};
+  const name = currentSyncName();
+  return name ? { by: name } : {};
+}
+
+function lotByHtml(lot) {
+  if (!lot || !lot.by || !state || !state.syncRoom) return '';
+  const mine = typeof currentSyncName === 'function' && lot.by === currentSyncName();
+  return `<span class="lot-by">${mine ? '我抄的' : escapeHtml(lot.by) + ' 抄的'}</span>`;
+}
+
 function commitLot(num, machineId, half) {
   const lot = {
     id: uid(),
@@ -7106,7 +7120,8 @@ function commitLot(num, machineId, half) {
     status: 'pending',
     priority: PRIORITIES.includes(draftPriority) ? draftPriority : (state.lastPriority || 'watch'),
     qty: 1,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    ...lotByField()
   };
   if (lot.item) bumpItemUse(lot.item);
   applyPlanPurposeToLot(lot);
@@ -9712,7 +9727,7 @@ function renderModal() {
     return `<div class="overlay" data-act="modal-cancel">
       <div class="sheet action-sheet" data-stop="1">
         <h3>${lotLabelHtml(lot)}</h3>
-        <p>${escapeHtml(machineNameOf(lot))}${lot.item ? '　' + escapeHtml(itemDisplayName(lot.item)) : ''}</p>
+        <p>${escapeHtml(machineNameOf(lot))}${lot.item ? '　' + escapeHtml(itemDisplayName(lot.item)) : ''}${lotByHtml(lot)}</p>
         <div class="lot-qty-row" aria-label="件數">
           <span class="lot-qty-label">件數</span>
           <button type="button" class="plan-qty-btn" data-act="lot-qty-dec" data-id="${escapeHtml(lot.id)}" aria-label="減少件數">−</button>

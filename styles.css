@@ -6779,3 +6779,17 @@ html.is-dragging .item-pick {
   font-weight: 900;
 }
 .cur-now-row.waiting { gap: 0; }
+
+/* v112: 同步檢查 */
+.sync-dev-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sync-dev-main small { font-size: 14px; font-weight: 600; color: var(--muted, #aaa); line-height: 1.35; }
+.sync-dev-main small b { color: #ff8a8a; }
+.sync-dev-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; background: #666; }
+.sync-dev-dot.on { background: #3ecf6e; }
+.sync-device.old { border-color: #ff8a8a; }
+.sync-diag { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #141414; }
+.sync-diag div { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; line-height: 1.35; }
+.sync-diag span { color: var(--muted, #aaa); flex: 0 0 auto; }
+.sync-diag b { text-align: right; word-break: break-all; }
+.sync-warn { margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; background: #3a1414; color: #ffb0b0; font-size: 16px; font-weight: 700; line-height: 1.4; }
+.lot-by { font-size: 13px; font-weight: 700; color: #8fc7ff; margin-left: 4px; white-space: nowrap; }

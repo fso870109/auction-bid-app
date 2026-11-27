@@ -17,10 +17,11 @@ const ROOM_TTL_SEC = 60 * 60 * 24 * 30;
 // A phone re-creating its room sends the whole snapshot (hundreds of lots with per-field stamps
 // run past 256 KB), so the JSON endpoints take up to 1.5 MB. Socket messages stay small.
 const BODY_LIMIT = 1536 * 1024;
-const WS_MSG_LIMIT = 256 * 1024;
+const WS_MSG_LIMIT = 1536 * 1024; // v112: same as BODY_LIMIT; a too-big frame used to close the socket and jam the phone's queue
 const MAX_OPS = 200;
-const MAX_DEVICES = 2;
+const MAX_DEVICES = 12; // v112: a team room (was 2: a third phone or a re-installed phone could never be approved)
 const MAX_PENDING = 5;
+const AUTO_APPROVE_DEVICES = 2; // the first two phones join on the invite alone; more need the owner's OK
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const JOIN_ERROR = '無法加入這個房間';
 const RETRY_ERROR = '請稍後再試';
@@ -32,6 +33,7 @@ if (!process.env.SYNC_SECRET) {
   console.log('SYNC_SECRET not set; using a process-local key (restore tickets will not survive restarts)');
 }
 
+const SERVER_VERSION = 'v112';
 const rooms = new Map();
 let redis = null;
 
@@ -345,8 +347,18 @@ function publicDevices(room, me) {
       name: sanitizeName(d && d.name),
       role: id === room.ownerDeviceId ? 'owner' : 'member',
       isMe: id === me,
-      joinedAt: d.joinedAt || 0
+      joinedAt: d.joinedAt || 0,
+      lastSeen: d.lastSeen || 0,
+      appVersion: typeof d.appVersion === 'string' ? d.appVersion.slice(0, 16) : '',
+      online: deviceOnline(room, id)
     }));
+}
+
+function deviceOnline(room, id) {
+  for (const ws of room.clients || []) {
+    if (ws.deviceId === id && ws.readyState === 1 && ws.authed) return true;
+  }
+  return false;
 }
 
 function publicPending(room) {
@@ -372,8 +384,19 @@ function getCached(code) {
   return r || null;
 }
 
+const roomLoads = new Map();
 async function loadRoom(code) {
   if (rooms.has(code)) return getCached(code);
+  // v112: two phones reconnecting at the same moment (server restart / wake-up) each
+  // read Redis and each made their own room object; the second replaced the first in
+  // the map, so the first phone sat in an orphan room and never got the other's ops.
+  if (roomLoads.has(code)) return roomLoads.get(code);
+  const p = loadRoomFromStore(code).finally(() => roomLoads.delete(code));
+  roomLoads.set(code, p);
+  return p;
+}
+
+async function loadRoomFromStore(code) {
   if (redis) {
     try {
       const raw = await redis.get('room:' + code);
@@ -394,6 +417,7 @@ async function loadRoom(code) {
         } else {
           return null;
         }
+        if (rooms.has(code)) return getCached(code);
         rooms.set(code, room);
         return room;
       }
@@ -462,11 +486,16 @@ function validOps(ops) {
   }
   return true;
 }
+// v112: keep the good ops of a batch instead of throwing the whole batch away.
+function goodOps(ops) {
+  if (!Array.isArray(ops)) return [];
+  return ops.slice(0, 2000).filter((op) => op && typeof op === 'object' && OP_KINDS.has(op.kind));
+}
 
 function mergeIncoming(room, body) {
   if (!body) return [];
   const ops = [];
-  if (Array.isArray(body.ops) && validOps(body.ops)) ops.push(...body.ops);
+  if (Array.isArray(body.ops)) ops.push(...goodOps(body.ops));
   if (body.snapshot && typeof body.snapshot === 'object') ops.push(...snapshotToOps(body.snapshot));
   if (!ops.length) return [];
   const { applied } = applyOps(room.snap, ops);
@@ -615,7 +644,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       prunePending(room);
-      if (approvedCount(room) < MAX_DEVICES) {
+      if (approvedCount(room) < AUTO_APPROVE_DEVICES) {
         const dev = registerDevice(room, deviceId, null, false, body && body.name);
         const merged = mergeIncoming(room, body);
         await persistRoom(code);
@@ -858,6 +887,8 @@ wss.on('connection', (ws, req) => {
       ws.token = msg.token;
       room.clients.add(ws);
       rec.lastSeen = Date.now();
+      if (typeof msg.appVersion === 'string') rec.appVersion = msg.appVersion.slice(0, 16);
+      if (typeof msg.name === 'string' && msg.name.trim()) rec.name = sanitizeName(msg.name);
       if (!rec.approved) {
         ws.authed = false;
         ws.pending = true;
@@ -866,8 +897,10 @@ wss.on('connection', (ws, req) => {
       }
       ws.authed = true;
       const role = deviceId === room.ownerDeviceId ? 'owner' : 'member';
+      broadcast(room, ws, { type: 'devices', devices: publicDevices(room, ''), pending: publicPending(room) });
       send(ws, {
         type: 'hello',
+        serverVersion: SERVER_VERSION,
         status: 'approved',
         snapshot: room.snap,
         label: room.label,
@@ -893,13 +926,16 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (msg.type === 'ops') {
-      if (!validOps(msg.ops)) { send(ws, { type: 'ack', count: 0, applied: 0 }); return; }
-      const { applied } = applyOps(room.snap, msg.ops);
+      const ops = goodOps(msg.ops);
+      const count = Array.isArray(msg.ops) ? msg.ops.length : 0;
+      rec.lastSeen = Date.now();
+      if (typeof msg.appVersion === 'string') rec.appVersion = msg.appVersion.slice(0, 16);
+      const { applied } = ops.length ? applyOps(room.snap, ops) : { applied: 0 };
       if (applied) {
         await persistRoom(ws.roomCode);
-        broadcast(room, ws, { type: 'ops', ops: msg.ops, from: ws.deviceId });
+        broadcast(room, ws, { type: 'ops', ops, from: ws.deviceId });
       }
-      send(ws, { type: 'ack', count: msg.ops.length, applied });
+      send(ws, { type: 'ack', count, applied, seq: msg.seq });
     } else if (msg.type === 'ping') {
       send(ws, { type: 'pong' });
     }
@@ -908,7 +944,11 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('close', () => {
     gpClients.delete(ws);
-    if (ws.roomCode && rooms.has(ws.roomCode)) rooms.get(ws.roomCode).clients.delete(ws);
+    if (ws.roomCode && rooms.has(ws.roomCode)) {
+      const r = rooms.get(ws.roomCode);
+      r.clients.delete(ws);
+      if (ws.authed) broadcast(r, null, { type: 'devices', devices: publicDevices(r, ''), pending: publicPending(r) });
+    }
   });
 });
 
