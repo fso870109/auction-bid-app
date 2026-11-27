@@ -14,7 +14,9 @@ const ALLOW_ORIGINS = (process.env.CORS_ORIGINS || 'https://auction-bid-app.onre
   .map((s) => s.trim())
   .filter(Boolean);
 const ROOM_TTL_SEC = 60 * 60 * 24 * 30;
-const BODY_LIMIT = 256 * 1024;
+// A phone re-creating its room sends the whole snapshot (hundreds of lots with per-field stamps
+// run past 256 KB), so the JSON endpoints take up to 1.5 MB. Socket messages stay small.
+const BODY_LIMIT = 1536 * 1024;
 const WS_MSG_LIMIT = 256 * 1024;
 const MAX_OPS = 200;
 const MAX_DEVICES = 2;
@@ -402,10 +404,26 @@ async function loadRoom(code) {
   return null;
 }
 
+const TOMBSTONE_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1000;
+function pruneTombstones(r) {
+  const tomb = r && r.snap && r.snap.tombstones;
+  if (!tomb) return;
+  const cut = Date.now() - TOMBSTONE_MAX_AGE_MS;
+  for (const k of ['lots', 'plan']) {
+    const m = tomb[k];
+    if (!m || typeof m !== 'object') continue;
+    for (const id of Object.keys(m)) {
+      const ts = Number(m[id]);
+      if (Number.isFinite(ts) && ts < cut) delete m[id];
+    }
+  }
+}
+
 async function persistRoom(code) {
   if (!redis) return;
   const r = rooms.get(code);
   if (!r) return;
+  pruneTombstones(r);
   try {
     const payload = JSON.stringify({
       label: r.label,

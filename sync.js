@@ -13,6 +13,7 @@ let syncWs = null;
 let syncStatus = 'off'; // off | connecting | online | offline | syncing | pending
 let syncTimer = null;
 let syncPingTimer = null;
+let syncNeedJoin = false;
 let syncApplying = false;
 let syncSentCount = 0;
 let syncConnecting = false;
@@ -710,12 +711,13 @@ async function ensureRoomOnServer() {
         deviceToken: state.syncDeviceToken,
         snapshot: stampedSnapshot()
       }),
-      signal: AbortSignal.timeout(20000)
+      signal: AbortSignal.timeout(8000)
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
       applyMembership(data);
       persistSyncState();
+      syncNeedJoin = false;
       return true;
     }
     if (res.status === 429) {
@@ -734,12 +736,13 @@ async function ensureRoomOnServer() {
           label: state.syncLabel,
           snapshot: stampedSnapshot()
         }),
-        signal: AbortSignal.timeout(20000)
+        signal: AbortSignal.timeout(8000)
       });
       const rd = await cr.json().catch(() => ({}));
       if (cr.ok) {
         applyMembership(rd);
         persistSyncState();
+        syncNeedJoin = false;
         return true;
       }
     }
@@ -795,8 +798,16 @@ function connectSync() {
     syncWs = null;
   }
   if (syncConnecting) return;
-  syncConnecting = true;
   setSyncStatus(state.syncPending ? 'pending' : 'connecting');
+  /* v110: a phone that has already been in this room just logs in on the socket.
+     The big "join" upload (the whole snapshot) is only needed when the server does
+     not know this device (login refused) or the phone never connected; doing it on
+     every connect made the dot sit on yellow while a large upload crawled or stalled. */
+  if (state.syncLastOkAt && !syncNeedJoin && !state.syncPending) {
+    openSyncSocket();
+    return;
+  }
+  syncConnecting = true;
   ensureRoomOnServer().catch(() => false).finally(() => {
     syncConnecting = false;
     if (!state || !state.syncRoom || isLegacyRoom(state.syncRoom)) return;
@@ -931,6 +942,7 @@ function openSyncSocket() {
     if (ws._gone) return;
     if (state && state.syncRoom && !isLegacyRoom(state.syncRoom)) {
       setSyncStatus(state.syncPending ? 'pending' : 'offline');
+      if (ev && ev.code === 4403) syncNeedJoin = true; // server does not know us: join again
       if (ev && ev.code === 4408) {
         lastSyncError = '請稍後再試';
         scheduleReconnect(8000);
@@ -1106,7 +1118,7 @@ async function joinSyncRoom(code, opts) {
         snapshot: stampedSnapshot(),
         name: currentSyncName()
       }),
-      signal: AbortSignal.timeout(20000)
+      signal: AbortSignal.timeout(8000)
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 429) throw new Error(data.error || '請稍後再試');

@@ -6769,3 +6769,13 @@ html.is-dragging .item-pick {
 }
 .sync-dot.compact { min-width: 0; width: 28px; height: 28px; padding: 0; gap: 0; }
 .sync-dot.compact b { display: none; }
+
+
+/* ===== v110: a 台 that has run to its tail goes back to 等待開始 (large, one line) ===== */
+.cur-now-num.waiting {
+  font-size: clamp(18px, 5.6vw, 24px);
+  letter-spacing: 0;
+  color: var(--yellow);
+  font-weight: 900;
+}
+.cur-now-row.waiting { gap: 0; }

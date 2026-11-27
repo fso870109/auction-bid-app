@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v109';
+const APP_VERSION = 'v110';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -6631,38 +6631,75 @@ function progressSignature() {
   return (state.machines[half] || []).map((m) => m.id + ':' + currentOf(m.id, half)).join('|');
 }
 
-function tickAutoProgress() {
-  if (!state) return;
-  let hitCap = false;
+/* v110: 跑完歸零等待.
+   Auto-advance used to walk every 台 on its own to the tail of its segment (or to the
+   biggest 抄號 number) and then sit there "ended" for good, on both phones. Now a
+   台 that reaches its tail, or that has been auto-running for hours with nobody
+   touching it (the auction is over), goes back to an empty 等待開始 state: no number,
+   no start, nothing running. It runs again only when Frank starts it (＋, a typed
+   現在, or 跳到), and 跳到 works straight from the waiting state. */
+const AUTO_IDLE_MAX_MS = 4 * 60 * 60 * 1000;
+
+function resetMachineToWaiting(half, machineId) {
+  if (!state.currentNumbers) state.currentNumbers = {};
+  if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
+  state.currentNumbers[half][machineId] = null;
+  writeAnchor(machineId, half, null);
+  if (!state.seriesPath) state.seriesPath = {};
+  if (!state.seriesPath[half]) state.seriesPath[half] = {};
+  state.seriesPath[half][machineId] = { segs: [], ts: nowDate().getTime() };
+}
+
+function progressFinishReason(machineId, half) {
+  const a = getAnchor(machineId, half);
+  if (!a || a.cleared || a.number == null) return '';
+  if (a.ended) return 'end';
+  if (!autoAdvanceOn() || a.paused || a.seeded || a.at == null) return '';
+  if (isStaleProgressAt(a.at, state && state.day)) return '';
+  const elapsed = nowDate().getTime() - a.at;
+  if (elapsed > AUTO_IDLE_MAX_MS) return 'idle';
+  // Nothing can have walked to a tail before at least one step has passed.
+  const rate = lotsPerMin();
+  if (!(rate > 0) || Math.floor((Math.max(0, elapsed) * rate) / 60000) < 1) return '';
+  const cur = currentOf(machineId, half);
+  if (cur == null) return '';
+  // Only a run that walked there by itself is "finished". Someone who tapped ＋ onto the
+  // last number is still standing on it, so leave that for the next ＋ / 跳到 (or the idle check).
+  if (cur !== a.number && seriesAtEnd(machineId, half, cur)) return 'end';
+  const cap = progressCap(machineId, half);
+  const ser = seriesOf(a.number, half);
+  if (!ser && cap != null && a.number < cap && cur >= cap) return 'end';
+  return '';
+}
+
+/* Returns the 台 that were sent back to waiting. */
+function settleProgress(opts) {
+  opts = opts || {};
+  if (!state || !state.machines || (typeof isSetupNeeded === 'function' && isSetupNeeded())) return [];
+  const done = [];
   for (const half of HALVES) {
-    if (!state.currentNumbers[half]) state.currentNumbers[half] = {};
     for (const m of state.machines[half] || []) {
-      if (!isAutoRunning(m.id, half)) continue;
-      const cur = currentOf(m.id, half);
-      const a = getAnchor(m.id, half);
-      if (seriesAtEnd(m.id, half, cur) && a && !a.ended) {
-        state.currentNumbers[half][m.id] = cur;
-        writeAnchor(m.id, half, { number: cur, at: nowDate().getTime(), paused: true, ended: true });
-        hitCap = true;
-        continue;
-      }
-      const cap = progressCap(m.id, half);
-      const ser = seriesOf(a && a.number, half);
-      // Only auto-stop at 到尾 when this run started at or below the list/range cap.
-      if (!ser && cap != null && a && a.number != null && a.number <= cap && cur != null && cur >= cap) {
-        const rate = lotsPerMin();
-        const ms = rate > 0 ? Math.ceil(((cap - a.number) * 60000) / rate) : 0;
-        const reachedAt = (a.at != null ? a.at : nowDate().getTime()) + Math.max(0, ms);
-        state.currentNumbers[half][m.id] = cap;
-        writeAnchor(m.id, half, { number: cap, at: reachedAt, paused: true, ended: true });
-        hitCap = true;
-      }
+      const why = progressFinishReason(m.id, half);
+      if (!why) continue;
+      const number = currentOf(m.id, half);
+      resetMachineToWaiting(half, m.id);
+      done.push({ half, id: m.id, number, why });
     }
   }
-  if (hitCap) {
+  if (done.length) {
     saveState();
     syncProgressTimer();
+    if (!opts.silent) {
+      const names = done.filter((d) => d.half === state.currentHalf).map((d) => columnTitleOf(d.id, d.half));
+      if (names.length) toast(names.join('、') + ' 跑完了，已歸零，等待開始', 4000);
+    }
   }
+  return done;
+}
+
+function tickAutoProgress() {
+  if (!state) return;
+  settleProgress();
   const sig = progressSignature();
   if (sig !== lastProgressSig) {
     lastProgressSig = sig;
@@ -8509,6 +8546,7 @@ function patchLiveMain(main, prev, next, grabColors) {
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
+  if (state && !planProgressLock) settleProgress({ silent: !!renderSettleSilent });
   if (!planProgressLock && state && !isSetupNeeded()) {
     planProgressLock = true;
     let dirty = false;
@@ -9036,6 +9074,7 @@ function refreshNoteHead() {
   render();
 }
 
+let renderSettleSilent = false;
 let liveParts = null; // structured copy of the last renderLive(), used to patch the DOM cell by cell
 let paintedLive = null; // liveParts that are currently on screen
 
@@ -9067,7 +9106,8 @@ function renderLive() {
       );
       const next = upcoming[0] || null;
       const title = columnTitle(m, half);
-      const curLabel = cur == null ? '—' : String(cur);
+      const waiting = cur == null;
+      const curLabel = waiting ? '等待開始' : String(cur);
       const ser = cur != null ? seriesOf(cur, half) : null;
       const startN = displayStartOf(m.id, half);
       const infoLabel = liveInfoLabel(startN);
@@ -9135,9 +9175,9 @@ function renderLive() {
         </div>`;
       const foot = `<div class="live-col-foot hand-${thumbHand()}" data-stop="1">
           <button type="button" class="live-cur hold-btn" data-act="edit-cur" data-hold="set-start" data-id="${m.id}" aria-label="輸入現在進度，長按設定這段起點">
-            <span class="cur-now-row">
-              <span class="cur-now-lbl">現在</span>
-              <span class="cur-now-num">${curLabel}</span>
+            <span class="cur-now-row${waiting ? ' waiting' : ''}">
+              ${waiting ? '' : '<span class="cur-now-lbl">現在</span>'}
+              <span class="cur-now-num${waiting ? ' waiting' : ''}">${curLabel}</span>
             </span>
             <span class="live-info-lbl${infoLabel ? '' : ' empty'}">${infoLabel ? escapeHtml(infoLabel) : ''}</span>
           </button>
@@ -11677,6 +11717,50 @@ if (typeof window !== 'undefined') {
   window.__undoPlanLast = undoPlanLast;
 }
 
+/* v110: keep only today and yesterday (by auction date) of 抄號 lots and 預計備註 rows.
+   Older ones are removed here and, through the normal sync diff, from the room too, so
+   the room snapshot stays small enough for the server (it used to be sent whole on every
+   connect and could go over the 256 KB limit). Today's data is never touched. */
+const KEEP_DATA_DAYS = 2;
+function purgeOldData() {
+  if (!state || (typeof isSetupNeeded === 'function' && isSetupNeeded())) return 0;
+  const today = todayStr();
+  const keepFrom = addDaysIso(today, -(KEEP_DATA_DAYS - 1));
+  const dayOf = (x) => String((x && x.day) || '');
+  const planDayOf = (p) => String((p && (p.forDay || p.createdOn)) || '');
+  const oldLot = (l) => { const d = dayOf(l); return !!d && d < keepFrom && d !== state.day; };
+  const oldPlan = (p) => { const d = planDayOf(p); return !!d && d < keepFrom && d !== state.day; };
+  let removed = 0;
+  const lots = state.lots || [];
+  if (lots.some(oldLot)) {
+    rememberBoughtLots(lots);
+    const kept = lots.filter((l) => !oldLot(l));
+    removed += lots.length - kept.length;
+    state.lots = kept;
+  }
+  const plans = state.planItems || [];
+  if (plans.some(oldPlan)) {
+    const kept = plans.filter((p) => !oldPlan(p));
+    removed += plans.length - kept.length;
+    state.planItems = kept;
+  }
+  // Delete markers older than the data window are no longer needed.
+  const tomb = state.syncTombstones;
+  if (tomb && typeof tomb === 'object') {
+    const cut = Date.now() - (KEEP_DATA_DAYS + 1) * 24 * 3600 * 1000;
+    for (const k of ['lots', 'plan']) {
+      const m = tomb[k];
+      if (!m || typeof m !== 'object') continue;
+      for (const id of Object.keys(m)) {
+        const ts = Number(m[id]);
+        if (Number.isFinite(ts) && ts < cut) { delete m[id]; removed += 1; }
+      }
+    }
+  }
+  if (removed) saveState();
+  return removed;
+}
+
 function init() {
   if (typeof window !== 'undefined' && window.__pendingAuctionNow) {
     setAuctionNow(window.__pendingAuctionNow);
@@ -11698,6 +11782,9 @@ function init() {
   applyFixedStartPrefills();
   cleanNewDayProgressIfNeeded();
   ensureAutoAnchors();
+  settleProgress({ silent: true });
+  purgeOldData();
+  setInterval(() => { try { if (purgeOldData()) render(); } catch { /* ignore */ } }, 30 * 60 * 1000);
   render();
   syncProgressTimer();
   syncWakeLock();
