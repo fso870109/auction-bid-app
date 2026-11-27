@@ -6793,3 +6793,10 @@ html.is-dragging .item-pick {
 .sync-diag b { text-align: right; word-break: break-all; }
 .sync-warn { margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; background: #3a1414; color: #ffb0b0; font-size: 16px; font-weight: 700; line-height: 1.4; }
 .lot-by { font-size: 13px; font-weight: 700; color: #8fc7ff; margin-left: 4px; white-space: nowrap; }
+
+/* v113: big version + 檢查更新 at the top of 設定 */
+.version-block { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.version-big { font-size: 26px; font-weight: 800; text-align: center; letter-spacing: 1px; color: #ffd400; }
+.version-new { margin: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ff8a8a; }
+.version-ok { margin: 0; text-align: center; font-size: 15px; color: var(--muted, #aaa); }
+.version-check-btn { width: 100%; min-height: 48px; font-size: 18px; }

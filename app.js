@@ -1,7 +1,9 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v112';
+const APP_VERSION = 'v113';
+var lastAutoUpdateCheck = 0;
+var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -8810,7 +8812,7 @@ function render() {
   if (shouldPageAnim && document.startViewTransition) {
     try {
       const vt = document.startViewTransition(paint);
-      if (vt && vt.finished) vt.finished.catch(() => {});
+      if (vt) ['finished', 'ready', 'updateCallbackDone'].forEach((k) => { if (vt[k] && vt[k].catch) vt[k].catch(() => {}); });
     } catch {
       paint();
       applyPageEnterFallback();
@@ -9365,6 +9367,11 @@ function renderSettings() {
     .join('');
 
   return `
+    <div class="setting-block version-block">
+      <div class="version-big">版本 ${escapeHtml(APP_VERSION)}</div>
+      ${updateInfo.latest && versionNumOf(updateInfo.latest) > versionNumOf(APP_VERSION) ? `<p class="version-new">有新版本 ${escapeHtml(updateInfo.latest)}，請按下面更新</p>` : (updateInfo.checkedAt ? `<p class="version-ok">已是最新版（${escapeHtml(updateInfo.checkedLabel)} 檢查）</p>` : '')}
+      <button type="button" class="btn version-check-btn" data-act="check-update">${updateInfo.busy ? '檢查中…' : '檢查更新'}</button>
+    </div>
     <div class="setting-block">
       <button type="button" class="btn primary" style="width:100%;margin-bottom:14px" data-act="settings">完成設定</button>
       <h2>我的承銷人代號</h2>
@@ -10323,7 +10330,11 @@ function onClick(e) {
       break;
     case 'settings':
       showSettings = !showSettings;
+      if (showSettings) checkForUpdate(false);
       render();
+      break;
+    case 'check-update':
+      checkForUpdate(true);
       break;
     case 'go-here':
       modal = null;
@@ -11678,6 +11689,76 @@ function pokeSWUpdate() {
   }
 }
 
+/* v113: iPhone home-screen apps keep running old files for a long time, and
+   「完全關掉重開」 does not always update them. Ask the server which version is out
+   (sw.js is tiny and always bumped with the app), and when it is newer, update the
+   worker, clear the old file cache and reload. */
+function versionNumOf(v) {
+  const m = /v(\d+)/.exec(String(v || ''));
+  return m ? Number(m[1]) : 0;
+}
+async function fetchLatestVersion() {
+  const res = await fetch('./sw.js?check=' + Date.now(), { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error('http ' + res.status);
+  const text = await res.text();
+  const m = /auction-bid-(v\d+)/.exec(text);
+  return m ? m[1] : '';
+}
+async function forceUpdateNow() {
+  toast('正在更新…', 2000);
+  try {
+    if (swRegistration) {
+      await swRegistration.update().catch(() => {});
+      const w = swRegistration.waiting || swRegistration.installing;
+      if (w) { try { w.postMessage({ type: 'skip-waiting' }); } catch { /* ignore */ } }
+    }
+  } catch { /* ignore */ }
+  try {
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch { /* ignore */ }
+  try { if (typeof writeStateNow === 'function') writeStateNow(); } catch { /* ignore */ }
+  sessionStorage.setItem('auction-bid-updated-toast', '1');
+  const url = location.pathname + '?u=' + Date.now() + location.hash;
+  setTimeout(() => location.replace(url), 400);
+}
+async function checkForUpdate(manual) {
+  if (updateInfo.busy) return;
+  if (!manual && Date.now() - lastAutoUpdateCheck < 60000) return;
+  lastAutoUpdateCheck = Date.now();
+  updateInfo.busy = !!manual;
+  if (manual) render();
+  try {
+    const latest = await fetchLatestVersion();
+    updateInfo.latest = latest;
+    updateInfo.checkedAt = Date.now();
+    const d = new Date();
+    updateInfo.checkedLabel = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    updateInfo.busy = false;
+    if (latest && versionNumOf(latest) > versionNumOf(APP_VERSION)) {
+      if (manual) { forceUpdateNow(); return; }
+      if (!isMidAction()) {
+        modal = modal || {
+          type: 'confirm',
+          title: '有新版本 ' + latest,
+          body: '這支手機還是 ' + APP_VERSION + '。按「更新」會重新載入，資料不會不見。',
+          ok: '更新',
+          cancel: '等一下',
+          onOk: () => { modal = null; forceUpdateNow(); }
+        };
+      }
+    } else if (manual) {
+      toast('已是最新版 ' + APP_VERSION, 2200);
+    }
+  } catch {
+    updateInfo.busy = false;
+    if (manual) toast('連不到伺服器，稍後再試');
+  }
+  render();
+}
+
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   if (sessionStorage.getItem('auction-bid-updated-toast') === '1') {
@@ -11700,6 +11781,9 @@ function registerSW() {
       pokeSWUpdate();
     })
     .catch(() => {});
+  setTimeout(() => checkForUpdate(false), 4000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(false); });
+  window.addEventListener('pageshow', () => checkForUpdate(false));
 }
 
 if (typeof window !== 'undefined') {

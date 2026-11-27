@@ -387,6 +387,21 @@ function utf8Len(str) {
   try { return new Blob([str]).size; } catch { return str.length * 3; }
 }
 
+/* v113: which kind of phone this is, shown next to its version in 同步檢查. */
+function syncPlatform() {
+  try {
+    const ua = navigator.userAgent || '';
+    const iPadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    let os = /iPhone|iPod/.test(ua) ? 'iPhone' : (/iPad/.test(ua) || iPadOS) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows|Macintosh|Linux/.test(ua) ? '電腦' : '其他';
+    const m = /OS (\d+)[_.](\d+)/.exec(ua);
+    if ((os === 'iPhone' || os === 'iPad') && m) os += ' iOS ' + m[1] + '.' + m[2];
+    const a = /Android (\d+)/.exec(ua);
+    if (os === 'Android' && a) os += ' ' + a[1];
+    const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+    return os + (standalone ? ' · 主畫面App' : ' · 瀏覽器');
+  } catch { return ''; }
+}
+
 function syncAppVersion() {
   return typeof APP_VERSION === 'string' ? APP_VERSION : '';
 }
@@ -946,6 +961,7 @@ function openSyncSocket() {
         deviceId: state.syncDeviceId,
         token: state.syncDeviceToken,
         appVersion: syncAppVersion(),
+        platform: syncPlatform(),
         name: currentSyncName()
       }));
     } catch { /* ignore */ }
@@ -1393,10 +1409,10 @@ function renderSyncSettings() {
       ? `<button type="button" class="btn danger sync-kick-btn" data-act="sync-kick" data-v="${escapeHtml(d.deviceId)}">移除</button>`
       : '';
     const online = me ? syncSocketAlive() : !!d.online;
-    const ver = me ? syncAppVersion() : (d.appVersion || '');
+    const ver = (me ? syncAppVersion() : (d.appVersion || '')) + ((me ? syncPlatform() : (d.platform || '')) ? '・' + (me ? syncPlatform() : d.platform) : '');
     const old = !me && peerVersionTooOld(d);
     const seen = !online && d.lastSeen ? '，最後上線 ' + syncClock(d.lastSeen) : '';
-    return `<div class="sync-device${old ? ' old' : ''}"><span class="sync-dev-main"><span><i class="sync-dev-dot ${online ? 'on' : 'off'}"></i>${escapeHtml(name + role + (me ? '（這支）' : ''))}</span><small>${escapeHtml((online ? '在線' : '離線') + ' · ' + (ver || '版本不明') + seen)}${old ? '<b>　版本太舊，請重開</b>' : ''}</small></span>${kick}</div>`;
+    return `<div class="sync-device${old ? ' old' : ''}"><span class="sync-dev-main"><span><i class="sync-dev-dot ${online ? 'on' : 'off'}"></i>${escapeHtml(name + role + (me && !/這支/.test(name) ? '（這支）' : ''))}</span><small>${escapeHtml((online ? '在線' : '離線') + ' · ' + (ver || '版本不明') + seen)}${old ? '<b>　版本太舊，請重開</b>' : ''}</small></span>${kick}</div>`;
   }).join('');
   const pending = (state.syncJoinRequests || []).map((r) =>
     `<div class="sync-pending">
@@ -1486,7 +1502,7 @@ function renderSyncDiag() {
   ];
   const old = syncPeersTooOld();
   const warn = old.length
-    ? `<p class="sync-warn">${escapeHtml(old.map(devicePublicName).join('、'))} 的版本太舊，請把那支手機的 App 完全關掉再打開。</p>`
+    ? `<p class="sync-warn">${escapeHtml(old.map(devicePublicName).join('、'))} 的版本太舊。請在那支手機打開「設定」按「檢查更新」；iPhone 若還是舊版，刪掉主畫面圖示，用 Safari 打開連結重新加入主畫面。</p>`
     : '';
   return `<h3 class="sync-sub">同步檢查</h3>
     <div class="sync-diag">${rows.map(([k, v]) => `<div><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`).join('')}</div>${warn}`;

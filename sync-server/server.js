@@ -33,7 +33,7 @@ if (!process.env.SYNC_SECRET) {
   console.log('SYNC_SECRET not set; using a process-local key (restore tickets will not survive restarts)');
 }
 
-const SERVER_VERSION = 'v112';
+const SERVER_VERSION = 'v113';
 const rooms = new Map();
 let redis = null;
 
@@ -350,6 +350,7 @@ function publicDevices(room, me) {
       joinedAt: d.joinedAt || 0,
       lastSeen: d.lastSeen || 0,
       appVersion: typeof d.appVersion === 'string' ? d.appVersion.slice(0, 16) : '',
+      platform: typeof d.platform === 'string' ? d.platform.slice(0, 40) : '',
       online: deviceOnline(room, id)
     }));
 }
@@ -888,6 +889,7 @@ wss.on('connection', (ws, req) => {
       room.clients.add(ws);
       rec.lastSeen = Date.now();
       if (typeof msg.appVersion === 'string') rec.appVersion = msg.appVersion.slice(0, 16);
+      if (typeof msg.platform === 'string') rec.platform = msg.platform.slice(0, 40);
       if (typeof msg.name === 'string' && msg.name.trim()) rec.name = sanitizeName(msg.name);
       if (!rec.approved) {
         ws.authed = false;

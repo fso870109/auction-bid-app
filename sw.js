@@ -1,10 +1,11 @@
-const CACHE = 'auction-bid-v112';
+const CACHE = 'auction-bid-v113';
 const NETWORK_TIMEOUT_MS = 3000;
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './compat.js',
   './items-catalog.js',
   './sync-core.js',
   './qrcode.js',
@@ -26,6 +27,7 @@ const NETWORK_FIRST_PATHS = new Set([
   '/index.html',
   '/app.js',
   '/styles.css',
+  '/compat.js',
   '/items-catalog.js',
   '/sync-core.js',
   '/sync.js',
@@ -132,4 +134,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   event.respondWith(cacheThenNetwork(event.request));
+});
+
+// v113: the page can ask a waiting worker to take over now (檢查更新).
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'skip-waiting') self.skipWaiting();
 });
