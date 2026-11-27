@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v110';
+const APP_VERSION = 'v111';
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -4683,7 +4683,7 @@ function cycleLotStatus(id) {
   }
   lot.status = next;
   rememberBoughtLots(state.lots);
-  saveState();
+  if (!startColumnFromLot(lot)) saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`${label} ${lotLabel(lot)}`));
   buzz(24);
@@ -4697,7 +4697,7 @@ function markFlow(id) {
   const snap = snapshotLot(lot);
   lot.status = 'flow';
   lot.secondMarket = true;
-  saveState();
+  if (!startColumnFromLot(lot)) saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`流標・二市 ${lotLabel(lot)}`));
   buzz(28);
@@ -4751,7 +4751,7 @@ function markLost(id) {
   const snap = snapshotLot(lot);
   lot.status = 'lost';
   rememberBoughtLots(state.lots);
-  saveState();
+  if (!startColumnFromLot(lot)) saveState();
   checkAlerts();
   offerUndo(snap, withPlanToast(`沒標到 ${lotLabel(lot)}`));
   buzz(24);
@@ -6228,7 +6228,7 @@ function setProgress(machineId, next, half, opts) {
       writeAnchor(machineId, h, null);
     } else {
       n = clampProgress(n);
-      pathInfo = ensureSeriesPath(machineId, n, h, { prevCur });
+      pathInfo = ensureSeriesPath(machineId, n, h, { prevCur, start: opts.start });
       state.currentNumbers[h][machineId] = n;
       writeAnchor(machineId, h, {
         number: n,
@@ -6639,6 +6639,63 @@ function progressSignature() {
    no start, nothing running. It runs again only when Frank starts it (＋, a typed
    現在, or 跳到), and 跳到 works straight from the waiting state. */
 const AUTO_IDLE_MAX_MS = 4 * 60 * 60 * 1000;
+
+/* v111: a 台 in 等待開始 also starts when Frank marks 標到/沒標到 (or taps the
+   card) or opens 舉牌. Start at that lot's number, and keep the segment 起 if
+   the 台's ranges already have one (第二台 2500, 第三台 2000). Only a local
+   tap does this; a 標到 that arrives from the other phone does not, for the
+   same reason a remote ＋ only moves 現在 when the progress itself is synced. */
+function isColumnWaiting(machineId, half) {
+  return currentOf(machineId, half) == null;
+}
+
+function inferredSeriesStart(machineId, half, n) {
+  const ser = seriesOf(n, half);
+  if (!ser) return null;
+  const existing = typeof seriesStart === 'function' ? seriesStart(machineId, half, ser) : null;
+  if (existing != null) return existing;
+  const m = typeof machineById === 'function' ? machineById(machineId, half) : null;
+  for (const r of (m && m.ranges) || []) {
+    if (!r || r.start == null || r.start === '') continue;
+    const rs = seriesOf(r.start, half);
+    if (rs && rs.key === ser.key) return Number(r.start);
+  }
+  return null;
+}
+
+function startColumnFromLot(lot) {
+  if (!state || !lot || lot.machineId == null || lot.number == null || lot.number === '') return false;
+  const half = lot.half || state.currentHalf;
+  const mid = lot.machineId;
+  if (!isColumnWaiting(mid, half)) return false;
+  const n = clampProgress(lot.number);
+  if (n == null) return false;
+  const start = inferredSeriesStart(mid, half, n);
+  setProgress(mid, n, half, { silentAdopt: true, start: start != null ? start : undefined });
+  return true;
+}
+
+function lotForPaddleStart() {
+  if (!state) return null;
+  const half = state.currentHalf;
+  const nexts = [];
+  for (const m of state.machines[half] || []) {
+    if (!isColumnWaiting(m.id, half)) continue;
+    const lots = (typeof columnLots === 'function' ? columnLots(m.id, half) : []).filter(
+      (l) => l && l.status === 'pending' && !l.secondMarket && l.number != null
+    );
+    if (lots[0]) nexts.push(lots[0]);
+  }
+  const musts = nexts.filter((l) => (typeof lotPriority === 'function' ? lotPriority(l) : l.priority) === 'must');
+  if (musts.length === 1) return musts[0];
+  if (musts.length === 0 && nexts.length === 1) return nexts[0];
+  return null;
+}
+
+function maybeStartColumnFromPaddle() {
+  const lot = lotForPaddleStart();
+  return lot ? startColumnFromLot(lot) : false;
+}
 
 function resetMachineToWaiting(half, machineId) {
   if (!state.currentNumbers) state.currentNumbers = {};
@@ -7121,7 +7178,7 @@ function setLotStatus(id, status) {
     if (status === 'won' || status === 'moved') lot.secondMarket = false;
   }
   rememberBoughtLots(state.lots);
-  saveState();
+  if (!startColumnFromLot(lot)) saveState();
   checkAlerts();
   const noteMsg = latestPlanToast();
   if (noteMsg) toast(noteMsg);
@@ -7267,6 +7324,7 @@ async function enterPaddle() {
     closePlan(false, reusedPlanHist ? { skipHistory: true } : undefined);
   }
   paddleOpen = true;
+  maybeStartColumnFromPaddle();
   resetPaddleTaps();
   try {
     if (reusedPlanHist) history.replaceState({ auctionPaddle: true }, '');
