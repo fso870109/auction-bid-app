@@ -6937,3 +6937,60 @@ html.is-dragging .item-pick {
   text-align: center;
 }
 .key.rg-key-save { background: #ffb000; color: #111; font-weight: 900; }
+
+/* v118 一鍵改號 — inside the 號碼防呆 card / sheet only. */
+.rg-autos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.rg-autos.multi { flex-direction: row; flex-wrap: wrap; }
+.rg-auto {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 66px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 3px solid #b6ffcb;
+  background: #1fa64a;
+  color: #fff;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 0 14px rgba(31, 166, 74, 0.55);
+}
+.rg-auto:active { filter: brightness(1.2); }
+.rg-auto-lbl { font-size: clamp(17px, 6vw, 21px); }
+.rg-auto-num { font-size: clamp(28px, 10vw, 36px); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
+.rg-auto-where { font-size: 14px; font-weight: 800; color: #dfffe8; }
+.rg-auto.multi {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 2px;
+}
+.rg-auto.multi .rg-auto-lbl { font-size: 14px; }
+.rg-auto.multi .rg-auto-num { font-size: clamp(20px, 7vw, 28px); }
+.rg-auto.multi .rg-auto-where { font-size: 12px; }
+.rg-auto-dup {
+  width: 100%;
+  padding: 8px;
+  border-radius: 10px;
+  border: 2px dashed #ffb000;
+  color: #ffd400;
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+@media (max-height: 600px) {
+  .rg-card .rg-typed { font-size: 42px; }
+  .rg-card .rg-title { font-size: 20px; margin-top: 6px; }
+  .rg-card .rg-typed-lbl { margin-top: 4px; font-size: 15px; }
+  .rg-card .rg-hint { display: none; }
+  .rg-card .rg-head { padding: 5px 6px; font-size: 20px; }
+}
+.rg-auto-where { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }

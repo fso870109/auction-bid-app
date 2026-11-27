@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v117';
+const APP_VERSION = 'v118';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -4182,6 +4182,7 @@ function buildRangeGuardModel() {
     const digits = new Set();
     const all = new Set();
     const groups = {};
+    const groupIds = {};
     for (const m of ms) {
       if (!(m.ranges || []).length) continue;
       for (const r of m.ranges) if (r && r.start != null) digits.add(numLead(r.start).digits);
@@ -4191,6 +4192,7 @@ function buildRangeGuardModel() {
       if (!g) continue;
       const set = groups[g] || (groups[g] = new Set());
       for (const k of leads) set.add(k);
+      (groupIds[g] || (groupIds[g] = [])).push(m.id);
     }
     /* 台 renamed without the 類別 word: fall back to the default 台 of that 類別
        (same id), still using this phone's own 號段 for it. */
@@ -4200,8 +4202,9 @@ function buildRangeGuardModel() {
       const m = ms.find((x) => x.id === dm.id);
       if (!m || machineGroupTag(m) || !(m.ranges || []).length) continue;
       groups[g] = rangeLeads(m.ranges);
+      groupIds[g] = [m.id];
     }
-    model[h] = { digits, all, groups };
+    model[h] = { digits, all, groups, groupIds };
   }
   return model;
 }
@@ -4220,6 +4223,10 @@ function leadsText(allowed) {
   const leads = [...new Set([...allowed].map((k) => k.split(':')[1]))].sort();
   const digits = [...new Set([...allowed].map((k) => parseInt(k.split(':')[0], 10)))];
   const pad = digits.length === 1 ? Math.max(0, digits[0] - 1) : 3;
+  const nums = leads.map((d) => parseInt(d, 10));
+  if (nums.length >= 3 && nums.every((n, i) => i === 0 || n === nums[i - 1] + 1)) {
+    return leads[0] + '0'.repeat(pad) + '～' + leads[leads.length - 1] + '0'.repeat(pad);
+  }
   return leads.map((d) => d + '0'.repeat(pad)).join('、');
 }
 
@@ -4241,14 +4248,14 @@ function lotRangeIssue(lot) {
   if (allowed) {
     if (allowed.has(key)) return null;
     const lead = leadsText(allowed);
-    return { title: `${g}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭`, group: g };
+    return { title: `${g}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭`, group: g, allowed, machineIds: hm.groups[g] ? (hm.groupIds[g] || []) : null };
   }
   const m = lot.machineId ? machineById(lot.machineId, lot.half) : null;
   if (m && (m.ranges || []).length) {
     const leads = rangeLeads(m.ranges);
     if (leads.size && !leads.has(key)) {
       const lead = leadsText(leads);
-      return { title: `${m.name}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭` };
+      return { title: `${m.name}通常是 ${lead} 開頭`, expect: `你打的是 ${typed}`, typed, want: `${lead} 開頭`, allowed: leads, machineIds: [m.id] };
     }
   }
   return null;
@@ -4285,7 +4292,8 @@ function confirmLotRange(id) {
 function openRangeFix(id) {
   const lot = state.lots.find((l) => l.id === id);
   if (!lot) { modal = null; render(); return; }
-  modal = { type: 'range-fix', id, value: '' };
+  const sug = rangeFixCandidates(lot, lotRangeIssue(lot)).find((c) => !c.dup);
+  modal = { type: 'range-fix', id, value: sug ? String(sug.num) : '', prefilled: !!sug };
   dismissActionToast();
   buzz(12);
   render();
@@ -4294,15 +4302,62 @@ function openRangeFix(id) {
 function typeRangeFixDigit(d) {
   if (!modal || modal.type !== 'range-fix') return;
   let v = String(modal.value || '');
-  if (v.length >= 5) v = '';
+  if (modal.prefilled || v.length >= 5) v = '';
+  modal.prefilled = false;
   modal.value = (v + String(d)).replace(/\D/g, '').slice(0, 5);
   render();
 }
 
 function backspaceRangeFix() {
   if (!modal || modal.type !== 'range-fix') return;
+  modal.prefilled = false;
   modal.value = String(modal.value || '').slice(0, -1);
   render();
+}
+
+/* v118: 台 for a corrected number — prefer the item's 類別 台, then keep the current 台. */
+function routeFixedNumber(lot, num, preferIds) {
+  const hits = machinesMatching(num, lot.half);
+  if (!hits.length) return lot.machineId;
+  const pref = (preferIds && preferIds.length) ? hits.filter((m) => preferIds.includes(m.id)) : [];
+  const pool = pref.length ? pref : hits;
+  if (pool.some((m) => m.id === lot.machineId)) return lot.machineId;
+  return pool[0].id;
+}
+
+/* v118: one-tap fixes — swap the wrong leading digit for the expected one(s),
+   keep the other digits, keep only numbers inside a configured 號段 of the right 台.
+   Wrong digit count → no guess. Up to 3, the busiest 號段 of today first. */
+function rangeFixCandidates(lot, issue) {
+  if (!lot || !issue || !issue.allowed || !issue.allowed.size) return [];
+  const typed = String(lot.number);
+  const out = [];
+  const leads = [...new Set([...issue.allowed]
+    .filter((k) => parseInt(k.split(':')[0], 10) === typed.length)
+    .map((k) => k.split(':')[1]))];
+  const today = (state.lots || []).filter((l) => l.day === lot.day && l.half === lot.half && l.id !== lot.id);
+  const grp = issue.group || '';
+  for (const d of leads) {
+    if (d === typed.charAt(0)) continue;
+    const num = parseInt(d + typed.slice(1), 10);
+    if (!Number.isFinite(num)) continue;
+    const hits = machinesMatching(num, lot.half);
+    if (!hits.length) continue;
+    const dup = today.find((l) => l.number === num) || (state.lots || []).find((l) => l.id !== lot.id && l.day === lot.day && l.number === num);
+    const lead = d;
+    const busy = today.filter((l) => String(l.number).charAt(0) === lead && String(l.number).length === typed.length
+      && (!grp || (l.item && cropGroupOfName(l.item) === grp))).length;
+    out.push({ num, dup: dup || null, busy, mid: routeFixedNumber(lot, num, issue.machineIds) });
+  }
+  out.sort((a, b) => (a.dup ? 1 : 0) - (b.dup ? 1 : 0) || b.busy - a.busy || a.num - b.num);
+  return out.slice(0, 3);
+}
+
+function applyRangeAuto(id, num) {
+  const lot = state.lots.find((l) => l.id === id);
+  if (!lot) { modal = null; render(); return; }
+  modal = { type: 'range-fix', id, value: String(num) };
+  applyRangeFix();
 }
 
 function applyRangeFix() {
@@ -4322,16 +4377,14 @@ function applyRangeFix() {
     return;
   }
   const prev = { id: lot.id, number: lot.number, machineId: lot.machineId, rangeOk: !!lot.rangeOk };
-  const hits = machinesMatching(num, lot.half);
-  let mid = lot.machineId;
-  if (hits.length === 1) mid = hits[0].id;
-  else if (hits.length > 1 && !hits.some((m) => m.id === lot.machineId)) mid = hits[0].id;
+  const oldIssue = lotRangeIssue(lot);
+  const mid = routeFixedNumber(lot, num, oldIssue && oldIssue.machineIds);
   lot.number = num;
   lot.machineId = mid;
   lot.rangeOk = false;
   modal = null;
   saveState();
-  offerUndo({ kind: 'renumber', prev }, `已改成 ${num}`);
+  offerUndo({ kind: 'renumber', prev }, `已改成 ${num}　${machineNameOf(lot)}`);
   buzz(26);
   if (!maybeRangeAlert(lot)) render();
   else render();
@@ -4343,11 +4396,26 @@ function rangeTypedHtml(issue) {
   return `<span class="rg-bad">${t.charAt(0)}</span>${t.slice(1)}`;
 }
 
+function rangeAutoHtml(lot, issue) {
+  const cands = rangeFixCandidates(lot, issue);
+  if (!cands.length) return '';
+  const btns = cands.map((c) => {
+    const to = machineById(c.mid, lot.half);
+    const where = to ? (cands.length > 1 ? String(to.name).split('・')[0] : to.name) : '';
+    if (c.dup) {
+      return `<div class="rg-auto-dup">${escapeHtml(String(c.num))} 已經抄過（${escapeHtml(machineNameOf(c.dup))}），不能改成這號</div>`;
+    }
+    return `<button type="button" class="rg-auto${cands.length > 1 ? ' multi' : ''}" data-act="rg-auto" data-id="${escapeHtml(lot.id)}" data-v="${c.num}"><span class="rg-auto-lbl">改成</span><span class="rg-auto-num">${escapeHtml(String(c.num))}</span>${where ? `<span class="rg-auto-where">${escapeHtml(where)}</span>` : ''}</button>`;
+  }).join('');
+  return `<div class="rg-autos${cands.length > 1 ? ' multi' : ''}">${btns}</div>`;
+}
+
 function rangeWarnSheetHtml(lot) {
   const issue = lotRangeWarn(lot);
   if (!issue) return '';
   return `<div class="rg-sheet-warn" role="alert">
       <div class="rg-sheet-title">⚠ 號碼可能打錯：${escapeHtml(issue.title)}，你打的是 ${escapeHtml(issue.typed)}</div>
+      ${rangeAutoHtml(lot, issue)}
       <div class="rg-acts"><button type="button" class="rg-btn fix" data-act="rg-fix" data-id="${escapeHtml(lot.id)}">改號</button><button type="button" class="rg-btn ok" data-act="rg-ok" data-id="${escapeHtml(lot.id)}">確定沒錯</button></div>
     </div>`;
 }
@@ -4371,7 +4439,7 @@ function rangeModalHtml() {
       <div class="sheet subcode-sheet hand-${thumbHand()}" data-stop="1">
         <h3>改號：原本 ${escapeHtml(String(lot.number))}</h3>
         <p>${escapeHtml(meta)}</p>
-        ${issue ? `<div class="rg-fix-hint">${escapeHtml(issue.title)}</div>` : ''}
+        ${issue ? `<div class="rg-fix-hint">${escapeHtml(issue.title)}${modal.prefilled ? '<br>已幫你改好開頭，對的話按「存」' : ''}</div>` : ''}
         <div class="lot-display"><div class="num${val ? '' : ' empty'}">${val ? escapeHtml(val) : '----'}</div></div>
         <div class="keypad">${keypad}</div>
         <div class="sheet-actions"><button type="button" class="btn" data-act="modal-cancel">取消</button></div>
@@ -4387,6 +4455,7 @@ function rangeModalHtml() {
         <div class="rg-typed-lbl">你打的是</div>
         <div class="rg-typed">${rangeTypedHtml(issue)}</div>
         ${meta ? `<div class="rg-meta">${escapeHtml(meta)}</div>` : ''}
+        ${rangeAutoHtml(lot, issue)}
         <div class="rg-acts"><button type="button" class="rg-btn fix" data-act="rg-fix" data-id="${escapeHtml(lot.id)}">改號</button><button type="button" class="rg-btn ok" data-act="rg-ok" data-id="${escapeHtml(lot.id)}">確定沒錯</button></div>
         <div class="rg-hint">號碼已先存好。沒確認前，格子上會一直顯示紅色「號?」</div>
       </div>
@@ -10702,6 +10771,9 @@ function onClick(e) {
       buzz([180, 80, 180]);
       buzzHoldUntil = Date.now() + 500;
       render();
+      break;
+    case 'rg-auto':
+      applyRangeAuto(btn.dataset.id, parseInt(v, 10));
       break;
     case 'rg-ok':
       confirmLotRange(btn.dataset.id);
