@@ -1,0 +1,33 @@
+# Keep the free Render sync server (auction-bid-sync) awake for early-morning auctions.
+# Runs every 10 minutes 00:00–05:50 Asia/Taipei (= 16:00–21:50 UTC; Taipei is UTC+8, no DST).
+# Render free web services sleep after 15 minutes idle, so a 10-minute ping keeps it up until ~06:05.
+# GET /health only returns {"ok":true,...}; it reads/writes nothing.
+# To turn off: delete this file, or GitHub → Actions → "Keep sync server awake" → ⋯ → Disable workflow.
+name: Keep sync server awake
+
+on:
+  schedule:
+    - cron: '*/10 16-21 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: keep-sync-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /health
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o body.txt -w '%{http_code}' --max-time 90 "https://auction-bid-sync.onrender.com/health?src=gh-keepalive" || echo 000)
+            echo "try $i: HTTP $code $(cat body.txt 2>/dev/null)"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "sync server did not answer 200"
+          exit 1
