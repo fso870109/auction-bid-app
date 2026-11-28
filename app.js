@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v118';
+const APP_VERSION = 'v119';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -249,7 +249,9 @@ const GRID_PROMOTIONS = [
   { l: '甜豆', cropN: '豌豆', varN: '豌豆-甜豌豆' },
   { l: '紅花', cropN: '豌豆', varN: '豌豆-紅花' },
   { l: '荷蘭豆', cropN: '豌豆', varN: '豌豆-白花' },
-  { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' }
+  { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' },
+  /* v119: 青花筍 (桃農 FR2, 青花苔 branch) was search-only; Frank needs its own button. */
+  { l: '青花筍', cropN: '青花苔', varN: '青花苔-青花筍' }
 ];
 
 /* Parents whose everyday varieties are already top-level buttons. Hidden
