@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v123';
+const APP_VERSION = 'v124';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -2197,12 +2197,12 @@ function planAssignSignature() {
   for (const l of state.lots || []) {
     if (!l || !l.item || !(l.status === 'won' || l.status === 'moved')) continue;
     if (l.day !== today && l.day !== day) continue;
-    parts.push(l.id, l.item, l.size || '', l.qty == null ? '' : l.qty);
+    parts.push(l.id, l.item, l.size || '', l.qty == null ? '' : l.qty, l.priority || '');
   }
   parts.push('|');
   for (const p of state.planItems || []) {
     if (!p) continue;
-    parts.push(p.id, p.text, p.qty == null ? '' : p.qty, p.forDay || '', p.done ? 1 : 0, p.doneOn || '');
+    parts.push(p.id, p.text, p.qty == null ? '' : p.qty, p.forDay || '', p.done ? 1 : 0, p.doneOn || '', p.purpose || '');
   }
   return parts.join('\u0002');
 }
@@ -2229,6 +2229,11 @@ function assignWonToPlans() {
         const needB = Math.max(0, planQtyOf(best) - have(best.id));
         const needP = Math.max(0, planQtyOf(p) - have(p.id));
         if (needP > 0 && needB === 0) best = p;
+        else if (needP > 0 && needB > 0) {
+          // v124: same item in both 交貨 and 零賣: a 交貨 lot (skip) fills the 交貨 entry first.
+          const want = lotPriority(lot) === 'skip' ? 'delivery' : 'retail';
+          if (planPurposeOf(p) === want && planPurposeOf(best) !== want) best = p;
+        }
       }
     }
     if (best && bestScore > 0) map.get(best.id).push(lot.id);
@@ -2585,18 +2590,22 @@ function parsePlanDraft(text) {
   return { text: raw, qty: 1, explicit: false };
 }
 
-function findPlanOnTarget(text, which) {
+/* v124: an entry is the same item AND the same 交貨／零賣. The picker passes the
+   switch's purpose, so 地瓜葉 can sit in both groups as two separate entries. */
+function findPlanOnTarget(text, which, purpose) {
   const value = String(text || '').trim();
   if (!value) return null;
   const today = todayStr();
   const target = which || planAddTarget || defaultPlanAddTarget();
   return (state.planItems || []).find((p) => (
     !p.done && p.text === value && (target === 'today' ? p.forDay <= today : p.forDay > today)
+    && (!purpose || planPurposeOf(p) === purpose)
   )) || null;
 }
 
 function planQtyOnTarget(text, which) {
-  const item = findPlanOnTarget(text, which);
+  // Picker badges count the entry the next tap would add to (current switch purpose).
+  const item = findPlanOnTarget(text, which, planAddPurpose());
   return item ? planQtyOf(item) : 0;
 }
 
@@ -2619,7 +2628,7 @@ function addOrBumpPlanItem(text, which, opts) {
   const target = which || planAddTarget || defaultPlanAddTarget();
   const forDay = planTargetDay(target);
   if (!Array.isArray(state.planItems)) state.planItems = [];
-  const existing = findPlanOnTarget(value, target);
+  const existing = findPlanOnTarget(value, target, planAddPurpose());
   const snap = snapshotPlanItems();
   if (existing) {
     if (parsed.explicit) {
