@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v119';
+const APP_VERSION = 'v120';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -67,7 +67,10 @@ const ITEM_CANON_V85 = {
   '碗豆-豌豆苗': '豌豆苗',
   '碗豆 豌豆苗': '豌豆苗',
   '豌豆-進口豌豆苗': '進口豌豆苗',
-  '碗豆-進口豌豆苗': '進口豌豆苗'
+  '碗豆-進口豌豆苗': '進口豌豆苗',
+  /* v120: 青花筍 is its own 上半場水菜 item now. */
+  '青花苔-青花筍': '青花筍',
+  '青花苔 青花筍': '青花筍'
 };
 
 function canonicalItemName(name) {
@@ -249,9 +252,7 @@ const GRID_PROMOTIONS = [
   { l: '甜豆', cropN: '豌豆', varN: '豌豆-甜豌豆' },
   { l: '紅花', cropN: '豌豆', varN: '豌豆-紅花' },
   { l: '荷蘭豆', cropN: '豌豆', varN: '豌豆-白花' },
-  { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' },
-  /* v119: 青花筍 (桃農 FR2, 青花苔 branch) was search-only; Frank needs its own button. */
-  { l: '青花筍', cropN: '青花苔', varN: '青花苔-青花筍' }
+  { l: '芥藍芽', cropN: '芥藍菜', varN: '芥藍菜-芥藍芽' }
 ];
 
 /* Parents whose everyday varieties are already top-level buttons. Hidden
@@ -1418,6 +1419,7 @@ const GOURD_PEEL_CROP = {
   '甘藷': 'copper',
   '馬鈴薯': 'tan',
   '青花苔': 'darkGreen',
+  '青花筍': 'darkGreen',
   '球莖甘藍': 'paleGreen',
   '結頭菜': 'paleGreen',
   '大蒜': 'white',
@@ -3850,6 +3852,7 @@ function defaultState() {
     itemsMigratedV85: true,
     itemsMigratedV86: true,
     itemsMigratedV108: true,
+    itemsMigratedV120: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
     lotsPerMin: DEFAULT_LOTS_PER_MIN,
     skipAutoDay: '',
@@ -3978,6 +3981,9 @@ function loadState() {
     }
     if (!saved.itemsMigratedV108) {
       migrateItemsV108(merged);
+    }
+    if (!saved.itemsMigratedV120) {
+      migrateItemsV120(merged);
     }
     for (const lot of merged.lots) {
       if (!['must', 'watch', 'skip'].includes(lot.priority)) lot.priority = 'watch';
@@ -5610,6 +5616,21 @@ function renameDisplayTextV108(text) {
     return next;
   }
   return raw;
+}
+
+/* v120: 青花筍 + 豌豆苗 belong to 上半場水菜 (Frank 11/28). Move usage counts,
+   custom entries and saved button order out of 下半場. */
+const LEAFY_V120_NAMES = new Set(['青花筍', '青花苔-青花筍', '豌豆苗', '進口豌豆苗', '豌豆苗-進口', '碗豆苗', '豌豆-豌豆苗']);
+function migrateItemsV120(merged) {
+  moveCustomsAndCounts(merged, 'afternoon', 'morning', LEAFY_V120_NAMES);
+  const order = merged.itemOrderByHalf && merged.itemOrderByHalf.afternoon;
+  if (order && typeof order === 'object') {
+    for (const group of Object.keys(order)) {
+      if (!Array.isArray(order[group])) continue;
+      order[group] = order[group].filter((n) => !LEAFY_V120_NAMES.has(String(n || '').trim()));
+    }
+  }
+  merged.itemsMigratedV120 = true;
 }
 
 function migrateItemsV108(merged) {
