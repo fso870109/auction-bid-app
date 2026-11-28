@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v122';
+const APP_VERSION = 'v123';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -2661,7 +2661,7 @@ function addOrBumpPlanItem(text, which, opts) {
     qty,
     doneBy: '',
     lockCount: 0,
-    purpose: 'retail'
+    purpose: planAddPurpose()
   });
   saveState();
   if (parsed.explicit) {
@@ -2673,6 +2673,12 @@ function addOrBumpPlanItem(text, which, opts) {
   render();
   revealPlanRow(value);
   return true;
+}
+
+/* v123: 選品項 交貨／零賣 switch. New plan items get this purpose. Kept per phone
+   (state.planAddPurpose is not a sync key), default 零賣 like before. */
+function planAddPurpose() {
+  return state && state.planAddPurpose === 'delivery' ? 'delivery' : 'retail';
 }
 
 function revealPlanRow(text) {
@@ -3213,6 +3219,16 @@ function renderPlanScreen() {
       ${qtyCtrl}
     </div>`;
   };
+  /* v123: inside each section, 交貨 first then 零賣, each under its own heading.
+     Only the display is grouped; planItems order and data stay as they are. */
+  const purposeGroups = (list, kind) => ['delivery', 'retail'].map((pur) => {
+    const sub = list.filter((p) => planPurposeOf(p) === pur);
+    const label = pur === 'delivery' ? '交貨' : '零賣';
+    return `<div class="plan-group ${pur}">
+        <h3 class="plan-group-head ${pur}">${label}${sub.length ? `<span>${sub.length}</span>` : ''}</h3>
+        ${sub.length ? sub.map((p) => row(p, kind)).join('') : '<div class="plan-group-empty">沒有項目</div>'}
+      </div>`;
+  }).join('');
   const section = (title, hint, list, kind) => {
     const target = kind === 'today' || kind === 'tomorrow';
     const on = target && planAddTarget === kind ? ' on' : '';
@@ -3226,7 +3242,7 @@ function renderPlanScreen() {
         ${clearBtn}
       </div>
       ${hint ? `<p class="plan-hint">${hint}</p>` : ''}
-      ${list.length ? list.map((p) => row(p, kind)).join('') : '<div class="plan-empty">還沒有項目</div>'}
+      ${list.length ? purposeGroups(list, kind) : '<div class="plan-empty">還沒有項目</div>'}
     </section>`;
   };
   const suggest = planSuggestList(planDraft);
@@ -3240,6 +3256,10 @@ function renderPlanScreen() {
         <span class="plan-target-lbl">加到</span>
         <button type="button" class="${todayOn}" data-act="plan-target" data-v="today">今日</button>
         <button type="button" class="${tomoOn}" data-act="plan-target" data-v="tomorrow">明日</button>
+      </div>
+      <div class="plan-addpur-seg" role="group" aria-label="新加的品項是交貨還是零賣">
+        <button type="button" class="delivery${planAddPurpose() === 'delivery' ? ' on' : ''}" data-act="plan-add-purpose" data-v="delivery" aria-pressed="${planAddPurpose() === 'delivery'}">交貨</button>
+        <button type="button" class="retail${planAddPurpose() === 'retail' ? ' on' : ''}" data-act="plan-add-purpose" data-v="retail" aria-pressed="${planAddPurpose() === 'retail'}">零賣</button>
       </div>
     </div>`;
   const gridBox = planGridOpen ? renderPlanGrid() : '';
@@ -10671,6 +10691,12 @@ function onClick(e) {
       break;
     case 'plan-target':
       planAddTarget = v === 'today' ? 'today' : 'tomorrow';
+      render();
+      break;
+    case 'plan-add-purpose':
+      state.planAddPurpose = v === 'delivery' ? 'delivery' : 'retail';
+      saveState();
+      buzz(12);
       render();
       break;
     case 'toggle-plan-picks':
