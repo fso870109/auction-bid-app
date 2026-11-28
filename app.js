@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v120';
+const APP_VERSION = 'v121';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
@@ -4636,9 +4636,38 @@ function isPassed(lot, cur) {
   return false;
 }
 
-function lotsPerMin() {
+/* v121: per-類別 auction speed (號/分鐘). A 類別 listed here uses its own rate for
+   自動前跳 and the「約N分」ETA; every other 台 uses the 拍賣速度 setting (預設 4).
+   To set another 類別, add it here, e.g. morning: { '大宗': 4.5, '水菜': 5 }.
+   類別 comes from the 台 name (machineGroupTag), or the default 台 with the same id
+   when the 台 was renamed without the 類別 word. */
+const CATEGORY_LOTS_PER_MIN = {
+  afternoon: { '瓜果': 5.3 }
+};
+
+function machineRateTag(machineId, half) {
+  if (!machineId || !half) return '';
+  const m = (typeof machineById === 'function') ? machineById(machineId, half) : null;
+  const tag = machineGroupTag(m);
+  if (tag) return tag;
+  const def = (DEFAULT_MACHINES[half] || []).find((x) => x.id === machineId);
+  return machineGroupTag(def);
+}
+
+function globalLotsPerMin() {
   const n = Number(state && state.lotsPerMin);
   return (Number.isFinite(n) && n >= 1 && n <= 12) ? Math.round(n * 10) / 10 : DEFAULT_LOTS_PER_MIN;
+}
+
+function lotsPerMin(machineId, half) {
+  if (machineId) {
+    const h = half || (state && state.currentHalf);
+    const table = CATEGORY_LOTS_PER_MIN[h];
+    const tag = table ? machineRateTag(machineId, h) : '';
+    const r = tag && table ? Number(table[tag]) : NaN;
+    if (Number.isFinite(r) && r > 0) return r;
+  }
+  return globalLotsPerMin();
 }
 
 function lotEtaMinutes(lot, cur) {
@@ -4655,7 +4684,7 @@ function lotEtaMinutes(lot, cur) {
   // finish the rest of the series first unless 現在 is already in that wrap.
   const d = segmentDist(now, lot.number, start, ser);
   if (d == null || !Number.isFinite(d) || d <= 0) return null;
-  const rate = lotsPerMin();
+  const rate = lotsPerMin(mid, half);
   if (!(rate > 0)) return null;
   return Math.max(1, Math.round(d / rate));
 }
@@ -6519,7 +6548,7 @@ function currentOf(machineId, half) {
   if (autoAdvanceOn() && a && !a.paused && !a.seeded && a.number != null && a.at != null
       && !isStaleProgressAt(a.at, state && state.day)) {
     const elapsed = Math.max(0, nowDate().getTime() - a.at);
-    const rate = lotsPerMin();
+    const rate = lotsPerMin(machineId, h);
     const advanced = rate > 0 ? Math.floor((elapsed * rate) / 60000) : 0;
     const ser = seriesOf(a.number, h);
     const start = ser ? (seriesStart(machineId, h, ser) ?? a.number) : a.number;
@@ -7077,7 +7106,7 @@ function progressFinishReason(machineId, half) {
   const elapsed = nowDate().getTime() - a.at;
   if (elapsed > AUTO_IDLE_MAX_MS) return 'idle';
   // Nothing can have walked to a tail before at least one step has passed.
-  const rate = lotsPerMin();
+  const rate = lotsPerMin(machineId, half);
   if (!(rate > 0) || Math.floor((Math.max(0, elapsed) * rate) / 60000) < 1) return '';
   const cur = currentOf(machineId, half);
   if (cur == null) return '';
@@ -9843,7 +9872,7 @@ function renderSettings() {
         <div><div class="lbl">拍賣速度</div><div class="sub">每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。預設每分鐘 4 號。</div></div>
         <select id="lots-per-min" class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
           ${[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => {
-            const sel = lotsPerMin() === n ? ' selected' : '';
+            const sel = globalLotsPerMin() === n ? ' selected' : '';
             return `<option value="${n}"${sel}>每分鐘 ${n} 號</option>`;
           }).join('')}
         </select>
