@@ -377,6 +377,7 @@
     kv.day = state.day;
     kv.dayCutoffHour = state.dayCutoffHour;
     kv.lotsPerMin = state.lotsPerMin;
+    if (state.lotsPerMinAfternoon != null) kv.lotsPerMinAfternoon = state.lotsPerMinAfternoon;
     // Clone object values so lastShared is a true snapshot. In-place edits
     // (setProgress, writeAnchor, machine lists) must still diff and emit kv ops.
     kv.machines = clone(state.machines);
@@ -408,6 +409,11 @@
     if (rate != null) {
       const n = Number(rate);
       if (Number.isFinite(n) && n >= 1 && n <= 12) state.lotsPerMin = Math.round(n * 10) / 10;
+    }
+    const ratePm = val('lotsPerMinAfternoon');
+    if (ratePm != null) {
+      const n = Number(ratePm);
+      if (Number.isFinite(n) && n >= 4 && n <= 7) state.lotsPerMinAfternoon = Math.round(n * 10) / 10;
     }
     const machines = val('machines');
     if (machines && typeof machines === 'object') state.machines = machines;

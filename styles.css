@@ -6994,3 +6994,23 @@ html.is-dragging .item-pick {
   .rg-card .rg-head { padding: 5px 6px; font-size: 20px; }
 }
 .rg-auto-where { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+/* v122: 下半場拍賣速度 slider. Label on top, slider + big number underneath. */
+.switch-row.speed-row { flex-wrap: wrap; }
+.switch-row.speed-row > div:first-child { flex: 1 1 100%; }
+.speed-ctl { flex: 1 1 100%; display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.speed-range {
+  flex: 1 1 auto; min-width: 0; height: 44px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: transparent; touch-action: pan-y;
+  border: 0; padding: 0; box-shadow: none; border-radius: 0;
+}
+.speed-range::-webkit-slider-runnable-track { height: 10px; border-radius: 999px; background: #3a3a44; border: 1px solid #55555f; }
+.speed-range::-moz-range-track { height: 10px; border-radius: 999px; background: #3a3a44; border: 1px solid #55555f; }
+.speed-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 34px; height: 34px; margin-top: -13px;
+  border-radius: 50%; background: var(--yellow); border: 3px solid #111; box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+.speed-range::-moz-range-thumb { width: 30px; height: 30px; border-radius: 50%; background: var(--yellow); border: 3px solid #111; }
+.speed-val { flex: 0 0 auto; display: flex; align-items: baseline; gap: 3px; color: var(--yellow); white-space: nowrap; }
+.speed-val b { font-size: 30px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+.speed-val span { font-size: 14px; font-weight: 800; }

@@ -1,14 +1,14 @@
 'use strict';
 
 const STORAGE_KEY = 'ty-auction-bid-v1';
-const APP_VERSION = 'v121';
+const APP_VERSION = 'v122';
 var lastAutoUpdateCheck = 0;
 var updateInfo = { latest: '', checkedAt: 0, checkedLabel: '', busy: false };
 const PURCHASE_WINDOW_DAYS = 30;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const HALVES = ['fruit', 'morning', 'afternoon'];
-const HALF_LABELS = { fruit: '水果場', morning: '上半場', afternoon: '下半場' };
+const HALF_LABELS = { fruit: '水果', morning: '上半場', afternoon: '下半場' };
 const SESSION_MACHINE_MAX = { fruit: 2, morning: 3, afternoon: 3 };
 const GROUP_RANK = {
   fruit: { '水果': 0 },
@@ -475,8 +475,8 @@ function itemOrderHasCustom(half, group) {
 }
 
 const ITEM_ORDER_SECTIONS = [
-  { half: 'fruit', group: '水果', label: '水果場・水果' },
-  { half: 'fruit', group: '自己輸入', label: '水果場・自己輸入' },
+  { half: 'fruit', group: '水果', label: '水果' },
+  { half: 'fruit', group: '自己輸入', label: '水果・自己輸入' },
   { half: 'morning', group: '大宗', label: '上半場・大宗' },
   { half: 'morning', group: '水菜', label: '上半場・水菜' },
   { half: 'morning', group: '自己輸入', label: '上半場・自己輸入' },
@@ -1142,6 +1142,15 @@ let dragState = null;
 
 const DEFAULT_DAY_CUTOFF_HOUR = 15;
 const DEFAULT_LOTS_PER_MIN = 4;
+/* v122: 下半場瓜果 speed has its own slider (4–7 號/分, step 0.1, 預設 5.3). */
+const AFTERNOON_LOTS_PER_MIN_DEFAULT = 5.3;
+const AFTERNOON_LOTS_PER_MIN_MIN = 4;
+const AFTERNOON_LOTS_PER_MIN_MAX = 7;
+function cleanAfternoonRate(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < AFTERNOON_LOTS_PER_MIN_MIN || n > AFTERNOON_LOTS_PER_MIN_MAX) return AFTERNOON_LOTS_PER_MIN_DEFAULT;
+  return Math.round(n * 10) / 10;
+}
 const PROGRESS_MIN = 1;
 const PROGRESS_MAX = 9999;
 let clockNow = null;
@@ -2518,7 +2527,7 @@ function planHasText(text) {
 
 
 const PLAN_GRID_TABS = [
-  { id: 'fruit', label: '水果場', half: 'fruit', groups: null },
+  { id: 'fruit', label: '水果', half: 'fruit', groups: null },
   { id: 'bulk', label: '大宗', half: 'morning', groups: ['大宗'] },
   { id: 'leafy', label: '水菜', half: 'morning', groups: ['水菜'] },
   { id: 'gourd', label: '瓜果', half: 'afternoon', groups: ['瓜果', '醃製'] }
@@ -3855,6 +3864,7 @@ function defaultState() {
     itemsMigratedV120: true,
     dayCutoffHour: DEFAULT_DAY_CUTOFF_HOUR,
     lotsPerMin: DEFAULT_LOTS_PER_MIN,
+    lotsPerMinAfternoon: AFTERNOON_LOTS_PER_MIN_DEFAULT,
     skipAutoDay: '',
     planItems: [],
     boughtHistory: [],
@@ -3934,6 +3944,7 @@ function loadState() {
       merged.lotsPerMin = (Number.isFinite(r) && r >= 1 && r <= 12)
         ? Math.round(r * 10) / 10
         : DEFAULT_LOTS_PER_MIN;
+      merged.lotsPerMinAfternoon = cleanAfternoonRate(merged.lotsPerMinAfternoon);
     }
     if (merged.skipAutoDay != null && typeof merged.skipAutoDay !== 'string') merged.skipAutoDay = '';
     if (!merged.jumpTargets || typeof merged.jumpTargets !== 'object' || Array.isArray(merged.jumpTargets)) {
@@ -4641,9 +4652,14 @@ function isPassed(lot, cur) {
    To set another 類別, add it here, e.g. morning: { '大宗': 4.5, '水菜': 5 }.
    類別 comes from the 台 name (machineGroupTag), or the default 台 with the same id
    when the 台 was renamed without the 類別 word. */
+/* A value can be a fixed number or a function (v122: 瓜果 reads the 設定 slider). */
 const CATEGORY_LOTS_PER_MIN = {
-  afternoon: { '瓜果': 5.3 }
+  afternoon: { '瓜果': () => afternoonLotsPerMin() }
 };
+
+function afternoonLotsPerMin() {
+  return cleanAfternoonRate(state && state.lotsPerMinAfternoon);
+}
 
 function machineRateTag(machineId, half) {
   if (!machineId || !half) return '';
@@ -4664,7 +4680,8 @@ function lotsPerMin(machineId, half) {
     const h = half || (state && state.currentHalf);
     const table = CATEGORY_LOTS_PER_MIN[h];
     const tag = table ? machineRateTag(machineId, h) : '';
-    const r = tag && table ? Number(table[tag]) : NaN;
+    const v = tag && table ? table[tag] : undefined;
+    const r = Number(typeof v === 'function' ? v() : v);
     if (Number.isFinite(r) && r > 0) return r;
   }
   return globalLotsPerMin();
@@ -8135,7 +8152,7 @@ function startNewDay(confirmed, opts) {
   saveState();
   freezeItemRanks();
   if (auto) offerUndo(snap, '已開始新的一天');
-  else toast('已開始新的一天，預計備註還在，先從水果場開始');
+  else toast('已開始新的一天，預計備註還在，先從水果開始');
   render();
 }
 
@@ -9868,20 +9885,25 @@ function renderSettings() {
         <div><div class="lbl">全市場共用拍賣進度</div><div class="sub">「現在拍到幾號」大家一起用：不管哪一組，誰更新都會一起顯示。只分享號碼，抄號、標到、備註不會分享出去。</div><div class="sub gp-status" id="gp-status">${escapeHtml(typeof gpStatusLabel === 'function' ? gpStatusLabel() : '')}</div></div>
         <button type="button" class="toggle${state.globalProgress !== false ? ' on' : ''}" data-act="toggle-global-progress"><i></i></button>
       </div>
-      <div class="switch-row">
-        <div><div class="lbl">拍賣速度</div><div class="sub">每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。預設每分鐘 4 號。</div></div>
-        <select id="lots-per-min" class="cutoff-select" data-act="lots-per-min" aria-label="拍賣速度，每分鐘幾號">
-          ${[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => {
-            const sel = globalLotsPerMin() === n ? ' selected' : '';
-            return `<option value="${n}"${sel}>每分鐘 ${n} 號</option>`;
-          }).join('')}
-        </select>
+      <div class="switch-row speed-row">
+        <div><div class="lbl">上半場速度</div><div class="sub">大宗、水菜（水果也用這個）每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。左右拉：最慢 1、最快 12，預設 4。</div></div>
+        <div class="speed-ctl">
+          <input type="range" id="lots-per-min" class="speed-range" data-act="lots-per-min" min="1" max="12" step="0.1" value="${globalLotsPerMin().toFixed(1)}" aria-label="上半場速度，每分鐘幾號">
+          <div class="speed-val"><b id="lots-per-min-val">${globalLotsPerMin().toFixed(1)}</b><span>號/分</span></div>
+        </div>
+      </div>
+      <div class="switch-row speed-row">
+        <div><div class="lbl">下半場速度</div><div class="sub">瓜果每分鐘大概跳幾號，用來自動前跳，也用來估算還要幾分鐘輪到。左右拉：最慢 4、最快 7，預設 5.3。</div></div>
+        <div class="speed-ctl">
+          <input type="range" id="lots-per-min-pm" class="speed-range" data-act="lots-per-min-pm" min="${AFTERNOON_LOTS_PER_MIN_MIN}" max="${AFTERNOON_LOTS_PER_MIN_MAX}" step="0.1" value="${afternoonLotsPerMin().toFixed(1)}" aria-label="下半場速度，每分鐘幾號">
+          <div class="speed-val"><b id="lots-per-min-pm-val">${afternoonLotsPerMin().toFixed(1)}</b><span>號/分</span></div>
+        </div>
       </div>
     </div>
     ${halfBlocks}
     ${renderItemOrderSettings()}
     ${HALVES.map((half) => {
-      const title = half === 'fruit' ? '水果場品項（水果）'
+      const title = half === 'fruit' ? '水果品項'
         : half === 'afternoon' ? '下半場品項（瓜果、醃製；芋頭、蒜、青花、花椰菜、竹筍等屬瓜果）'
         : '上半場品項（大宗、水菜；香菇類屬大宗第一台）';
       const built = catalogSummary(half);
@@ -11248,9 +11270,28 @@ function onInput(e) {
     render();
     return;
   }
+  if (act === 'lots-per-min-pm') {
+    const n = cleanAfternoonRate(el.value);
+    const out = document.getElementById('lots-per-min-pm-val');
+    if (out) out.textContent = n.toFixed(1);
+    // While dragging only the big number changes; save when the finger lets go.
+    if (e.type !== 'change') return;
+    if (n === afternoonLotsPerMin()) return;
+    reanchorRunningAtNewRate();
+    state.lotsPerMinAfternoon = n;
+    saveState();
+    render();
+    return;
+  }
   if (act === 'lots-per-min') {
-    const n = Number(el.value);
-    state.lotsPerMin = (Number.isFinite(n) && n >= 1 && n <= 12) ? Math.round(n * 10) / 10 : DEFAULT_LOTS_PER_MIN;
+    const n0 = Number(el.value);
+    const n = (Number.isFinite(n0) && n0 >= 1 && n0 <= 12) ? Math.round(n0 * 10) / 10 : DEFAULT_LOTS_PER_MIN;
+    const out = document.getElementById('lots-per-min-val');
+    if (out) out.textContent = n.toFixed(1);
+    // v122: slider. While dragging only the big number changes; save when the finger lets go.
+    if (e.type !== 'change') return;
+    if (n === globalLotsPerMin()) return;
+    state.lotsPerMin = n;
     reanchorRunningAtNewRate();
     saveState();
     render();
